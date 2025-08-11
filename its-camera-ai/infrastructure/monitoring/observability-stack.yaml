@@ -1,0 +1,805 @@
+# Observability Stack for ITS Camera AI System
+# Comprehensive monitoring, logging, and alerting setup
+# Prometheus, Grafana, Loki, Jaeger, and AlertManager configuration
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+
+---
+# Prometheus Configuration
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus-main
+  namespace: monitoring
+spec:
+  replicas: 2
+  retention: 30d
+  retentionSize: 500GB
+  
+  # Storage configuration
+  storage:
+    volumeClaimTemplate:
+      spec:
+        storageClassName: fast-ssd
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 500Gi
+  
+  # Resource allocation
+  resources:
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "16Gi"
+  
+  # Service monitor selector
+  serviceMonitorSelector:
+    matchLabels:
+      team: its-camera-ai
+  
+  # Pod monitor selector
+  podMonitorSelector:
+    matchLabels:
+      team: its-camera-ai
+  
+  # Rule selector
+  ruleSelector:
+    matchLabels:
+      team: its-camera-ai
+  
+  # Prometheus configuration
+  additionalScrapeConfigs:
+    name: prometheus-additional-scrape-configs
+    key: prometheus-additional.yaml
+  
+  # Security context
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  
+  # Affinity rules
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: [prometheus]
+          topologyKey: kubernetes.io/hostname
+
+---
+# Additional Scrape Configurations
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometheus-additional-scrape-configs
+  namespace: monitoring
+stringData:
+  prometheus-additional.yaml: |
+    # Camera stream metrics
+    - job_name: 'camera-streams'
+      static_configs:
+      - targets:
+        - 'camera-stream-service.its-camera-ai-system:9090'
+        - 'edge-camera-processor-service.its-camera-edge:9090'
+      scrape_interval: 5s
+      metrics_path: '/metrics'
+      
+    # ML inference metrics
+    - job_name: 'ml-inference'
+      static_configs:
+      - targets:
+        - 'ml-inference-service.its-camera-ai-system:9090'
+        - 'edge-ml-inference-service.its-camera-edge:9090'
+      scrape_interval: 5s
+      metrics_path: '/metrics'
+      
+    # Database metrics
+    - job_name: 'postgresql'
+      static_configs:
+      - targets:
+        - 'postgresql-cluster-rw.its-camera-ai-system:9187'
+        - 'postgresql-cluster-ro.its-camera-ai-system:9187'
+      scrape_interval: 30s
+      
+    # Redis metrics
+    - job_name: 'redis'
+      static_configs:
+      - targets:
+        - 'redis-cluster-service.its-camera-ai-system:9121'
+      scrape_interval: 30s
+      
+    # InfluxDB metrics
+    - job_name: 'influxdb'
+      static_configs:
+      - targets:
+        - 'influxdb-service.its-camera-ai-system:8086'
+      scrape_interval: 30s
+      metrics_path: '/metrics'
+      
+    # Node exporter metrics
+    - job_name: 'node-exporter'
+      kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [monitoring]
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_endpoints_name]
+        regex: node-exporter
+        action: keep
+      
+    # GPU metrics
+    - job_name: 'gpu-metrics'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [its-camera-ai-system, its-camera-edge]
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape_gpu]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+
+---
+# Grafana Configuration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.2.3
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-credentials
+              key: admin-password
+        - name: GF_DATABASE_TYPE
+          value: postgres
+        - name: GF_DATABASE_HOST
+          value: postgresql-cluster-rw.its-camera-ai-system:5432
+        - name: GF_DATABASE_NAME
+          value: grafana
+        - name: GF_DATABASE_USER
+          value: grafana
+        - name: GF_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-db-credentials
+              key: password
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        - name: grafana-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboards-config
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboards
+          mountPath: /var/lib/grafana/dashboards
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+      
+      volumes:
+      - name: grafana-storage
+        persistentVolumeClaim:
+          claimName: grafana-storage
+      - name: grafana-datasources
+        configMap:
+          name: grafana-datasources
+      - name: grafana-dashboards-config
+        configMap:
+          name: grafana-dashboards-config
+      - name: grafana-dashboards
+        configMap:
+          name: grafana-dashboards
+
+---
+# Grafana Datasources Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus-main:9090
+      isDefault: true
+      
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway:3100
+      
+    - name: Jaeger
+      type: jaeger
+      access: proxy
+      url: http://jaeger-query:16686
+      
+    - name: InfluxDB
+      type: influxdb
+      access: proxy
+      url: http://influxdb-service.its-camera-ai-system:8086
+      database: its-camera-ai
+      user: grafana
+      secureJsonData:
+        password: ${INFLUXDB_PASSWORD}
+
+---
+# Grafana Dashboard Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-config
+  namespace: monitoring
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      updateIntervalSeconds: 10
+      options:
+        path: /var/lib/grafana/dashboards
+
+---
+# ITS Camera AI Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  its-camera-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "ITS Camera AI - System Overview",
+        "tags": ["its-camera-ai"],
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Active Cameras",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(camera_active_total)",
+                "legendFormat": "Active Cameras"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 800},
+                    {"color": "red", "value": 900}
+                  ]
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "ML Inference Latency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(ml_inference_duration_seconds_bucket[5m])) by (le))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, sum(rate(ml_inference_duration_seconds_bucket[5m])) by (le))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Latency (seconds)",
+                "max": 0.2,
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Frame Processing Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(camera_frames_processed_total[5m]))",
+                "legendFormat": "Frames/sec"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Frames per Second",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "System Resource Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "avg(100 * (1 - avg_over_time(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+                "legendFormat": "CPU Usage %"
+              },
+              {
+                "expr": "avg(100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)))",
+                "legendFormat": "Memory Usage %"
+              },
+              {
+                "expr": "avg(nvidia_gpu_utilization_gpu)",
+                "legendFormat": "GPU Usage %"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Usage %",
+                "max": 100,
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Database Performance",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(postgresql_queries_total[5m])",
+                "legendFormat": "Queries/sec"
+              },
+              {
+                "expr": "avg(postgresql_query_duration_seconds)",
+                "legendFormat": "Avg Query Duration"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          }
+        ]
+      }
+    }
+
+---
+# Loki Configuration for Log Aggregation
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  serviceName: loki
+  replicas: 3
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      containers:
+      - name: loki
+        image: grafana/loki:2.9.4
+        ports:
+        - containerPort: 3100
+          name: http
+        args:
+        - "-config.file=/etc/loki/local-config.yaml"
+        - "-target=all"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1
+            memory: 2Gi
+        volumeMounts:
+        - name: loki-config
+          mountPath: /etc/loki
+        - name: loki-storage
+          mountPath: /loki
+      
+      volumes:
+      - name: loki-config
+        configMap:
+          name: loki-config
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: loki-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 100Gi
+
+---
+# Loki Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: monitoring
+data:
+  local-config.yaml: |
+    auth_enabled: false
+    
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+      log_level: info
+    
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 3
+    
+    schema_config:
+      configs:
+        - from: 2023-01-01
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v12
+          index:
+            prefix: index_
+            period: 24h
+    
+    storage_config:
+      boltdb_shipper:
+        active_index_directory: /loki/boltdb-shipper-active
+        cache_location: /loki/boltdb-shipper-cache
+        shared_store: filesystem
+      filesystem:
+        directory: /loki/chunks
+    
+    limits_config:
+      enforce_metric_name: false
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      ingestion_rate_mb: 16
+      ingestion_burst_size_mb: 32
+      per_stream_rate_limit: 8MB
+      per_stream_rate_limit_burst: 16MB
+      max_concurrent_tail_requests: 20
+    
+    chunk_store_config:
+      max_look_back_period: 0s
+    
+    table_manager:
+      retention_deletes_enabled: true
+      retention_period: 30d
+    
+    ruler:
+      storage:
+        type: local
+        local:
+          directory: /loki/rules
+      rule_path: /loki/rules-temp
+      alertmanager_url: http://alertmanager:9093
+      ring:
+        kvstore:
+          store: inmemory
+      enable_api: true
+
+---
+# Promtail for Log Collection
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      serviceAccount: promtail
+      containers:
+      - name: promtail
+        image: grafana/promtail:2.9.4
+        args:
+        - "-config.file=/etc/promtail/config.yml"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/promtail
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        env:
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      
+      volumes:
+      - name: config
+        configMap:
+          name: promtail-config
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+
+---
+# AlertManager Configuration
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: alertmanager-main
+  namespace: monitoring
+spec:
+  replicas: 3
+  retention: 120h
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+  
+  storage:
+    volumeClaimTemplate:
+      spec:
+        storageClassName: fast-ssd
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+# Alert Rules for ITS Camera AI
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: its-camera-ai-alerts
+  namespace: monitoring
+  labels:
+    team: its-camera-ai
+spec:
+  groups:
+  - name: its-camera-ai.rules
+    rules:
+    # High inference latency alert
+    - alert: HighInferenceLatency
+      expr: histogram_quantile(0.95, sum(rate(ml_inference_duration_seconds_bucket[5m])) by (le)) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+        service: ml-inference
+      annotations:
+        summary: "ML inference latency is above 100ms"
+        description: "95th percentile inference latency is {{ $value }}s, above the 100ms target"
+    
+    # Camera offline alert
+    - alert: CameraOffline
+      expr: increase(camera_disconnections_total[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+        service: camera-stream
+      annotations:
+        summary: "Camera has gone offline"
+        description: "Camera {{ $labels.camera_id }} has disconnected"
+    
+    # High error rate
+    - alert: HighErrorRate
+      expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High error rate detected"
+        description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+    
+    # Database connection issues
+    - alert: DatabaseConnectionIssues
+      expr: postgresql_up == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: database
+      annotations:
+        summary: "Database is down"
+        description: "PostgreSQL database {{ $labels.instance }} is not responding"
+    
+    # GPU utilization too low
+    - alert: LowGPUUtilization
+      expr: avg_over_time(nvidia_gpu_utilization_gpu[10m]) < 20
+      for: 15m
+      labels:
+        severity: info
+        service: ml-inference
+      annotations:
+        summary: "GPU utilization is low"
+        description: "GPU utilization on {{ $labels.instance }} is {{ $value }}%, consider scaling down"
+    
+    # Disk space running low
+    - alert: DiskSpaceRunningLow
+      expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Disk space running low"
+        description: "Disk space on {{ $labels.instance }} is {{ $value | humanizePercentage }} full"
+
+---
+# Services for Monitoring Stack
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  selector:
+    app: grafana
+  ports:
+  - port: 3000
+    targetPort: 3000
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  selector:
+    app: loki
+  ports:
+  - port: 3100
+    targetPort: 3100
+  type: ClusterIP
+
+---
+# Persistent Volume Claim for Grafana
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-storage
+  namespace: monitoring
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# RBAC for Promtail
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promtail
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail
+subjects:
+- kind: ServiceAccount
+  name: promtail
+  namespace: monitoring

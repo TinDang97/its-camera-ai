@@ -1,0 +1,763 @@
+# Edge Computing Deployment Strategy for ITS Camera AI System
+# Local processing with cloud fallback for sub-100ms latency
+# Optimized for 1000+ distributed camera deployment
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-edge
+  labels:
+    edge-zone: "true"
+    app.kubernetes.io/name: its-camera-ai-edge
+
+---
+# Edge Node Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-node-config
+  namespace: its-camera-edge
+data:
+  config.yaml: |
+    # Edge node specifications
+    edgeNodeSpecs:
+      # Primary edge nodes (high-traffic locations)
+      primary:
+        minNodes: 10
+        maxNodes: 50
+        instanceType: "m5.2xlarge"  # 8 vCPU, 32GB RAM
+        storage: "1TB-ssd"
+        gpuRequired: false
+        maxCamerasPerNode: 25
+        networkBandwidth: "10Gbps"
+        locations: ["highway-interchanges", "city-centers", "major-intersections"]
+      
+      # GPU-enabled edge nodes (ML inference)
+      gpu_enabled:
+        minNodes: 5
+        maxNodes: 20
+        instanceType: "g4dn.xlarge"  # 4 vCPU, 16GB RAM, 1x T4 GPU
+        storage: "500GB-ssd"
+        gpuRequired: true
+        maxCamerasPerNode: 15
+        networkBandwidth: "5Gbps"
+        locations: ["smart-traffic-zones", "incident-detection-areas"]
+      
+      # Micro edge nodes (low-traffic areas)
+      micro:
+        minNodes: 20
+        maxNodes: 100
+        instanceType: "m5.large"  # 2 vCPU, 8GB RAM
+        storage: "200GB-ssd"
+        gpuRequired: false
+        maxCamerasPerNode: 5
+        networkBandwidth: "1Gbps"
+        locations: ["residential-areas", "secondary-roads"]
+    
+    # Network connectivity requirements
+    networkRequirements:
+      minimumBandwidth: "100Mbps"
+      latencyToCloud: "<50ms"
+      reliabilityTarget: "99.5%"
+      fallbackConnections: ["4G/5G", "satellite"]
+      
+    # Local processing capabilities
+    localProcessing:
+      # Real-time inference
+      inference:
+        enabled: true
+        models: ["yolo11-vehicle-detection", "license-plate-ocr"]
+        maxLatency: "50ms"
+        batchSize: 4
+        gpuMemoryLimit: "8GB"
+      
+      # Local analytics
+      analytics:
+        enabled: true
+        functions: ["traffic-counting", "speed-detection", "congestion-analysis"]
+        aggregationInterval: "5m"
+        storageRetention: "24h"
+      
+      # Event detection
+      events:
+        enabled: true
+        types: ["accidents", "congestion", "rule-violations"]
+        alertThreshold: "medium"
+        cloudNotification: true
+    
+    # Data synchronization patterns
+    dataSynchronization:
+      # Real-time sync (critical events)
+      realtime:
+        triggers: ["accidents", "emergencies"]
+        method: "websocket"
+        compression: false
+        encryption: true
+        maxRetries: 3
+      
+      # Batch sync (analytics data)
+      batch:
+        interval: "15m"
+        method: "http-post"
+        compression: true
+        encryption: true
+        maxBatchSize: "100MB"
+        retentionOnFailure: "48h"
+      
+      # Metadata sync (configurations)
+      metadata:
+        interval: "1h"
+        method: "grpc"
+        compression: false
+        encryption: true
+        conflictResolution: "cloud-wins"
+
+---
+# Edge ML Inference Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-ml-inference
+  namespace: its-camera-edge
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: edge-ml-inference
+  template:
+    metadata:
+      labels:
+        app: edge-ml-inference
+        component: ml-inference
+    spec:
+      # Node selection for GPU nodes when available
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: accelerator
+                operator: In
+                values: ["nvidia"]
+          - weight: 80
+            preference:
+              matchExpressions:
+              - key: edge-zone
+                operator: In
+                values: ["primary", "gpu_enabled"]
+      
+      tolerations:
+      - key: edge-node
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: ml-inference
+        image: its-camera-ai/edge-ml-inference:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: EDGE_MODE
+          value: "true"
+        - name: CLOUD_ENDPOINT
+          value: "https://cloud-api.its-camera-ai.com"
+        - name: MODEL_CACHE_SIZE
+          value: "4GB"
+        - name: INFERENCE_BATCH_SIZE
+          value: "4"
+        - name: MAX_LATENCY_MS
+          value: "50"
+        - name: GPU_MEMORY_LIMIT
+          value: "8GB"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: "0"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: model-cache
+          mountPath: /app/models
+        - name: config
+          mountPath: /app/config
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+      
+      volumes:
+      - name: model-cache
+        emptyDir:
+          sizeLimit: 10Gi
+      - name: config
+        configMap:
+          name: edge-node-config
+
+---
+# Edge Camera Stream Processor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-camera-processor
+  namespace: its-camera-edge
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: edge-camera-processor
+  template:
+    metadata:
+      labels:
+        app: edge-camera-processor
+        component: stream-processor
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: edge-zone
+                operator: In
+                values: ["primary", "micro"]
+      
+      tolerations:
+      - key: edge-node
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: camera-processor
+        image: its-camera-ai/edge-camera-processor:latest
+        ports:
+        - containerPort: 8081
+          name: http
+        - containerPort: 1883
+          name: mqtt
+        env:
+        - name: EDGE_MODE
+          value: "true"
+        - name: MAX_CAMERAS_PER_INSTANCE
+          value: "20"
+        - name: FRAME_BUFFER_SIZE
+          value: "1000"
+        - name: PROCESSING_THREADS
+          value: "8"
+        - name: MQTT_BROKER
+          value: "edge-mqtt-service:1883"
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            cpu: "2"
+            memory: "8Gi"
+        volumeMounts:
+        - name: frame-buffer
+          mountPath: /app/buffer
+        - name: config
+          mountPath: /app/config
+      
+      volumes:
+      - name: frame-buffer
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: config
+        configMap:
+          name: edge-node-config
+
+---
+# Edge Local Analytics Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-analytics
+  namespace: its-camera-edge
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: edge-analytics
+  template:
+    metadata:
+      labels:
+        app: edge-analytics
+        component: analytics
+    spec:
+      containers:
+      - name: analytics
+        image: its-camera-ai/edge-analytics:latest
+        ports:
+        - containerPort: 8082
+          name: http
+        env:
+        - name: AGGREGATION_INTERVAL
+          value: "5m"
+        - name: STORAGE_RETENTION
+          value: "24h"
+        - name: CLOUD_SYNC_INTERVAL
+          value: "15m"
+        resources:
+          requests:
+            cpu: 500m
+            memory: "2Gi"
+          limits:
+            cpu: "1"
+            memory: "4Gi"
+        volumeMounts:
+        - name: analytics-storage
+          mountPath: /app/data
+      
+      volumes:
+      - name: analytics-storage
+        persistentVolumeClaim:
+          claimName: edge-analytics-storage
+
+---
+# Edge Data Synchronization Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-sync-service
+  namespace: its-camera-edge
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: edge-sync-service
+  template:
+    metadata:
+      labels:
+        app: edge-sync-service
+        component: synchronization
+    spec:
+      containers:
+      - name: sync-service
+        image: its-camera-ai/edge-sync:latest
+        ports:
+        - containerPort: 8083
+          name: http
+        - containerPort: 8084
+          name: grpc
+        env:
+        - name: CLOUD_API_ENDPOINT
+          value: "https://api.its-camera-ai.com"
+        - name: SYNC_INTERVAL_BATCH
+          value: "15m"
+        - name: SYNC_INTERVAL_METADATA
+          value: "1h"
+        - name: MAX_BATCH_SIZE
+          value: "100MB"
+        - name: RETENTION_ON_FAILURE
+          value: "48h"
+        - name: COMPRESSION_ENABLED
+          value: "true"
+        - name: ENCRYPTION_ENABLED
+          value: "true"
+        resources:
+          requests:
+            cpu: 200m
+            memory: "1Gi"
+          limits:
+            cpu: 500m
+            memory: "2Gi"
+        volumeMounts:
+        - name: sync-storage
+          mountPath: /app/sync-data
+        - name: tls-certs
+          mountPath: /app/certs
+      
+      volumes:
+      - name: sync-storage
+        persistentVolumeClaim:
+          claimName: edge-sync-storage
+      - name: tls-certs
+        secret:
+          secretName: edge-tls-certificates
+
+---
+# Edge MQTT Broker for Local Communication
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-mqtt-broker
+  namespace: its-camera-edge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edge-mqtt-broker
+  template:
+    metadata:
+      labels:
+        app: edge-mqtt-broker
+    spec:
+      containers:
+      - name: mqtt-broker
+        image: eclipse-mosquitto:2.0.18
+        ports:
+        - containerPort: 1883
+          name: mqtt
+        - containerPort: 8883
+          name: mqtts
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - name: mqtt-config
+          mountPath: /mosquitto/config/mosquitto.conf
+          subPath: mosquitto.conf
+        - name: mqtt-data
+          mountPath: /mosquitto/data
+      
+      volumes:
+      - name: mqtt-config
+        configMap:
+          name: mqtt-config
+      - name: mqtt-data
+        persistentVolumeClaim:
+          claimName: edge-mqtt-storage
+
+---
+# MQTT Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mqtt-config
+  namespace: its-camera-edge
+data:
+  mosquitto.conf: |
+    # General settings
+    listener 1883
+    listener 8883
+    protocol mqtt
+    
+    # Security settings
+    allow_anonymous false
+    password_file /mosquitto/config/passwd
+    
+    # Persistence
+    persistence true
+    persistence_location /mosquitto/data/
+    
+    # Logging
+    log_dest stdout
+    log_type error
+    log_type warning
+    log_type notice
+    log_type information
+    
+    # Performance settings
+    max_connections 1000
+    max_inflight_messages 100
+    max_queued_messages 1000
+    
+    # QoS settings
+    max_qos 2
+    retain_available true
+    
+    # Keep alive settings
+    keepalive_interval 60
+
+---
+# Edge Storage Classes
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: edge-fast-ssd
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  iops: "8000"
+  throughput: "500"
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+---
+# Edge Analytics Persistent Volume Claim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: edge-analytics-storage
+  namespace: its-camera-edge
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: edge-fast-ssd
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+# Edge Sync Persistent Volume Claim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: edge-sync-storage
+  namespace: its-camera-edge
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: edge-fast-ssd
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+# Edge MQTT Persistent Volume Claim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: edge-mqtt-storage
+  namespace: its-camera-edge
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: edge-fast-ssd
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# Edge Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-ml-inference-service
+  namespace: its-camera-edge
+spec:
+  selector:
+    app: edge-ml-inference
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  - port: 9090
+    targetPort: 9090
+    name: metrics
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-camera-processor-service
+  namespace: its-camera-edge
+spec:
+  selector:
+    app: edge-camera-processor
+  ports:
+  - port: 8081
+    targetPort: 8081
+    name: http
+  - port: 1883
+    targetPort: 1883
+    name: mqtt
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-mqtt-service
+  namespace: its-camera-edge
+spec:
+  selector:
+    app: edge-mqtt-broker
+  ports:
+  - port: 1883
+    targetPort: 1883
+    name: mqtt
+  - port: 8883
+    targetPort: 8883
+    name: mqtts
+  type: ClusterIP
+
+---
+# Edge Node Health Monitor
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: edge-health-monitor
+  namespace: its-camera-edge
+spec:
+  selector:
+    matchLabels:
+      app: edge-health-monitor
+  template:
+    metadata:
+      labels:
+        app: edge-health-monitor
+    spec:
+      tolerations:
+      - key: edge-node
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: health-monitor
+        image: its-camera-ai/edge-health-monitor:latest
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CLOUD_ENDPOINT
+          value: "https://monitoring.its-camera-ai.com"
+        - name: HEALTH_CHECK_INTERVAL
+          value: "30s"
+        - name: ALERT_THRESHOLD
+          value: "3"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+      
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      
+      hostNetwork: true
+      hostPID: true
+
+---
+# Edge Cloud Fallback Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-fallback-config
+  namespace: its-camera-edge
+data:
+  fallback-rules.yaml: |
+    # Cloud fallback configuration
+    fallbackRules:
+      # Network connectivity thresholds
+      connectivity:
+        latencyThreshold: "100ms"
+        bandwidthThreshold: "50Mbps"
+        packetLossThreshold: "5%"
+        checkInterval: "10s"
+        retryAttempts: 3
+        retryDelay: "5s"
+      
+      # Resource utilization thresholds
+      resources:
+        cpuThreshold: 90
+        memoryThreshold: 85
+        diskThreshold: 80
+        gpuThreshold: 95
+        evaluationWindow: "5m"
+      
+      # Service degradation triggers
+      degradation:
+        inferenceLatency: "80ms"
+        queueDepth: 100
+        errorRate: "10%"
+        timeWindow: "2m"
+      
+    # Fallback actions
+    fallbackActions:
+      # Offload to cloud
+      cloudOffload:
+        enabled: true
+        services: ["ml-inference", "heavy-analytics"]
+        priority: "high"
+        compression: true
+        encryption: true
+      
+      # Reduce local processing
+      reduceProcessing:
+        enabled: true
+        frameSkipping: 2  # Process every 2nd frame
+        resolutionReduction: 0.5  # Reduce to 50% resolution
+        qualityReduction: 0.8  # Reduce quality to 80%
+      
+      # Emergency mode
+      emergencyMode:
+        enabled: true
+        criticalOnly: true
+        maxLatency: "200ms"
+        basicFunctionality: true
+
+---
+# Edge Auto-scaling Configuration
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: edge-ml-inference-hpa
+  namespace: its-camera-edge
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: edge-ml-inference
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: inference_queue_length
+      target:
+        type: AverageValue
+        averageValue: "5"  # Lower threshold for edge
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 30

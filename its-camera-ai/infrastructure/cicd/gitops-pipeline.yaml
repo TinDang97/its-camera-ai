@@ -1,0 +1,700 @@
+# GitOps CI/CD Pipeline for ITS Camera AI System
+# Production-grade deployment automation with multi-environment support
+# ArgoCD-based GitOps with automated testing and security scanning
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-gitops
+  labels:
+    app.kubernetes.io/name: gitops
+
+---
+# ArgoCD Application Configuration
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: its-camera-ai-production
+  namespace: its-camera-gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: its-camera-ai
+  source:
+    repoURL: https://github.com/its-org/its-camera-ai-config
+    targetRevision: main
+    path: environments/production
+    helm:
+      valueFiles:
+      - values.yaml
+      - values-production.yaml
+      parameters:
+      - name: image.tag
+        value: "latest"
+      - name: replicas.mlInference
+        value: "20"
+      - name: resources.requests.nvidia-gpu
+        value: "1"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: its-camera-ai-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+
+---
+# ArgoCD Application for Staging Environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: its-camera-ai-staging
+  namespace: its-camera-gitops
+spec:
+  project: its-camera-ai
+  source:
+    repoURL: https://github.com/its-org/its-camera-ai-config
+    targetRevision: develop
+    path: environments/staging
+    helm:
+      valueFiles:
+      - values.yaml
+      - values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: its-camera-ai-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+
+---
+# ArgoCD Application for Edge Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: its-camera-ai-edge
+  namespace: its-camera-gitops
+spec:
+  project: its-camera-ai
+  source:
+    repoURL: https://github.com/its-org/its-camera-ai-config
+    targetRevision: main
+    path: environments/edge
+    helm:
+      valueFiles:
+      - values.yaml
+      - values-edge.yaml
+      parameters:
+      - name: edge.enabled
+        value: "true"
+      - name: cloud.fallback
+        value: "true"
+  destination:
+    server: https://edge-cluster.its-camera-ai.com
+    namespace: its-camera-edge
+  syncPolicy:
+    automated:
+      prune: false  # More conservative for edge
+      selfHeal: false
+
+---
+# ArgoCD Project Configuration
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: its-camera-ai
+  namespace: its-camera-gitops
+spec:
+  description: ITS Camera AI Project
+  sourceRepos:
+  - https://github.com/its-org/its-camera-ai-config
+  - https://github.com/its-org/its-camera-ai
+  destinations:
+  - namespace: its-camera-ai-system
+    server: https://kubernetes.default.svc
+  - namespace: its-camera-ai-staging
+    server: https://kubernetes.default.svc
+  - namespace: its-camera-edge
+    server: https://edge-cluster.its-camera-ai.com
+  clusterResourceWhitelist:
+  - group: ""
+    kind: Namespace
+  - group: storage.k8s.io
+    kind: StorageClass
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRole
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+  - group: ""
+    kind: ConfigMap
+  - group: ""
+    kind: Secret
+  - group: ""
+    kind: Service
+  - group: apps
+    kind: Deployment
+  - group: apps
+    kind: StatefulSet
+  - group: batch
+    kind: Job
+  - group: batch
+    kind: CronJob
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: monitoring.coreos.com
+    kind: ServiceMonitor
+  - group: postgresql.cnpg.io
+    kind: Cluster
+  roles:
+  - name: developer
+    description: Developer access
+    policies:
+    - p, proj:its-camera-ai:developer, applications, get, its-camera-ai/*, allow
+    - p, proj:its-camera-ai:developer, applications, sync, its-camera-ai/its-camera-ai-staging, allow
+    groups:
+    - its-camera-ai:developers
+  - name: operator
+    description: Operator access
+    policies:
+    - p, proj:its-camera-ai:operator, applications, *, its-camera-ai/*, allow
+    - p, proj:its-camera-ai:operator, repositories, *, *, allow
+    groups:
+    - its-camera-ai:operators
+
+---
+# GitHub Actions Workflow Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: github-workflow-config
+  namespace: its-camera-gitops
+data:
+  ci-cd.yaml: |
+    name: ITS Camera AI CI/CD Pipeline
+    
+    on:
+      push:
+        branches: [main, develop]
+      pull_request:
+        branches: [main, develop]
+    
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: its-camera-ai
+    
+    jobs:
+      # Code Quality and Security Scanning
+      code-quality:
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@v4
+        
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.11'
+        
+        - name: Install dependencies
+          run: |
+            python -m pip install --upgrade pip
+            pip install uv
+            uv sync --group dev
+        
+        - name: Run code quality checks
+          run: |
+            uv run ruff check src/ tests/
+            uv run black --check src/ tests/
+            uv run mypy src/
+        
+        - name: Run security scanning
+          run: |
+            uv run bandit -r src/
+            uv run safety check
+            uv run pip-audit
+        
+        - name: SonarCloud Scan
+          uses: SonarSource/sonarcloud-github-action@master
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      
+      # Unit and Integration Tests
+      test:
+        runs-on: ubuntu-latest
+        services:
+          postgres:
+            image: postgres:15
+            env:
+              POSTGRES_PASSWORD: testpass
+              POSTGRES_DB: test_db
+            options: >-
+              --health-cmd pg_isready
+              --health-interval 10s
+              --health-timeout 5s
+              --health-retries 5
+          
+          redis:
+            image: redis:7
+            options: >-
+              --health-cmd "redis-cli ping"
+              --health-interval 10s
+              --health-timeout 5s
+              --health-retries 5
+        
+        steps:
+        - uses: actions/checkout@v4
+        
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.11'
+        
+        - name: Install dependencies
+          run: |
+            python -m pip install --upgrade pip
+            pip install uv
+            uv sync --group dev --group ml
+        
+        - name: Run tests
+          env:
+            DATABASE_URL: postgresql://postgres:testpass@localhost/test_db
+            REDIS_URL: redis://localhost:6379
+          run: |
+            uv run pytest --cov=src/its_camera_ai --cov-report=xml --cov-report=html
+        
+        - name: Upload coverage to Codecov
+          uses: codecov/codecov-action@v3
+          with:
+            file: ./coverage.xml
+            flags: unittests
+      
+      # ML Model Testing
+      ml-tests:
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@v4
+        
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.11'
+        
+        - name: Install dependencies
+          run: |
+            pip install uv
+            uv sync --group ml
+        
+        - name: Run ML model tests
+          run: |
+            uv run pytest -m ml tests/
+        
+        - name: Model performance benchmarks
+          run: |
+            uv run pytest -m benchmark tests/
+      
+      # Container Build and Push
+      build-and-push:
+        needs: [code-quality, test, ml-tests]
+        runs-on: ubuntu-latest
+        if: github.event_name == 'push'
+        
+        outputs:
+          image-tag: ${{ steps.meta.outputs.tags }}
+          image-digest: ${{ steps.build.outputs.digest }}
+        
+        steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+        
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+        
+        - name: Log in to Container Registry
+          uses: docker/login-action@v3
+          with:
+            registry: ${{ env.REGISTRY }}
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
+        
+        - name: Extract metadata
+          id: meta
+          uses: docker/metadata-action@v5
+          with:
+            images: ${{ env.REGISTRY }}/${{ github.repository }}
+            tags: |
+              type=ref,event=branch
+              type=ref,event=pr
+              type=sha,prefix={{branch}}-
+              type=raw,value=latest,enable={{is_default_branch}}
+        
+        - name: Build and push Docker images
+          id: build
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            platforms: linux/amd64,linux/arm64
+            push: true
+            tags: ${{ steps.meta.outputs.tags }}
+            labels: ${{ steps.meta.outputs.labels }}
+            cache-from: type=gha
+            cache-to: type=gha,mode=max
+        
+        - name: Generate SBOM
+          uses: anchore/sbom-action@v0
+          with:
+            image: ${{ steps.meta.outputs.tags }}
+            format: spdx-json
+            output-file: sbom.spdx.json
+        
+        - name: Scan image with Trivy
+          uses: aquasecurity/trivy-action@master
+          with:
+            image-ref: ${{ steps.meta.outputs.tags }}
+            format: sarif
+            output: trivy-results.sarif
+        
+        - name: Upload Trivy scan results to GitHub Security tab
+          uses: github/codeql-action/upload-sarif@v2
+          with:
+            sarif_file: trivy-results.sarif
+      
+      # Deployment
+      deploy-staging:
+        needs: build-and-push
+        runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/develop'
+        environment: staging
+        
+        steps:
+        - name: Checkout config repository
+          uses: actions/checkout@v4
+          with:
+            repository: its-org/its-camera-ai-config
+            token: ${{ secrets.CONFIG_REPO_TOKEN }}
+            path: config
+        
+        - name: Update staging image tag
+          run: |
+            cd config
+            sed -i 's|image:.*|image: ${{ needs.build-and-push.outputs.image-tag }}|' environments/staging/values-staging.yaml
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add .
+            git commit -m "Update staging image to ${{ needs.build-and-push.outputs.image-tag }}"
+            git push
+      
+      deploy-production:
+        needs: build-and-push
+        runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main'
+        environment: production
+        
+        steps:
+        - name: Checkout config repository
+          uses: actions/checkout@v4
+          with:
+            repository: its-org/its-camera-ai-config
+            token: ${{ secrets.CONFIG_REPO_TOKEN }}
+            path: config
+        
+        - name: Update production image tag
+          run: |
+            cd config
+            sed -i 's|image:.*|image: ${{ needs.build-and-push.outputs.image-tag }}|' environments/production/values-production.yaml
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add .
+            git commit -m "Update production image to ${{ needs.build-and-push.outputs.image-tag }}"
+            git push
+
+---
+# Tekton Pipeline Configuration
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: its-camera-ai-pipeline
+  namespace: its-camera-gitops
+spec:
+  params:
+  - name: repo-url
+    type: string
+    description: Repository URL
+  - name: repo-revision
+    type: string
+    description: Repository revision
+    default: main
+  - name: image-name
+    type: string
+    description: Container image name
+  
+  workspaces:
+  - name: shared-data
+    description: Workspace for sharing data between tasks
+  - name: docker-credentials
+    description: Docker registry credentials
+  
+  tasks:
+  # Source code checkout
+  - name: fetch-source
+    taskRef:
+      name: git-clone
+      kind: ClusterTask
+    workspaces:
+    - name: output
+      workspace: shared-data
+    params:
+    - name: url
+      value: $(params.repo-url)
+    - name: revision
+      value: $(params.repo-revision)
+  
+  # Code quality and security scanning
+  - name: code-analysis
+    taskRef:
+      name: sonarqube-scanner
+      kind: Task
+    runAfter: ["fetch-source"]
+    workspaces:
+    - name: source
+      workspace: shared-data
+    params:
+    - name: SONAR_HOST_URL
+      value: https://sonarcloud.io
+    - name: SONAR_PROJECT_KEY
+      value: its-camera-ai
+  
+  # Unit tests
+  - name: unit-tests
+    taskRef:
+      name: python-test
+      kind: Task
+    runAfter: ["fetch-source"]
+    workspaces:
+    - name: source
+      workspace: shared-data
+    params:
+    - name: REQUIREMENTS_FILE
+      value: pyproject.toml
+    - name: TEST_COMMAND
+      value: |
+        uv sync --group dev
+        uv run pytest --cov=src/its_camera_ai
+  
+  # Container image build
+  - name: build-image
+    taskRef:
+      name: buildah
+      kind: ClusterTask
+    runAfter: ["code-analysis", "unit-tests"]
+    workspaces:
+    - name: source
+      workspace: shared-data
+    - name: dockerconfig
+      workspace: docker-credentials
+    params:
+    - name: IMAGE
+      value: $(params.image-name)
+    - name: FORMAT
+      value: docker
+    - name: BUILD_EXTRA_ARGS
+      value: --platform=linux/amd64,linux/arm64
+  
+  # Security scanning of the built image
+  - name: image-scan
+    taskRef:
+      name: trivy-scanner
+      kind: Task
+    runAfter: ["build-image"]
+    workspaces:
+    - name: manifest-dir
+      workspace: shared-data
+    params:
+    - name: IMAGE
+      value: $(params.image-name)
+    - name: ARGS
+      value: ["--severity", "HIGH,CRITICAL", "--exit-code", "1"]
+  
+  # Deploy to staging
+  - name: deploy-staging
+    taskRef:
+      name: argocd-task-sync-and-wait
+      kind: Task
+    runAfter: ["image-scan"]
+    when:
+    - input: $(params.repo-revision)
+      operator: in
+      values: ["develop"]
+    params:
+    - name: application-name
+      value: its-camera-ai-staging
+    - name: flags
+      value: --insecure
+
+---
+# ArgoCD Notifications Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: its-camera-gitops
+data:
+  service.slack: |
+    token: $slack-token
+    username: argocd
+    channel: its-camera-alerts
+  
+  service.email: |
+    host: smtp.gmail.com
+    port: 587
+    username: $email-username
+    password: $email-password
+    from: $email-username
+  
+  template.app-deployed: |
+    email:
+      subject: Application {{.app.metadata.name}} is now running new version.
+    message: |
+      {{if eq .serviceType "slack"}}:white_check_mark:{{end}} Application {{.app.metadata.name}} is now running new version of {{.context.repo.url}}.
+      Sync Status: {{.app.status.sync.status}}.
+      Health Status: {{.app.status.health.status}}.
+  
+  template.app-health-degraded: |
+    email:
+      subject: Application {{.app.metadata.name}} has degraded.
+    message: |
+      {{if eq .serviceType "slack"}}:exclamation:{{end}} Application {{.app.metadata.name}} has degraded.
+      Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}.
+  
+  template.app-sync-failed: |
+    email:
+      subject: Application {{.app.metadata.name}} sync is failed.
+    message: |
+      {{if eq .serviceType "slack"}}:exclamation:{{end}} Application {{.app.metadata.name}} sync is failed.
+      Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}.
+      Error: {{.app.status.operationState.message}}.
+  
+  trigger.on-deployed: |
+    - description: Application is synced and healthy. Triggered once per commit.
+      oncePer: app.status.sync.revision
+      send:
+      - app-deployed
+      when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+  
+  trigger.on-health-degraded: |
+    - description: Application has degraded
+      send:
+      - app-health-degraded
+      when: app.status.health.status == 'Degraded'
+  
+  trigger.on-sync-failed: |
+    - description: Application syncing has failed
+      send:
+      - app-sync-failed
+      when: app.status.operationState.phase in ['Error', 'Failed']
+  
+  subscriptions: |
+    - recipients:
+      - slack:its-camera-alerts
+      - email:ops-team@its-camera-ai.com
+      triggers:
+      - on-deployed
+      - on-health-degraded
+      - on-sync-failed
+
+---
+# Environment Configuration Management
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: environment-configs
+  namespace: its-camera-gitops
+data:
+  environments.yaml: |
+    environments:
+      development:
+        cluster: "local"
+        namespace: "its-camera-ai-dev"
+        replicas:
+          mlInference: 2
+          cameraProcessor: 3
+          analytics: 1
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+            gpu: "0"
+        features:
+          monitoring: basic
+          logging: debug
+          security: minimal
+      
+      staging:
+        cluster: "staging-k8s.its-camera-ai.com"
+        namespace: "its-camera-ai-staging"
+        replicas:
+          mlInference: 5
+          cameraProcessor: 8
+          analytics: 2
+        resources:
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+            gpu: "1"
+        features:
+          monitoring: enhanced
+          logging: info
+          security: standard
+      
+      production:
+        cluster: "prod-k8s.its-camera-ai.com"
+        namespace: "its-camera-ai-system"
+        replicas:
+          mlInference: 20
+          cameraProcessor: 50
+          analytics: 10
+        resources:
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+            gpu: "1"
+        features:
+          monitoring: full
+          logging: warn
+          security: enhanced
+      
+      edge:
+        cluster: "edge-*.its-camera-ai.com"
+        namespace: "its-camera-edge"
+        replicas:
+          mlInference: 3
+          cameraProcessor: 5
+          analytics: 1
+        resources:
+          limits:
+            cpu: "2"
+            memory: "8Gi"
+            gpu: "1"
+        features:
+          monitoring: essential
+          logging: error
+          security: standard
+          edgeMode: true
+          cloudFallback: true

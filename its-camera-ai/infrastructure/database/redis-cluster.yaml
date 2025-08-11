@@ -1,0 +1,452 @@
+# Redis Cluster Configuration for ITS Camera AI System
+# High-performance caching and session management
+# Optimized for sub-100ms latency requirements
+
+apiVersion: redis.redis.opstreelabs.in/v1beta1
+kind: RedisCluster
+metadata:
+  name: redis-cluster
+  namespace: its-camera-ai-system
+spec:
+  clusterSize: 6
+  clusterVersion: v7.2.0
+  
+  # Redis configuration optimized for camera data caching
+  redisExporter:
+    enabled: true
+    image: quay.io/opstree/redis-exporter:v1.55.0
+  
+  # Storage configuration
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 500Gi
+  
+  # Redis configuration
+  redisConfig:
+    # Memory management
+    maxmemory: "30gb"
+    maxmemory-policy: "allkeys-lru"
+    
+    # Persistence settings for cached inference results
+    save: "900 1 300 10 60 10000"
+    rdbcompression: "yes"
+    rdbchecksum: "yes"
+    
+    # Network and timeout settings
+    timeout: "300"
+    tcp-keepalive: "300"
+    
+    # Performance tuning
+    tcp-backlog: "511"
+    databases: "16"
+    
+    # Replication settings
+    repl-diskless-sync: "yes"
+    repl-diskless-sync-delay: "5"
+    
+    # Client management
+    client-output-buffer-limit-normal: "0 0 0"
+    client-output-buffer-limit-replica: "256mb 64mb 60"
+    client-output-buffer-limit-pubsub: "32mb 8mb 60"
+  
+  # Resource allocation
+  resources:
+    requests:
+      cpu: "2"
+      memory: "32Gi"
+    limits:
+      cpu: "4"
+      memory: "64Gi"
+  
+  # Node affinity for performance
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: workload
+            operator: In
+            values: ["general", "database"]
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values: ["redis-cluster"]
+          topologyKey: kubernetes.io/hostname
+  
+  # Security context
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  
+  # Monitoring
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+# Redis Sentinel for High Availability
+apiVersion: redis.redis.opstreelabs.in/v1beta1
+kind: RedisSentinel
+metadata:
+  name: redis-sentinel
+  namespace: its-camera-ai-system
+spec:
+  clusterSize: 3
+  redisExporter:
+    enabled: true
+  
+  # Sentinel configuration
+  redisConfig:
+    # Sentinel specific settings
+    sentinel-announce-ip: ""
+    sentinel-announce-port: "26379"
+    
+    # Master monitoring
+    down-after-milliseconds: "5000"
+    failover-timeout: "60000"
+    parallel-syncs: "1"
+    
+    # Logging
+    loglevel: "notice"
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+---
+# Redis Insight for Monitoring and Management
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-insight
+  namespace: its-camera-ai-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-insight
+  template:
+    metadata:
+      labels:
+        app: redis-insight
+    spec:
+      containers:
+      - name: redis-insight
+        image: redislabs/redisinsight:latest
+        ports:
+        - containerPort: 8001
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - name: redis-insight-data
+          mountPath: /db
+      volumes:
+      - name: redis-insight-data
+        emptyDir: {}
+
+---
+# Redis Insight Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-insight
+  namespace: its-camera-ai-system
+spec:
+  selector:
+    app: redis-insight
+  ports:
+  - port: 8001
+    targetPort: 8001
+  type: ClusterIP
+
+---
+# Cache Warming Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cache-warming
+  namespace: its-camera-ai-system
+spec:
+  schedule: "*/30 * * * *"  # Every 30 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cache-warmer
+            image: redis:7.2.0
+            command:
+            - /bin/sh
+            - -c
+            - |
+              # Connect to Redis cluster and warm frequently accessed data
+              redis-cli -h redis-cluster -p 6379 <<EOF
+              
+              # Pre-load commonly accessed camera configurations
+              HSET camera:configs:template fps 30
+              HSET camera:configs:template resolution "1920x1080"
+              HSET camera:configs:template encoding "h264"
+              
+              # Pre-load ML model metadata
+              HSET ml:models:yolo11 version "latest"
+              HSET ml:models:yolo11 accuracy "0.92"
+              HSET ml:models:yolo11 latency_ms "45"
+              
+              # Warm up connection pools
+              PING
+              
+              EOF
+          restartPolicy: OnFailure
+
+---
+# Cache Configuration for Different Data Types
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-cache-config
+  namespace: its-camera-ai-system
+data:
+  cache-strategy.yaml: |
+    # Cache configuration for different data types
+    cacheStrategies:
+      # ML inference results cache
+      inference_results:
+        database: 0
+        ttl: 300  # 5 minutes
+        maxMemory: "8gb"
+        evictionPolicy: "allkeys-lru"
+        keyPattern: "inference:camera:{camera_id}:frame:{frame_id}"
+      
+      # Camera metadata cache
+      camera_metadata:
+        database: 1
+        ttl: 3600  # 1 hour
+        maxMemory: "2gb"
+        evictionPolicy: "volatile-lru"
+        keyPattern: "camera:meta:{camera_id}"
+      
+      # Session and authentication cache
+      sessions:
+        database: 2
+        ttl: 1800  # 30 minutes
+        maxMemory: "1gb"
+        evictionPolicy: "volatile-ttl"
+        keyPattern: "session:{session_id}"
+      
+      # Real-time analytics cache
+      analytics:
+        database: 3
+        ttl: 60  # 1 minute
+        maxMemory: "4gb"
+        evictionPolicy: "allkeys-lru"
+        keyPattern: "analytics:{type}:{camera_id}:{timestamp}"
+      
+      # Configuration cache
+      config_cache:
+        database: 4
+        ttl: 7200  # 2 hours
+        maxMemory: "512mb"
+        evictionPolicy: "noeviction"
+        keyPattern: "config:{component}:{key}"
+      
+      # Rate limiting cache
+      rate_limiting:
+        database: 5
+        ttl: 3600  # 1 hour
+        maxMemory: "256mb"
+        evictionPolicy: "volatile-ttl"
+        keyPattern: "rate_limit:{ip}:{endpoint}"
+    
+    # Cache warming strategies
+    warmingStrategies:
+      camera_configs:
+        enabled: true
+        schedule: "*/15 * * * *"  # Every 15 minutes
+        query: "SELECT camera_id, config FROM cameras WHERE active = true"
+        cacheKey: "camera:config:{camera_id}"
+      
+      ml_models:
+        enabled: true
+        schedule: "0 */2 * * *"  # Every 2 hours
+        preloadModels:
+          - "yolo11-vehicle-detection"
+          - "traffic-flow-analysis"
+          - "license-plate-recognition"
+      
+      frequent_queries:
+        enabled: true
+        schedule: "*/10 * * * *"  # Every 10 minutes
+        queries:
+          - "active_cameras_count"
+          - "system_health_metrics"
+          - "recent_alerts"
+
+---
+# Redis Cluster Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-service
+  namespace: its-camera-ai-system
+spec:
+  selector:
+    app: redis-cluster
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  - port: 16379
+    targetPort: 16379
+    name: cluster-bus
+  type: ClusterIP
+
+---
+# Redis Connection Pool Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-connection-config
+  namespace: its-camera-ai-system
+data:
+  connection-pool.yaml: |
+    # Connection pool settings for different services
+    connectionPools:
+      ml_inference_service:
+        maxConnections: 100
+        minIdleConnections: 10
+        maxIdleTime: 300
+        connectionTimeout: 5
+        commandTimeout: 3
+        retryAttempts: 3
+        retryDelay: 100
+      
+      camera_stream_service:
+        maxConnections: 200
+        minIdleConnections: 20
+        maxIdleTime: 180
+        connectionTimeout: 2
+        commandTimeout: 1
+        retryAttempts: 2
+        retryDelay: 50
+      
+      analytics_service:
+        maxConnections: 50
+        minIdleConnections: 5
+        maxIdleTime: 600
+        connectionTimeout: 10
+        commandTimeout: 5
+        retryAttempts: 3
+        retryDelay: 200
+    
+    # Circuit breaker settings
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      recoveryTimeout: 30
+      halfOpenMaxCalls: 10
+
+---
+# Redis Monitoring and Alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: redis-monitoring-rules
+  namespace: its-camera-ai-system
+spec:
+  groups:
+  - name: redis.rules
+    rules:
+    # High memory usage alert
+    - alert: RedisHighMemoryUsage
+      expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Redis instance has high memory usage"
+        description: "Redis instance {{ $labels.instance }} memory usage is above 90%"
+    
+    # High connection count
+    - alert: RedisHighConnectionCount
+      expr: redis_connected_clients > 800
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Redis has too many client connections"
+        description: "Redis instance {{ $labels.instance }} has {{ $value }} connections"
+    
+    # Slow queries
+    - alert: RedisSlowQueries
+      expr: rate(redis_slowlog_length[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Redis is experiencing slow queries"
+        description: "Redis instance {{ $labels.instance }} slow query rate: {{ $value }} queries/sec"
+    
+    # Cache hit rate too low
+    - alert: RedisLowHitRate
+      expr: redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total) < 0.8
+      for: 10m
+      labels:
+        severity: info
+      annotations:
+        summary: "Redis cache hit rate is low"
+        description: "Redis cache hit rate on {{ $labels.instance }} is {{ $value | humanizePercentage }}"
+
+---
+# Redis Backup Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup
+  namespace: its-camera-ai-system
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: redis-backup
+            image: redis:7.2.0
+            command:
+            - /bin/sh
+            - -c
+            - |
+              # Create backup of Redis data
+              DATE=$(date +"%Y%m%d_%H%M%S")
+              
+              # Backup each database
+              for DB in 0 1 2 3 4 5; do
+                redis-cli -h redis-cluster -p 6379 -n $DB --rdb /tmp/redis_backup_db${DB}_${DATE}.rdb
+              done
+              
+              # Upload to S3 (requires AWS credentials)
+              # aws s3 cp /tmp/redis_backup_* s3://its-camera-ai-backups/redis/
+              
+              echo "Backup completed for date: $DATE"
+          restartPolicy: OnFailure

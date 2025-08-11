@@ -1,0 +1,276 @@
+# Kubernetes Infrastructure Design for ITS Camera AI System
+# Production-grade cluster architecture supporting 1000+ cameras at 30 FPS
+# Sub-100ms inference latency with 99.9% uptime SLA
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-ai-system
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/version: "1.0.0"
+    environment: production
+
+---
+# Multi-Zone Node Pool Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: its-camera-ai-system
+data:
+  # Cluster sizing for 1000+ cameras
+  cluster.yaml: |
+    # Control Plane Configuration
+    controlPlane:
+      nodes: 3
+      instanceType: "c5.2xlarge"  # 8 vCPU, 16GB RAM
+      zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
+      etcdStorage: "1TB-ssd"
+    
+    # Worker Node Pools
+    nodePools:
+      # High-Memory Nodes for ML Inference
+      - name: "ml-inference"
+        minSize: 6
+        maxSize: 20
+        instanceType: "g4dn.2xlarge"  # 8 vCPU, 32GB RAM, 1x T4 GPU
+        gpuCount: 1
+        zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        taints:
+          - key: "gpu"
+            value: "ml-inference"
+            effect: "NoSchedule"
+        labels:
+          workload: "ml-inference"
+          gpu-type: "nvidia-t4"
+      
+      # GPU Nodes for Training/Heavy Inference
+      - name: "gpu-heavy"
+        minSize: 2
+        maxSize: 8
+        instanceType: "g4dn.4xlarge"  # 16 vCPU, 64GB RAM, 1x T4 GPU
+        gpuCount: 1
+        zones: ["us-west-2a", "us-west-2b"]
+        taints:
+          - key: "gpu"
+            value: "training"
+            effect: "NoSchedule"
+        labels:
+          workload: "training"
+          gpu-type: "nvidia-t4"
+      
+      # General Workload Nodes
+      - name: "general"
+        minSize: 9
+        maxSize: 30
+        instanceType: "c5.4xlarge"  # 16 vCPU, 32GB RAM
+        zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        labels:
+          workload: "general"
+      
+      # Database Nodes (High I/O)
+      - name: "database"
+        minSize: 3
+        maxSize: 9
+        instanceType: "r5.2xlarge"  # 8 vCPU, 64GB RAM
+        storageType: "gp3"
+        storageSize: "2TB"
+        zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        taints:
+          - key: "database"
+            value: "true"
+            effect: "NoSchedule"
+        labels:
+          workload: "database"
+      
+      # Edge Gateway Nodes
+      - name: "edge-gateway"
+        minSize: 3
+        maxSize: 12
+        instanceType: "m5.xlarge"  # 4 vCPU, 16GB RAM
+        zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        labels:
+          workload: "edge-gateway"
+    
+    # Network Configuration
+    networking:
+      cni: "cilium"
+      serviceSubnet: "10.96.0.0/12"
+      podSubnet: "10.244.0.0/16"
+      loadBalancer:
+        type: "nlb"  # Network Load Balancer for low latency
+        crossZone: true
+      
+    # Storage Configuration
+    storage:
+      classes:
+        - name: "fast-ssd"
+          provisioner: "ebs.csi.aws.com"
+          type: "gp3"
+          iops: 16000
+          throughput: 1000
+        - name: "gpu-local"
+          provisioner: "kubernetes.io/no-provisioner"
+          volumeBindingMode: "WaitForFirstConsumer"
+    
+    # Auto-scaling Configuration
+    autoscaling:
+      clusterAutoscaler:
+        enabled: true
+        scaleDownDelay: "10m"
+        scaleDownUtilization: 0.5
+      horizontalPodAutoscaler:
+        enabled: true
+        targetCPU: 70
+        targetMemory: 80
+      verticalPodAutoscaler:
+        enabled: true
+        updateMode: "Auto"
+
+---
+# GPU Node Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-config
+  namespace: its-camera-ai-system
+data:
+  nvidia-device-plugin.yaml: |
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: nvidia-device-plugin-daemonset
+      namespace: kube-system
+    spec:
+      selector:
+        matchLabels:
+          name: nvidia-device-plugin-ds
+      updateStrategy:
+        type: RollingUpdate
+      template:
+        metadata:
+          labels:
+            name: nvidia-device-plugin-ds
+        spec:
+          tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+          priorityClassName: "system-node-critical"
+          containers:
+          - image: nvcr.io/nvidia/k8s-device-plugin:v0.14.1
+            name: nvidia-device-plugin-ctr
+            args:
+              - "--fail-on-init-error=false"
+              - "--device-list-strategy=envvar"
+              - "--nvidia-driver-root=/host/usr/lib/nvidia"
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            volumeMounts:
+              - name: device-plugin
+                mountPath: /var/lib/kubelet/device-plugins
+          volumes:
+            - name: device-plugin
+              hostPath:
+                path: /var/lib/kubelet/device-plugins
+          nodeSelector:
+            accelerator: nvidia
+
+---
+# Network Policies for Security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: its-camera-ai-network-policy
+  namespace: its-camera-ai-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: its-camera-ai-system
+    - podSelector: {}
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 8080  # Health checks
+    - protocol: TCP
+      port: 9090  # Metrics
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: its-camera-ai-system
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS outbound
+    - protocol: TCP
+      port: 53   # DNS
+    - protocol: UDP
+      port: 53   # DNS
+
+---
+# Service Mesh Configuration (Istio)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-mesh-config
+  namespace: its-camera-ai-system
+data:
+  istio-config.yaml: |
+    apiVersion: install.istio.io/v1alpha1
+    kind: IstioOperator
+    metadata:
+      name: its-camera-ai-mesh
+    spec:
+      values:
+        pilot:
+          env:
+            EXTERNAL_ISTIOD: false
+        global:
+          meshID: its-camera-ai
+          multiCluster:
+            clusterName: production
+          network: network1
+      components:
+        pilot:
+          k8s:
+            resources:
+              requests:
+                cpu: 500m
+                memory: 2048Mi
+        ingressGateways:
+        - name: istio-ingressgateway
+          enabled: true
+          k8s:
+            service:
+              type: LoadBalancer
+              loadBalancerSourceRanges:
+              - 0.0.0.0/0  # Restrict in production
+            resources:
+              requests:
+                cpu: 1000m
+                memory: 1024Mi
+              limits:
+                cpu: 2000m
+                memory: 2048Mi
+        egressGateways:
+        - name: istio-egressgateway
+          enabled: true
+      meshConfig:
+        accessLogFile: /dev/stdout
+        defaultConfig:
+          proxyStatsMatcher:
+            inclusionRegexps:
+            - ".*outlier_detection.*"
+            - ".*circuit_breakers.*"
+            - ".*upstream_rq_retry.*"
+            - ".*_cx_.*"

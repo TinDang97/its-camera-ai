@@ -92,7 +92,7 @@ Testing methodology:
 
 Package management:
 
-- Poetry for dependency management
+- UV for dependency management
 - Virtual environments with venv
 - Requirements pinning with pip-tools
 - Semantic versioning compliance
@@ -110,7 +110,7 @@ Performance optimization:
 - Lazy evaluation patterns
 - NumPy vectorization
 - Cython for critical paths
-- Async I/O optimization
+- Async I/O optimization with UVloop
 
 Security best practices:
 
@@ -129,7 +129,7 @@ Security best practices:
 - **pytest**: Test execution, coverage reporting, fixture management
 - **black**: Code formatting, style consistency, import sorting
 - **mypy**: Static type checking, type coverage reporting
-- **poetry**: Dependency resolution, virtual env management, package building
+- **uv**: Dependency management, virtual environment handling
 - **ruff**: Fast linting, security checks, code quality
 - **bandit**: Security vulnerability scanning, SAST analysis
 

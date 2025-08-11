@@ -1,0 +1,449 @@
+# PostgreSQL Cluster Configuration for ITS Camera AI System
+# High-availability setup with read replicas and automatic failover
+# Designed to handle 1000+ concurrent cameras with sub-100ms query latency
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgresql-cluster
+  namespace: its-camera-ai-system
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:15.4
+  
+  # Primary database configuration
+  postgresql:
+    parameters:
+      # Connection and authentication
+      max_connections: "1000"
+      shared_preload_libraries: "pg_stat_statements,pg_buffercache,timescaledb"
+      
+      # Memory configuration for high throughput
+      shared_buffers: "8GB"
+      effective_cache_size: "24GB"
+      work_mem: "32MB"
+      maintenance_work_mem: "2GB"
+      
+      # Write-ahead logging for high write loads
+      wal_buffers: "64MB"
+      wal_level: "replica"
+      max_wal_senders: "10"
+      max_replication_slots: "10"
+      checkpoint_completion_target: "0.9"
+      wal_compression: "on"
+      
+      # Query optimization
+      random_page_cost: "1.1"  # SSD storage
+      effective_io_concurrency: "200"
+      max_worker_processes: "16"
+      max_parallel_workers: "16"
+      max_parallel_workers_per_gather: "8"
+      
+      # Logging for monitoring
+      log_statement: "none"
+      log_duration: "off"
+      log_slow_queries: "on"
+      log_min_duration_statement: "1000"  # Log queries > 1s
+      
+      # TimescaleDB specific (for time-series data)
+      timescaledb.max_background_workers: "16"
+      timescaledb.telemetry_level: "off"
+  
+  # Bootstrap configuration
+  bootstrap:
+    initdb:
+      database: its_camera_ai
+      owner: camera_ai_user
+      encoding: UTF8
+      localeCollate: en_US.UTF-8
+      localeCType: en_US.UTF-8
+      postInitSQL:
+        - CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+        - CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+        - CREATE EXTENSION IF NOT EXISTS pg_buffercache;
+        - CREATE EXTENSION IF NOT EXISTS uuid-ossp;
+        - CREATE EXTENSION IF NOT EXISTS pgcrypto;
+        
+        # Create application schemas
+        - CREATE SCHEMA IF NOT EXISTS camera_data;
+        - CREATE SCHEMA IF NOT EXISTS analytics;
+        - CREATE SCHEMA IF NOT EXISTS audit;
+        
+        # Create time-series hypertables
+        - |
+          CREATE TABLE IF NOT EXISTS camera_data.frame_metadata (
+            id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+            camera_id VARCHAR(50) NOT NULL,
+            timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            frame_number BIGINT NOT NULL,
+            resolution VARCHAR(20),
+            fps DECIMAL(5,2),
+            quality_score DECIMAL(3,2),
+            file_path TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        - SELECT create_hypertable('camera_data.frame_metadata', 'timestamp', chunk_time_interval => INTERVAL '1 hour');
+        
+        # Vehicle detection events table
+        - |
+          CREATE TABLE IF NOT EXISTS analytics.vehicle_detections (
+            id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+            camera_id VARCHAR(50) NOT NULL,
+            timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            vehicle_type VARCHAR(50),
+            confidence DECIMAL(3,2),
+            bbox_x INTEGER,
+            bbox_y INTEGER,
+            bbox_width INTEGER,
+            bbox_height INTEGER,
+            speed_kmh DECIMAL(5,2),
+            direction VARCHAR(20),
+            license_plate VARCHAR(20),
+            processed_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        - SELECT create_hypertable('analytics.vehicle_detections', 'timestamp', chunk_time_interval => INTERVAL '1 hour');
+        
+        # Traffic analytics aggregation table
+        - |
+          CREATE TABLE IF NOT EXISTS analytics.traffic_stats (
+            camera_id VARCHAR(50) NOT NULL,
+            time_bucket TIMESTAMPTZ NOT NULL,
+            vehicle_count INTEGER DEFAULT 0,
+            avg_speed DECIMAL(5,2),
+            peak_congestion DECIMAL(3,2),
+            incident_count INTEGER DEFAULT 0,
+            PRIMARY KEY (camera_id, time_bucket)
+          );
+        - SELECT create_hypertable('analytics.traffic_stats', 'time_bucket', chunk_time_interval => INTERVAL '6 hours');
+        
+        # Create indexes for performance
+        - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_frame_metadata_camera_timestamp ON camera_data.frame_metadata (camera_id, timestamp DESC);
+        - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vehicle_detections_camera_timestamp ON analytics.vehicle_detections (camera_id, timestamp DESC);
+        - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vehicle_detections_type ON analytics.vehicle_detections (vehicle_type, timestamp DESC);
+        - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_traffic_stats_camera_bucket ON analytics.traffic_stats (camera_id, time_bucket DESC);
+  
+  # Storage configuration
+  storage:
+    size: 2Ti
+    storageClass: fast-ssd
+    resizeInUseVolumes: true
+  
+  # Resource allocation
+  resources:
+    requests:
+      cpu: "4"
+      memory: "32Gi"
+    limits:
+      cpu: "8"
+      memory: "64Gi"
+  
+  # Monitoring and logging
+  monitoring:
+    enabled: true
+    podMonitorEnabled: true
+    customQueriesConfigMap:
+    - name: postgresql-custom-queries
+      key: queries.yaml
+  
+  # Backup configuration
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://its-camera-ai-backups/postgresql
+      s3Credentials:
+        accessKeyId:
+          name: backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: backup-credentials
+          key: SECRET_ACCESS_KEY
+      wal:
+        retention: "7d"
+        maxParallel: 8
+      data:
+        compression: gzip
+        immediateCheckpoint: true
+        jobs: 4
+  
+  # Affinity and tolerations
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: workload
+            operator: In
+            values: ["database"]
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: cnpg.io/cluster
+              operator: In
+              values: ["postgresql-cluster"]
+          topologyKey: kubernetes.io/hostname
+  
+  tolerations:
+  - key: database
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
+---
+# Read Replica Configuration
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgresql-read-replicas
+  namespace: its-camera-ai-system
+spec:
+  instances: 5  # Multiple read replicas for analytics queries
+  imageName: ghcr.io/cloudnative-pg/postgresql:15.4
+  
+  # Bootstrap from primary cluster
+  bootstrap:
+    pg_basebackup:
+      source: postgresql-cluster
+  
+  # Optimized for read workloads
+  postgresql:
+    parameters:
+      max_connections: "500"
+      shared_buffers: "4GB"
+      effective_cache_size: "12GB"
+      work_mem: "64MB"  # Higher for complex analytics queries
+      random_page_cost: "1.0"
+      effective_io_concurrency: "300"
+      
+      # Read-only optimizations
+      default_transaction_isolation: "read committed"
+      hot_standby: "on"
+      hot_standby_feedback: "on"
+      max_standby_streaming_delay: "30s"
+  
+  storage:
+    size: 1Ti
+    storageClass: fast-ssd
+  
+  resources:
+    requests:
+      cpu: "2"
+      memory: "16Gi"
+    limits:
+      cpu: "4"
+      memory: "32Gi"
+  
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: workload
+            operator: In
+            values: ["database"]
+  
+  tolerations:
+  - key: database
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
+---
+# Connection Pooling with PgBouncer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: its-camera-ai-system
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      containers:
+      - name: pgbouncer
+        image: pgbouncer/pgbouncer:1.21.0
+        ports:
+        - containerPort: 5432
+        env:
+        - name: DATABASES_HOST
+          value: postgresql-cluster-rw
+        - name: DATABASES_PORT
+          value: "5432"
+        - name: DATABASES_USER
+          value: camera_ai_user
+        - name: DATABASES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-cluster-app
+              key: password
+        - name: DATABASES_DBNAME
+          value: its_camera_ai
+        - name: POOL_MODE
+          value: transaction
+        - name: SERVER_RESET_QUERY
+          value: DISCARD ALL
+        - name: MAX_CLIENT_CONN
+          value: "2000"
+        - name: DEFAULT_POOL_SIZE
+          value: "100"
+        - name: MAX_DB_CONNECTIONS
+          value: "200"
+        - name: RESERVE_POOL_SIZE
+          value: "20"
+        - name: SERVER_ROUND_ROBIN
+          value: "1"
+        - name: LOG_CONNECTIONS
+          value: "0"
+        - name: LOG_DISCONNECTIONS
+          value: "0"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1
+            memory: 2Gi
+        readinessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+---
+# PgBouncer Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer-service
+  namespace: its-camera-ai-system
+spec:
+  selector:
+    app: pgbouncer
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Database Monitoring Queries
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-custom-queries
+  namespace: its-camera-ai-system
+data:
+  queries.yaml: |
+    camera_active_connections:
+      query: "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND datname = 'its_camera_ai'"
+      master: true
+      metrics:
+        - active_connections:
+            usage: "GAUGE"
+            description: "Number of active connections to camera AI database"
+    
+    camera_table_sizes:
+      query: |
+        SELECT 
+          schemaname,
+          tablename,
+          pg_total_relation_size(schemaname||'.'||tablename) as size_bytes
+        FROM pg_tables 
+        WHERE schemaname IN ('camera_data', 'analytics')
+      master: true
+      metrics:
+        - size_bytes:
+            usage: "GAUGE"
+            description: "Size of camera AI tables in bytes"
+            key_labels:
+              - schemaname
+              - tablename
+    
+    camera_query_performance:
+      query: |
+        SELECT 
+          query,
+          calls,
+          total_time,
+          mean_time,
+          stddev_time
+        FROM pg_stat_statements 
+        WHERE query LIKE '%camera_%' OR query LIKE '%vehicle_%'
+        ORDER BY total_time DESC
+        LIMIT 10
+      master: true
+      metrics:
+        - calls:
+            usage: "COUNTER"
+            description: "Number of times query was executed"
+        - total_time:
+            usage: "COUNTER"
+            description: "Total time spent in query execution"
+        - mean_time:
+            usage: "GAUGE"
+            description: "Mean query execution time"
+
+---
+# Database Maintenance Jobs
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-maintenance
+  namespace: its-camera-ai-system
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: maintenance
+            image: postgres:15.4
+            command:
+            - /bin/bash
+            - -c
+            - |
+              # Connect to database and run maintenance
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgresql-cluster-rw -U camera_ai_user -d its_camera_ai <<EOF
+              
+              -- Vacuum and analyze tables
+              VACUUM ANALYZE camera_data.frame_metadata;
+              VACUUM ANALYZE analytics.vehicle_detections;
+              VACUUM ANALYZE analytics.traffic_stats;
+              
+              -- Update table statistics
+              ANALYZE;
+              
+              -- Drop old chunks (older than 30 days)
+              SELECT drop_chunks('camera_data.frame_metadata', INTERVAL '30 days');
+              SELECT drop_chunks('analytics.vehicle_detections', INTERVAL '30 days');
+              
+              -- Compress old chunks (older than 7 days)
+              SELECT compress_chunk(i) FROM show_chunks('camera_data.frame_metadata', older_than => INTERVAL '7 days') i;
+              SELECT compress_chunk(i) FROM show_chunks('analytics.vehicle_detections', older_than => INTERVAL '7 days') i;
+              
+              -- Reindex if needed
+              REINDEX INDEX CONCURRENTLY idx_frame_metadata_camera_timestamp;
+              REINDEX INDEX CONCURRENTLY idx_vehicle_detections_camera_timestamp;
+              
+              EOF
+            env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-cluster-app
+                  key: password
+          restartPolicy: OnFailure

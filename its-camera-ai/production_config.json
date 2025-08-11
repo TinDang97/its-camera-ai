@@ -1,0 +1,169 @@
+{
+  "deployment_mode": "production",
+  "environment_name": "its-prod",
+  
+  "scaling": {
+    "max_concurrent_cameras": 1000,
+    "auto_scaling_enabled": true,
+    "target_cpu_utilization": 70.0,
+    "target_gpu_utilization": 80.0,
+    "min_replicas": 2,
+    "max_replicas": 20
+  },
+  
+  "performance_targets": {
+    "target_latency_ms": 95,
+    "target_throughput_fps": 30000,
+    "target_accuracy": 0.95,
+    "min_uptime_percentage": 99.9
+  },
+  
+  "model_config": {
+    "base_model_type": "small",
+    "optimization_backend": "tensorrt",
+    "enable_quantization": true,
+    "precision": "fp16",
+    "batch_size": 8,
+    "max_batch_size": 32
+  },
+  
+  "training": {
+    "continuous_training_enabled": true,
+    "federated_learning_enabled": true,
+    "training_data_retention_days": 30,
+    "retraining_trigger_accuracy_drop": 0.05,
+    "retraining_trigger_drift_threshold": 0.1
+  },
+  
+  "federated_learning": {
+    "min_clients_per_round": 5,
+    "max_clients_per_round": 50,
+    "client_selection_fraction": 0.2,
+    "global_rounds": 200,
+    "local_epochs": 3,
+    "convergence_threshold": 0.001,
+    "aggregation_method": "fedavg"
+  },
+  
+  "monitoring": {
+    "enabled": true,
+    "alerting_enabled": true,
+    "drift_detection_enabled": true,
+    "dashboard_update_interval": 10,
+    "health_check_interval": 30
+  },
+  
+  "infrastructure": {
+    "kafka_cluster": "kafka-prod.its.local:9092",
+    "redis_cluster": "redis-prod.its.local:6379",
+    "mlflow_uri": "http://mlflow-prod.its.local:5000",
+    "prometheus_gateway": "prometheus-prod.its.local:9091",
+    "minio_endpoint": "minio-prod.its.local:9000"
+  },
+  
+  "data_pipeline": {
+    "kafka_topics": {
+      "input": "camera-frames-v2",
+      "processed": "processed-frames-v2",
+      "training": "training-batches-v2",
+      "predictions": "model-predictions-v2"
+    },
+    "quality_threshold": 0.75,
+    "processing_timeout": 5.0,
+    "max_queue_size": 10000
+  },
+  
+  "security": {
+    "encryption_enabled": true,
+    "authentication_required": true,
+    "audit_logging_enabled": true,
+    "rate_limiting_enabled": true,
+    "max_requests_per_minute": 60000
+  },
+  
+  "alerting": {
+    "channels": {
+      "email": {
+        "enabled": true,
+        "smtp_host": "smtp.company.com",
+        "smtp_port": 587,
+        "sender": "its-alerts@company.com",
+        "recipients": [
+          "ml-ops@company.com",
+          "traffic-ops@company.com"
+        ]
+      },
+      "slack": {
+        "enabled": true,
+        "webhook_url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+        "channel": "#its-alerts"
+      },
+      "pagerduty": {
+        "enabled": true,
+        "integration_key": "your-pagerduty-integration-key",
+        "severity_mapping": {
+          "critical": "critical",
+          "warning": "warning",
+          "info": "info"
+        }
+      }
+    },
+    "alert_thresholds": {
+      "accuracy_drop_percentage": 5.0,
+      "latency_increase_percentage": 20.0,
+      "error_rate_percentage": 2.0,
+      "throughput_drop_percentage": 15.0,
+      "system_health_minimum": 80.0
+    }
+  },
+  
+  "storage": {
+    "model_registry_path": "/data/models",
+    "training_data_path": "/data/training",
+    "logs_path": "/data/logs",
+    "metrics_retention_days": 90,
+    "model_retention_versions": 10
+  },
+  
+  "kubernetes": {
+    "namespace": "its-camera-ai",
+    "service_account": "its-pipeline",
+    "resource_requests": {
+      "cpu": "2000m",
+      "memory": "4Gi",
+      "nvidia.com/gpu": "1"
+    },
+    "resource_limits": {
+      "cpu": "8000m",
+      "memory": "16Gi",
+      "nvidia.com/gpu": "2"
+    },
+    "hpa_config": {
+      "min_replicas": 2,
+      "max_replicas": 20,
+      "target_cpu_utilization": 70,
+      "target_memory_utilization": 80
+    }
+  },
+  
+  "feature_flags": {
+    "enable_a_b_testing": true,
+    "enable_canary_deployment": true,
+    "enable_blue_green_deployment": true,
+    "enable_shadow_mode": false,
+    "enable_model_explainability": false,
+    "enable_privacy_mode": true
+  },
+  
+  "compliance": {
+    "gdpr_enabled": true,
+    "data_retention_policy": {
+      "raw_images_days": 7,
+      "processed_data_days": 30,
+      "model_predictions_days": 365,
+      "audit_logs_days": 2555
+    },
+    "anonymization_enabled": true,
+    "consent_tracking_enabled": true
+  }
+}

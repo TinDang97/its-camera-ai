@@ -1,0 +1,364 @@
+# Auto-scaling Configuration for ITS Camera AI System
+# Handles dynamic scaling from 50 to 1000+ cameras
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml-inference-hpa
+  namespace: its-camera-ai-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-inference-service
+  minReplicas: 6
+  maxReplicas: 50
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: inference_queue_length
+      target:
+        type: AverageValue
+        averageValue: "10"  # Max 10 requests per pod in queue
+  - type: External
+    external:
+      metric:
+        name: kafka_consumer_lag
+        selector:
+          matchLabels:
+            topic: camera-frames
+      target:
+        type: AverageValue
+        averageValue: "100"  # Max 100 messages lag
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+# Camera Stream Processing HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: camera-stream-hpa
+  namespace: its-camera-ai-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: camera-stream-processor
+  minReplicas: 10
+  maxReplicas: 100
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Pods
+    pods:
+      metric:
+        name: active_camera_streams
+      target:
+        type: AverageValue
+        averageValue: "10"  # 10 cameras per pod max
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 200
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 180
+      policies:
+      - type: Percent
+        value: 20
+        periodSeconds: 60
+
+---
+# Event Processing HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: event-processor-hpa
+  namespace: its-camera-ai-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: event-processor
+  minReplicas: 5
+  maxReplicas: 30
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: External
+    external:
+      metric:
+        name: kafka_consumer_lag
+        selector:
+          matchLabels:
+            topic: traffic-events
+      target:
+        type: AverageValue
+        averageValue: "200"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 45
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+
+---
+# Vertical Pod Autoscaler for Database
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: postgresql-vpa
+  namespace: its-camera-ai-system
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: postgresql-primary
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: postgresql
+      maxAllowed:
+        cpu: 4
+        memory: 16Gi
+      minAllowed:
+        cpu: 500m
+        memory: 2Gi
+      controlledResources: ["cpu", "memory"]
+
+---
+# Cluster Autoscaler Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-autoscaler-status
+  namespace: kube-system
+data:
+  nodes.max: "100"
+  nodes.min: "20"
+  scale-down-delay-after-add: "10m"
+  scale-down-unneeded-time: "10m"
+  scale-down-utilization-threshold: "0.5"
+  skip-nodes-with-local-storage: "false"
+  skip-nodes-with-system-pods: "false"
+  max-node-provision-time: "15m"
+  scan-interval: "10s"
+  expendable-pods-priority-cutoff: "-10"
+  balance-similar-node-groups: "true"
+  node-group-auto-discovery: "asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/its-camera-ai"
+
+---
+# GPU Node Auto-scaling Policy
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-autoscaling-policy
+  namespace: its-camera-ai-system
+data:
+  policy.yaml: |
+    # GPU node scaling rules
+    gpuNodeGroups:
+      ml-inference:
+        minNodes: 6
+        maxNodes: 20
+        targetGPUUtilization: 80
+        scaleUpThreshold: 85
+        scaleDownThreshold: 40
+        cooldownPeriod: 300
+      
+      gpu-heavy:
+        minNodes: 2
+        maxNodes: 8
+        targetGPUUtilization: 70
+        scaleUpThreshold: 80
+        scaleDownThreshold: 30
+        cooldownPeriod: 600
+    
+    # Custom metrics for GPU scaling
+    customMetrics:
+    - name: gpu_memory_utilization
+      threshold: 85
+      scaleUpFactor: 2
+    - name: inference_requests_per_second
+      threshold: 100
+      scaleUpFactor: 1.5
+    - name: model_queue_depth
+      threshold: 50
+      scaleUpFactor: 2
+
+---
+# Predictive Scaling Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: predictive-scaling-config
+  namespace: its-camera-ai-system
+data:
+  config.yaml: |
+    # Traffic pattern-based predictive scaling
+    trafficPatterns:
+      weekdayMorning:
+        time: "06:00-10:00"
+        days: ["mon", "tue", "wed", "thu", "fri"]
+        scaleMultiplier: 2.5
+        preScaleMinutes: 30
+      
+      weekdayEvening:
+        time: "16:00-20:00"
+        days: ["mon", "tue", "wed", "thu", "fri"]
+        scaleMultiplier: 3.0
+        preScaleMinutes: 30
+      
+      weekendAfternoon:
+        time: "12:00-18:00"
+        days: ["sat", "sun"]
+        scaleMultiplier: 2.0
+        preScaleMinutes: 45
+    
+    # Camera activation patterns
+    cameraActivationRules:
+    - eventType: "school_hours"
+      timeRange: "07:00-16:00"
+      expectedCameras: 800
+      scaleTarget: 0.8  # Scale to 80% capacity
+    
+    - eventType: "rush_hour"
+      timeRange: "07:00-09:00,17:00-19:00"
+      expectedCameras: 1000
+      scaleTarget: 0.9  # Scale to 90% capacity
+    
+    - eventType: "night_mode"
+      timeRange: "22:00-06:00"
+      expectedCameras: 200
+      scaleTarget: 0.3  # Scale down to 30%
+
+---
+# KEDA ScaledObject for Kafka-based scaling
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kafka-camera-frames-scaler
+  namespace: its-camera-ai-system
+spec:
+  scaleTargetRef:
+    name: ml-inference-service
+  pollingInterval: 5
+  cooldownPeriod: 60
+  idleReplicaCount: 6
+  minReplicaCount: 6
+  maxReplicaCount: 50
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-cluster-kafka-bootstrap.kafka:9092
+      consumerGroup: ml-inference-group
+      topic: camera-frames
+      lagThreshold: '100'
+      offsetResetPolicy: latest
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.monitoring:9090
+      metricName: kafka_consumer_lag_frames
+      threshold: '200'
+      query: sum(kafka_consumer_lag{topic="camera-frames"})
+
+---
+# Node Resource Monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-resource-thresholds
+  namespace: its-camera-ai-system
+data:
+  thresholds.yaml: |
+    # Node resource thresholds for scaling decisions
+    nodeResourceThresholds:
+      cpu:
+        scaleUpThreshold: 80
+        scaleDownThreshold: 30
+        evaluationPeriod: 300  # 5 minutes
+      
+      memory:
+        scaleUpThreshold: 85
+        scaleDownThreshold: 40
+        evaluationPeriod: 300
+      
+      gpu:
+        scaleUpThreshold: 90
+        scaleDownThreshold: 20
+        evaluationPeriod: 180  # 3 minutes (faster for GPU)
+      
+      storage:
+        scaleUpThreshold: 80
+        scaleDownThreshold: 50
+        evaluationPeriod: 600  # 10 minutes
+    
+    # Emergency scaling rules
+    emergencyScaling:
+      triggers:
+      - condition: "inference_latency > 150ms"
+        action: "scale_up_immediate"
+        factor: 2.0
+      
+      - condition: "error_rate > 5%"
+        action: "scale_up_gradual"
+        factor: 1.5
+      
+      - condition: "queue_depth > 1000"
+        action: "scale_up_aggressive"
+        factor: 3.0
