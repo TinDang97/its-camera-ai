@@ -38,10 +38,11 @@ logger = logging.getLogger(__name__)
 
 class RequestPriority(Enum):
     """Request priority levels for traffic monitoring."""
-    EMERGENCY = 0    # Accidents, violations, emergency vehicles
-    HIGH = 1        # Heavy traffic, congestion events
-    NORMAL = 2      # Regular traffic monitoring
-    LOW = 3         # Background analytics, statistics
+
+    EMERGENCY = 0  # Accidents, violations, emergency vehicles
+    HIGH = 1  # Heavy traffic, congestion events
+    NORMAL = 2  # Regular traffic monitoring
+    LOW = 3  # Background analytics, statistics
 
 
 @dataclass
@@ -84,7 +85,7 @@ class BatchRequest:
             RequestPriority.EMERGENCY: 50,
             RequestPriority.HIGH: 100,
             RequestPriority.NORMAL: 200,
-            RequestPriority.LOW: 500
+            RequestPriority.LOW: 500,
         }
         return self.queue_age_ms > max_age_ms[self.priority]
 
@@ -113,17 +114,17 @@ class BatchMetrics:
     memory_efficiency: float = 0
     queue_depth_avg: float = 0
 
-    def update_from_batch(self, batch_size: int, processing_time_ms: float,
-                         queue_times: list[float]):
+    def update_from_batch(
+        self, batch_size: int, processing_time_ms: float, queue_times: list[float]
+    ):
         """Update metrics from processed batch."""
         self.requests_processed += batch_size
         self.total_processing_time_ms += processing_time_ms
 
         # Update running averages
         self.avg_batch_size = (
-            (self.avg_batch_size * (self.requests_processed - batch_size) + batch_size) /
-            self.requests_processed
-        )
+            self.avg_batch_size * (self.requests_processed - batch_size) + batch_size
+        ) / self.requests_processed
 
         if queue_times:
             self.avg_queue_time_ms = np.mean(queue_times)
@@ -163,7 +164,7 @@ class AdaptiveBatchSizer:
         current_latency_ms: float,
         current_throughput: float,
         gpu_utilization: float,
-        queue_depth: int
+        queue_depth: int,
     ) -> int:
         """Adapt batch size based on current performance metrics."""
 
@@ -176,7 +177,7 @@ class AdaptiveBatchSizer:
         self.gpu_util_history.append(gpu_utilization)
 
         # Calculate trend indicators
-        latency_trend = self._calculate_trend(self.latency_history)
+        self._calculate_trend(self.latency_history)
         gpu_util_avg = np.mean(list(self.gpu_util_history))
 
         # Adaptation logic
@@ -185,29 +186,42 @@ class AdaptiveBatchSizer:
         # Increase batch size if:
         # 1. Latency is below target and GPU utilization is low
         # 2. Queue depth is high (throughput pressure)
-        if (current_latency_ms < self.target_latency_ms * 0.7 and
-            gpu_util_avg < self.target_gpu_utilization * 0.8):
+        if (
+            current_latency_ms < self.target_latency_ms * 0.7
+            and gpu_util_avg < self.target_gpu_utilization * 0.8
+        ):
             new_batch_size = min(
                 self.max_batch_size,
-                int(self.current_batch_size * (1 + self.adaptation_rate))
+                int(self.current_batch_size * (1 + self.adaptation_rate)),
             )
-            logger.debug(f"Increasing batch size: {self.current_batch_size} -> {new_batch_size}")
+            logger.debug(
+                f"Increasing batch size: {self.current_batch_size} -> {new_batch_size}"
+            )
 
         # Decrease batch size if:
         # 1. Latency is above target
         # 2. GPU utilization is very high (resource pressure)
-        elif (current_latency_ms > self.target_latency_ms or
-              gpu_util_avg > self.target_gpu_utilization):
+        elif (
+            current_latency_ms > self.target_latency_ms
+            or gpu_util_avg > self.target_gpu_utilization
+        ):
             new_batch_size = max(
                 self.min_batch_size,
-                int(self.current_batch_size * (1 - self.adaptation_rate))
+                int(self.current_batch_size * (1 - self.adaptation_rate)),
             )
-            logger.debug(f"Decreasing batch size: {self.current_batch_size} -> {new_batch_size}")
+            logger.debug(
+                f"Decreasing batch size: {self.current_batch_size} -> {new_batch_size}"
+            )
 
         # Special case: High queue depth with acceptable latency
-        if queue_depth > self.max_batch_size and current_latency_ms < self.target_latency_ms:
+        if (
+            queue_depth > self.max_batch_size
+            and current_latency_ms < self.target_latency_ms
+        ):
             new_batch_size = min(self.max_batch_size, queue_depth // 2)
-            logger.debug(f"Queue pressure adaptation: {self.current_batch_size} -> {new_batch_size}")
+            logger.debug(
+                f"Queue pressure adaptation: {self.current_batch_size} -> {new_batch_size}"
+            )
 
         self.current_batch_size = new_batch_size
         self.last_adaptation_time = time.time()
@@ -232,8 +246,8 @@ class GPULoadBalancer:
 
     def __init__(self, device_ids: list[int]):
         self.device_ids = device_ids
-        self.device_loads = {device_id: 0.0 for device_id in device_ids}
-        self.device_queue_sizes = {device_id: 0 for device_id in device_ids}
+        self.device_loads = dict.fromkeys(device_ids, 0.0)
+        self.device_queue_sizes = dict.fromkeys(device_ids, 0)
         self.device_affinities = {}  # camera_id -> preferred_device_id
 
         # Load balancing strategy
@@ -243,9 +257,7 @@ class GPULoadBalancer:
         self.last_load_update = time.time()
 
     def select_device(
-        self,
-        camera_id: str,
-        priority: RequestPriority = RequestPriority.NORMAL
+        self, camera_id: str, priority: RequestPriority = RequestPriority.NORMAL
     ) -> int:
         """Select optimal device for processing request."""
 
@@ -261,13 +273,15 @@ class GPULoadBalancer:
             preferred_device = self.device_affinities[camera_id]
 
             # Use affinity device if not overloaded
-            if (self.device_loads[preferred_device] <
-                min(self.device_loads.values()) + 0.2):
+            if (
+                self.device_loads[preferred_device]
+                < min(self.device_loads.values()) + 0.2
+            ):
                 return preferred_device
 
         # Select device with best composite score
         best_device = None
-        best_score = float('inf')
+        best_score = float("inf")
 
         for device_id in self.device_ids:
             score = self._calculate_device_score(device_id, camera_id)
@@ -293,8 +307,10 @@ class GPULoadBalancer:
 
         # Affinity bonus (-0.3 to 0)
         affinity_score = 0
-        if (camera_id in self.device_affinities and
-            self.device_affinities[camera_id] == device_id):
+        if (
+            camera_id in self.device_affinities
+            and self.device_affinities[camera_id] == device_id
+        ):
             affinity_score = -self.affinity_weight
 
         # Memory utilization penalty (0-0.2)
@@ -311,13 +327,14 @@ class GPULoadBalancer:
 
         try:
             import pynvml
+
             pynvml.nvmlInit()
 
             for device_id in self.device_ids:
                 handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
                 util = pynvml.nvmlDeviceGetUtilizationRates(handle)
                 self.device_loads[device_id] = util.gpu / 100.0
-        except:
+        except Exception:
             # Fallback to simple round-robin if pynvml unavailable
             pass
 
@@ -331,8 +348,8 @@ class GPULoadBalancer:
 
             # Simple heuristic: memory pressure increases exponentially
             memory_ratio = allocated / max(1, cached)
-            return min(0.2, memory_ratio ** 2)
-        except:
+            return min(0.2, memory_ratio**2)
+        except Exception:
             return 0.0
 
     def update_queue_size(self, device_id: int, queue_size: int):
@@ -347,7 +364,7 @@ class SmartBatchProcessor:
         self,
         config: InferenceConfig,
         inference_engine: Any,  # OptimizedInferenceEngine
-        max_queue_size: int = 1000
+        max_queue_size: int = 1000,
     ):
         self.config = config
         self.inference_engine = inference_engine
@@ -379,15 +396,15 @@ class SmartBatchProcessor:
 
         # Start processing tasks for each GPU
         for device_id in self.config.device_ids:
-            task = asyncio.create_task(
-                self._process_batches_for_device(device_id)
-            )
+            task = asyncio.create_task(self._process_batches_for_device(device_id))
             self.processing_tasks[device_id] = task
 
         # Start metrics collection task
         self.metrics_task = asyncio.create_task(self._collect_metrics())
 
-        logger.info(f"Batch processor started with {len(self.processing_tasks)} GPU workers")
+        logger.info(
+            f"Batch processor started with {len(self.processing_tasks)} GPU workers"
+        )
 
     async def stop(self):
         """Stop the batch processing system."""
@@ -398,7 +415,7 @@ class SmartBatchProcessor:
         for task in self.processing_tasks.values():
             task.cancel()
 
-        if hasattr(self, 'metrics_task'):
+        if hasattr(self, "metrics_task"):
             self.metrics_task.cancel()
 
         # Wait for tasks to complete
@@ -411,7 +428,7 @@ class SmartBatchProcessor:
         frame: np.ndarray,
         frame_id: str,
         camera_id: str,
-        priority: RequestPriority = RequestPriority.NORMAL
+        priority: RequestPriority = RequestPriority.NORMAL,
     ) -> DetectionResult:
         """Submit prediction request with priority."""
 
@@ -426,7 +443,7 @@ class SmartBatchProcessor:
             camera_id=camera_id,
             timestamp=time.time(),
             priority=priority,
-            future=future
+            future=future,
         )
 
         # Add to appropriate priority queue
@@ -477,17 +494,16 @@ class SmartBatchProcessor:
         # Determine target batch size
         current_metrics = self._get_current_performance_metrics()
         target_batch_size = self.batch_sizer.adapt_batch_size(
-            current_latency_ms=current_metrics.get('avg_latency_ms', 50),
-            current_throughput=current_metrics.get('throughput_fps', 30),
-            gpu_utilization=current_metrics.get('gpu_utilization', 0.7),
-            queue_depth=self._get_total_queue_depth()
+            current_latency_ms=current_metrics.get("avg_latency_ms", 50),
+            current_throughput=current_metrics.get("throughput_fps", 30),
+            gpu_utilization=current_metrics.get("gpu_utilization", 0.7),
+            queue_depth=self._get_total_queue_depth(),
         )
 
         # Calculate timeout based on priority and queue age
         base_timeout_ms = self.config.batch_timeout_ms
         adaptive_timeout_ms = min(
-            base_timeout_ms * 3,
-            base_timeout_ms + self._get_total_queue_depth()
+            base_timeout_ms * 3, base_timeout_ms + self._get_total_queue_depth()
         )
 
         deadline = time.time() + (adaptive_timeout_ms / 1000.0)
@@ -573,9 +589,7 @@ class SmartBatchProcessor:
                     request.future.set_result(result)
 
             # Update metrics
-            self.metrics.update_from_batch(
-                len(batch), processing_time_ms, queue_times
-            )
+            self.metrics.update_from_batch(len(batch), processing_time_ms, queue_times)
 
             logger.debug(
                 f"Processed batch of {len(batch)} on GPU {device_id} "
@@ -604,12 +618,8 @@ class SmartBatchProcessor:
         """Get current performance metrics from inference engine."""
         try:
             return self.inference_engine.get_performance_stats()
-        except:
-            return {
-                'avg_latency_ms': 50,
-                'throughput_fps': 30,
-                'gpu_utilization': 0.7
-            }
+        except Exception:
+            return {"avg_latency_ms": 50, "throughput_fps": 30, "gpu_utilization": 0.7}
 
     async def _collect_metrics(self):
         """Collect and log performance metrics periodically."""
@@ -618,7 +628,7 @@ class SmartBatchProcessor:
                 await asyncio.sleep(self.metrics_update_interval)
 
                 # Get current metrics
-                engine_metrics = self._get_current_performance_metrics()
+                self._get_current_performance_metrics()
 
                 # Calculate batch processor specific metrics
                 total_queue_depth = self._get_total_queue_depth()
@@ -653,45 +663,43 @@ class SmartBatchProcessor:
 
         return {
             # Batch processing metrics
-            'batch_processor': {
-                'requests_processed': self.metrics.requests_processed,
-                'avg_batch_size': self.metrics.avg_batch_size,
-                'current_batch_size': self.batch_sizer.current_batch_size,
-                'requests_dropped': self.metrics.requests_dropped,
-                'requests_expired': self.metrics.requests_expired,
-                'retry_rate': self.metrics.retry_rate,
-                'avg_queue_time_ms': self.metrics.avg_queue_time_ms,
-                'p95_queue_time_ms': self.metrics.p95_queue_time_ms,
-                'p99_queue_time_ms': self.metrics.p99_queue_time_ms
+            "batch_processor": {
+                "requests_processed": self.metrics.requests_processed,
+                "avg_batch_size": self.metrics.avg_batch_size,
+                "current_batch_size": self.batch_sizer.current_batch_size,
+                "requests_dropped": self.metrics.requests_dropped,
+                "requests_expired": self.metrics.requests_expired,
+                "retry_rate": self.metrics.retry_rate,
+                "avg_queue_time_ms": self.metrics.avg_queue_time_ms,
+                "p95_queue_time_ms": self.metrics.p95_queue_time_ms,
+                "p99_queue_time_ms": self.metrics.p99_queue_time_ms,
             },
-
             # Queue status
-            'queues': {
+            "queues": {
                 priority.name: queue.qsize()
                 for priority, queue in self.request_queues.items()
             },
-            'total_queue_depth': self._get_total_queue_depth(),
-
+            "total_queue_depth": self._get_total_queue_depth(),
             # Device utilization
-            'devices': {
-                f'gpu_{device_id}': {
-                    'load': self.load_balancer.device_loads[device_id],
-                    'queue_size': self.load_balancer.device_queue_sizes[device_id]
+            "devices": {
+                f"gpu_{device_id}": {
+                    "load": self.load_balancer.device_loads[device_id],
+                    "queue_size": self.load_balancer.device_queue_sizes[device_id],
                 }
                 for device_id in self.config.device_ids
             },
-
             # Inference engine metrics
-            'inference_engine': engine_metrics
+            "inference_engine": engine_metrics,
         }
 
 
 # Utility functions for batch optimization
 
+
 async def benchmark_batch_performance(
     processor: SmartBatchProcessor,
     num_requests: int = 1000,
-    concurrent_cameras: int = 10
+    concurrent_cameras: int = 10,
 ) -> dict[str, float]:
     """Benchmark batch processor performance."""
 
@@ -740,15 +748,15 @@ async def benchmark_batch_performance(
         avg_latency = p95_latency = p99_latency = 0
 
     benchmark_results = {
-        'total_requests': num_requests,
-        'successful_requests': len(successful_results),
-        'failed_requests': len(failed_results),
-        'success_rate': len(successful_results) / num_requests,
-        'total_time_s': total_time_s,
-        'throughput_rps': throughput,
-        'avg_latency_ms': avg_latency,
-        'p95_latency_ms': p95_latency,
-        'p99_latency_ms': p99_latency
+        "total_requests": num_requests,
+        "successful_requests": len(successful_results),
+        "failed_requests": len(failed_results),
+        "success_rate": len(successful_results) / num_requests,
+        "total_time_s": total_time_s,
+        "throughput_rps": throughput,
+        "avg_latency_ms": avg_latency,
+        "p95_latency_ms": p95_latency,
+        "p99_latency_ms": p99_latency,
     }
 
     logger.info(f"Benchmark completed: {benchmark_results}")
@@ -759,7 +767,7 @@ def calculate_optimal_batch_configuration(
     target_throughput_rps: float,
     max_latency_ms: float,
     available_gpus: int,
-    gpu_memory_gb: float
+    gpu_memory_gb: float,
 ) -> InferenceConfig:
     """Calculate optimal batch configuration for given requirements."""
 
@@ -768,9 +776,10 @@ def calculate_optimal_batch_configuration(
     max_batch_size_memory = int(gpu_memory_gb * 1024 / 50)  # ~50MB per batch item
 
     # Calculate required batch size for throughput
-    required_batch_size = max(1, int(
-        target_throughput_rps * base_processing_time_ms / (1000 * available_gpus)
-    ))
+    required_batch_size = max(
+        1,
+        int(target_throughput_rps * base_processing_time_ms / (1000 * available_gpus)),
+    )
 
     # Constrain by latency requirements
     max_batch_size_latency = max(1, int(max_latency_ms / base_processing_time_ms))
@@ -780,14 +789,11 @@ def calculate_optimal_batch_configuration(
         required_batch_size,
         max_batch_size_latency,
         max_batch_size_memory,
-        32  # Hard limit for stability
+        32,  # Hard limit for stability
     )
 
     # Adaptive timeout based on batch size
-    optimal_timeout_ms = min(
-        max_latency_ms / 4,
-        optimal_batch_size * 2 + 5
-    )
+    optimal_timeout_ms = min(max_latency_ms / 4, optimal_batch_size * 2 + 5)
 
     logger.info(
         f"Optimal batch config: size={optimal_batch_size}, "
@@ -799,5 +805,5 @@ def calculate_optimal_batch_configuration(
         max_batch_size=min(optimal_batch_size * 2, 32),
         batch_timeout_ms=int(optimal_timeout_ms),
         device_ids=list(range(available_gpus)),
-        memory_fraction=0.8
+        memory_fraction=0.8,
     )

@@ -1,0 +1,137 @@
+# .dockerignore for ITS Camera AI
+# Optimize Docker build context by excluding unnecessary files
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Linting
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Documentation
+docs/_build/
+site/
+
+# Local data and logs
+data/
+logs/
+temp/
+backups/
+*.log
+*.log.*
+
+# Models (exclude from Docker build, mount as volume instead)
+models/*.pt
+models/*.onnx
+models/*.trt
+models/*.bin
+
+# Configuration (use environment variables instead)
+.env.local
+.env.dev
+.env.prod
+config.local.json
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Development tools
+Makefile
+*.md
+LICENSE
+.pre-commit-config.yaml
+.github/
+
+# Infrastructure configs (handled separately)
+infrastructure/
+k8s/
+helm/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.p12
+
+# Large files that should be downloaded at runtime
+datasets/
+pretrained/

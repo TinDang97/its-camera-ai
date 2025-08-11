@@ -20,6 +20,7 @@ Key Optimizations:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -30,18 +31,20 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 from ultralytics import YOLO
 
 try:
     import tensorrt as trt
     import torch_tensorrt
+
     TRT_AVAILABLE = True
 except ImportError:
     TRT_AVAILABLE = False
 
 try:
     import onnxruntime as ort
+
     ONNX_AVAILABLE = True
 except ImportError:
     ONNX_AVAILABLE = False
@@ -85,19 +88,23 @@ class TensorRTModel:
             self.bindings.append(int(mem_gpu))
 
             if engine.binding_is_input(i):
-                self.inputs.append({
-                    'name': binding_name,
-                    'mem_gpu': mem_gpu,
-                    'shape': shape,
-                    'dtype': np_dtype
-                })
+                self.inputs.append(
+                    {
+                        "name": binding_name,
+                        "mem_gpu": mem_gpu,
+                        "shape": shape,
+                        "dtype": np_dtype,
+                    }
+                )
             else:
-                self.outputs.append({
-                    'name': binding_name,
-                    'mem_gpu': mem_gpu,
-                    'shape': shape,
-                    'dtype': np_dtype
-                })
+                self.outputs.append(
+                    {
+                        "name": binding_name,
+                        "mem_gpu": mem_gpu,
+                        "shape": shape,
+                        "dtype": np_dtype,
+                    }
+                )
 
     def __call__(self, input_tensor: torch.Tensor):
         """Run inference using TensorRT engine."""
@@ -111,7 +118,7 @@ class TensorRTModel:
             import pycuda.driver as cuda
 
             # Copy input data to GPU
-            cuda.memcpy_htod(self.inputs[0]['mem_gpu'], input_data)
+            cuda.memcpy_htod(self.inputs[0]["mem_gpu"], input_data)
 
             # Run inference
             self.context.execute_v2(self.bindings)
@@ -119,15 +126,15 @@ class TensorRTModel:
             # Copy output back to host
             outputs = []
             for output_info in self.outputs:
-                output_shape = output_info['shape']
-                output_dtype = output_info['dtype']
+                output_shape = output_info["shape"]
+                output_dtype = output_info["dtype"]
 
                 # Handle dynamic batch size
                 if output_shape[0] == -1:
                     output_shape = (input_tensor.shape[0],) + output_shape[1:]
 
                 output_data = np.empty(output_shape, dtype=output_dtype)
-                cuda.memcpy_dtoh(output_data, output_info['mem_gpu'])
+                cuda.memcpy_dtoh(output_data, output_info["mem_gpu"])
 
                 outputs.append(torch.from_numpy(output_data))
 
@@ -140,15 +147,17 @@ class TensorRTModel:
 
 class ModelType(Enum):
     """Supported YOLO11 model variants for different deployment scenarios."""
-    NANO = "yolo11n.pt"      # Ultra-fast edge deployment, 2.6M params
-    SMALL = "yolo11s.pt"     # Balanced performance, 9.4M params
-    MEDIUM = "yolo11m.pt"    # High accuracy cloud deployment, 20.1M params
-    LARGE = "yolo11l.pt"     # Maximum accuracy, 25.3M params
-    XLARGE = "yolo11x.pt"    # Research grade, 56.9M params
+
+    NANO = "yolo11n.pt"  # Ultra-fast edge deployment, 2.6M params
+    SMALL = "yolo11s.pt"  # Balanced performance, 9.4M params
+    MEDIUM = "yolo11m.pt"  # High accuracy cloud deployment, 20.1M params
+    LARGE = "yolo11l.pt"  # Maximum accuracy, 25.3M params
+    XLARGE = "yolo11x.pt"  # Research grade, 56.9M params
 
 
 class OptimizationBackend(Enum):
     """Inference optimization backends."""
+
     PYTORCH = "pytorch"
     TENSORRT = "tensorrt"
     ONNX = "onnx"
@@ -234,24 +243,22 @@ class GPUMemoryManager:
             torch.cuda.set_device(device_id)
 
             # Set memory fraction to prevent OOM
-            total_memory = torch.cuda.get_device_properties(device_id).total_memory
-            torch.cuda.set_per_process_memory_fraction(
-                self.memory_fraction, device_id
-            )
+            torch.cuda.set_per_process_memory_fraction(self.memory_fraction, device_id)
 
             # Pre-allocate common tensor shapes
             self.memory_pools[device_id] = {}
             common_shapes = [
-                (1, 3, 640, 640),   # Single frame
-                (4, 3, 640, 640),   # Small batch
-                (8, 3, 640, 640),   # Standard batch
+                (1, 3, 640, 640),  # Single frame
+                (4, 3, 640, 640),  # Small batch
+                (8, 3, 640, 640),  # Standard batch
                 (16, 3, 640, 640),  # Large batch
                 (32, 3, 640, 640),  # Max batch
             ]
 
             for shape in common_shapes:
-                tensor = torch.zeros(shape, dtype=torch.float16,
-                                   device=f"cuda:{device_id}")
+                tensor = torch.zeros(
+                    shape, dtype=torch.float16, device=f"cuda:{device_id}"
+                )
                 self.memory_pools[device_id][shape] = tensor
 
             logger.info(f"Initialized memory pool for GPU {device_id}")
@@ -261,8 +268,7 @@ class GPUMemoryManager:
         if shape in self.memory_pools[device_id]:
             return self.memory_pools[device_id][shape].clone()
 
-        return torch.zeros(shape, dtype=torch.float16,
-                         device=f"cuda:{device_id}")
+        return torch.zeros(shape, dtype=torch.float16, device=f"cuda:{device_id}")
 
     def cleanup(self):
         """Clean up GPU memory."""
@@ -293,18 +299,18 @@ class TensorRTOptimizer:
         model = YOLO(str(model_path))
 
         # Export to ONNX first
-        onnx_path = output_path.with_suffix('.onnx')
+        onnx_path = output_path.with_suffix(".onnx")
         model.export(
-            format='onnx',
+            format="onnx",
             imgsz=self.config.input_size,
             dynamic=True,
             batch_size=1,
             opset=16,
-            half=self.config.precision == "fp16"
+            half=self.config.precision == "fp16",
         )
 
         # Compile ONNX to TensorRT
-        engine_path = output_path.with_suffix('.trt')
+        engine_path = output_path.with_suffix(".trt")
         self._compile_onnx_to_tensorrt(onnx_path, engine_path)
 
         return engine_path
@@ -322,18 +328,28 @@ class TensorRTOptimizer:
 
             # Load original model
             session_options = ort.SessionOptions()
-            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            session_options.graph_optimization_level = (
+                ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            )
 
             # Enable optimizations
             session_options.optimized_model_filepath = str(output_path)
 
             # Create session to trigger optimization
-            providers = ['CUDAExecutionProvider'] if torch.cuda.is_available() else ['CPUExecutionProvider']
-            session = ort.InferenceSession(str(model_path), session_options, providers=providers)
+            providers = (
+                ["CUDAExecutionProvider"]
+                if torch.cuda.is_available()
+                else ["CPUExecutionProvider"]
+            )
+            session = ort.InferenceSession(
+                str(model_path), session_options, providers=providers
+            )
 
             # Test run to ensure optimization
-            dummy_input = np.random.randn(1, 3, *self.config.input_size).astype(np.float32)
-            session.run(None, {'images': dummy_input})
+            dummy_input = np.random.randn(1, 3, *self.config.input_size).astype(
+                np.float32
+            )
+            session.run(None, {"images": dummy_input})
 
             logger.info(f"ONNX model optimized and saved to {output_path}")
             return output_path
@@ -342,7 +358,9 @@ class TensorRTOptimizer:
             logger.error(f"ONNX optimization failed: {e}")
             return model_path
 
-    def quantize_model_int8(self, model_path: Path, calibration_data: list[np.ndarray]) -> Path:
+    def quantize_model_int8(
+        self, model_path: Path, calibration_data: list[np.ndarray]
+    ) -> Path:
         """Quantize model to INT8 for edge deployment."""
         logger.info(f"Quantizing model to INT8: {model_path}")
 
@@ -355,7 +373,7 @@ class TensorRTOptimizer:
 
             # Prepare model for quantization
             model.model.eval()
-            model.model.qconfig = quant.get_default_qconfig('fbgemm')
+            model.model.qconfig = quant.get_default_qconfig("fbgemm")
 
             # Prepare for quantization
             quant.prepare(model.model, inplace=True)
@@ -377,7 +395,7 @@ class TensorRTOptimizer:
             quant.convert(model.model, inplace=True)
 
             # Save quantized model
-            quantized_path = model_path.with_suffix('.int8.pt')
+            quantized_path = model_path.with_suffix(".int8.pt")
             torch.save(model.model.state_dict(), quantized_path)
 
             logger.info(f"INT8 quantized model saved to {quantized_path}")
@@ -402,7 +420,7 @@ class TensorRTOptimizer:
         parser = trt.OnnxParser(network, trt_logger)
 
         # Parse ONNX model
-        with open(onnx_path, 'rb') as model:
+        with open(onnx_path, "rb") as model:
             if not parser.parse(model.read()):
                 for error in range(parser.num_errors):
                     logger.error(parser.get_error(error))
@@ -431,7 +449,7 @@ class TensorRTOptimizer:
             input_name,
             (1, 3, *self.config.input_size),  # min
             (self.config.batch_size, 3, *self.config.input_size),  # opt
-            (self.config.max_batch_size, 3, *self.config.input_size)  # max
+            (self.config.max_batch_size, 3, *self.config.input_size),  # max
         )
         config.add_optimization_profile(profile)
 
@@ -441,7 +459,7 @@ class TensorRTOptimizer:
             raise RuntimeError("Failed to build TensorRT engine")
 
         # Save engine
-        with open(engine_path, 'wb') as f:
+        with open(engine_path, "wb") as f:
             f.write(engine)
 
         logger.info(f"TensorRT engine saved to {engine_path}")
@@ -467,7 +485,9 @@ class TensorRTOptimizer:
                     return self.batch_size
 
                 def get_batch(self, names):
-                    if self.current_index + self.batch_size > len(self.calibration_files):
+                    if self.current_index + self.batch_size > len(
+                        self.calibration_files
+                    ):
                         return None
 
                     # Load and preprocess batch
@@ -475,10 +495,12 @@ class TensorRTOptimizer:
 
                     if self.device_input is None:
                         import pycuda.driver as cuda
+
                         self.device_input = cuda.mem_alloc(batch_data.nbytes)
 
                     # Copy to device
                     import pycuda.driver as cuda
+
                     cuda.memcpy_htod(self.device_input, batch_data)
 
                     self.current_index += self.batch_size
@@ -494,12 +516,17 @@ class TensorRTOptimizer:
 
                         # For demo, create synthetic calibration data
                         # In production, use real traffic images
-                        img = np.random.randint(0, 255,
-                                              (self.config.input_size[0], self.config.input_size[1], 3),
-                                              dtype=np.uint8)
+                        img = np.random.randint(
+                            0,
+                            255,
+                            (self.config.input_size[0], self.config.input_size[1], 3),
+                            dtype=np.uint8,
+                        )
 
                         # Preprocess like real inference
-                        img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+                        img_tensor = (
+                            torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+                        )
                         batch_images.append(img_tensor)
 
                     if batch_images:
@@ -509,12 +536,12 @@ class TensorRTOptimizer:
 
                 def read_calibration_cache(self):
                     if os.path.exists(self.cache_file):
-                        with open(self.cache_file, 'rb') as f:
+                        with open(self.cache_file, "rb") as f:
                             return f.read()
                     return None
 
                 def write_calibration_cache(self, cache):
-                    with open(self.cache_file, 'wb') as f:
+                    with open(self.cache_file, "wb") as f:
                         f.write(cache)
 
             # Create calibrator with synthetic data for demo
@@ -551,20 +578,18 @@ class DynamicBatcher:
         """Stop the dynamic batching processor."""
         if self.batch_processor:
             self.batch_processor.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.batch_processor
-            except asyncio.CancelledError:
-                pass
 
     async def predict(self, frame: np.ndarray, frame_id: str) -> DetectionResult:
         """Add frame to batch queue and return prediction."""
         future = asyncio.Future()
 
         request = {
-            'frame': frame,
-            'frame_id': frame_id,
-            'future': future,
-            'timestamp': time.time()
+            "frame": frame,
+            "frame_id": frame_id,
+            "future": future,
+            "timestamp": time.time(),
         }
 
         await self.batch_queue.put(request)
@@ -593,20 +618,17 @@ class DynamicBatcher:
         # Get first request (blocking)
         try:
             first_request = await asyncio.wait_for(
-                self.batch_queue.get(),
-                timeout=self.config.batch_timeout_ms / 1000.0
+                self.batch_queue.get(), timeout=self.config.batch_timeout_ms / 1000.0
             )
             batch.append(first_request)
         except TimeoutError:
             return []
 
         # Collect additional requests until timeout or batch full
-        while (len(batch) < self.config.max_batch_size and
-               time.time() < deadline):
+        while len(batch) < self.config.max_batch_size and time.time() < deadline:
             try:
                 request = await asyncio.wait_for(
-                    self.batch_queue.get(),
-                    timeout=max(0.001, deadline - time.time())
+                    self.batch_queue.get(), timeout=max(0.001, deadline - time.time())
                 )
                 batch.append(request)
             except TimeoutError:
@@ -677,7 +699,7 @@ class OptimizedInferenceEngine:
 
         if self.config.backend == OptimizationBackend.TENSORRT and TRT_AVAILABLE:
             # Load TensorRT optimized model
-            trt_path = model_path.with_suffix('.trt')
+            trt_path = model_path.with_suffix(".trt")
             if not trt_path.exists():
                 trt_path = self.optimizer.compile_model(model_path, trt_path)
 
@@ -704,7 +726,7 @@ class OptimizedInferenceEngine:
         import tensorrt as trt
 
         # Load serialized engine
-        with open(engine_path, 'rb') as f:
+        with open(engine_path, "rb") as f:
             engine_data = f.read()
 
         # Create runtime and deserialize engine
@@ -720,17 +742,13 @@ class OptimizedInferenceEngine:
         return TensorRTModel(engine, context, device)
 
     async def predict_single(
-        self,
-        frame: np.ndarray,
-        frame_id: str,
-        camera_id: str = "unknown"
+        self, frame: np.ndarray, frame_id: str, camera_id: str = "unknown"
     ) -> DetectionResult:
         """Single frame prediction with optimizations."""
         start_time = time.time()
 
         # Select optimal device based on load
         device_id = self._select_optimal_device()
-        device = f"cuda:{device_id}"
         model = self.models[device_id]
 
         # Preprocessing
@@ -740,10 +758,15 @@ class OptimizedInferenceEngine:
 
         # Inference
         inference_start = time.time()
-        with torch.cuda.device(device_id):
-            with torch.inference_mode():
-                with autocast(enabled=self.config.precision == "fp16"):
-                    predictions = model(input_tensor)
+        with (
+            torch.cuda.device(device_id),
+            torch.inference_mode(),
+            autocast(
+                enabled=self.config.precision == "fp16",
+                device_type="cuda" if torch.cuda.is_available() else "cpu",
+            ),
+        ):
+            predictions = model(input_tensor)
 
         # Synchronize to get accurate timing
         torch.cuda.synchronize(device_id)
@@ -752,8 +775,12 @@ class OptimizedInferenceEngine:
         # Post-processing
         postprocess_start = time.time()
         result = self._postprocess_predictions(
-            predictions, frame_id, camera_id,
-            inference_time, preprocess_time, start_time
+            predictions,
+            frame_id,
+            camera_id,
+            inference_time,
+            preprocess_time,
+            start_time,
         )
         postprocess_time = (time.time() - postprocess_start) * 1000
 
@@ -769,7 +796,7 @@ class OptimizedInferenceEngine:
         self,
         frames: list[np.ndarray],
         frame_ids: list[str],
-        camera_ids: list[str] = None
+        camera_ids: list[str] = None,
     ) -> list[DetectionResult]:
         """Batch prediction for maximum throughput."""
         if not frames:
@@ -783,7 +810,6 @@ class OptimizedInferenceEngine:
 
         # Select optimal device
         device_id = self._select_optimal_device()
-        device = f"cuda:{device_id}"
         model = self.models[device_id]
 
         # Batch preprocessing
@@ -793,24 +819,34 @@ class OptimizedInferenceEngine:
 
         # Batch inference
         inference_start = time.time()
-        with torch.cuda.device(device_id):
-            with torch.inference_mode():
-                with autocast(enabled=self.config.precision == "fp16"):
-                    batch_predictions = model(batch_tensor)
+        with (
+            torch.cuda.device(device_id),
+            torch.inference_mode(),
+            autocast(
+                enabled=self.config.precision == "fp16",
+                device_type="cuda" if torch.cuda.is_available() else "cpu",
+            ),
+        ):
+            batch_predictions = model(batch_tensor)
 
         torch.cuda.synchronize(device_id)
         inference_time = (time.time() - inference_start) * 1000
 
         # Post-process each result in batch
         results = []
-        for i, (frame_id, camera_id) in enumerate(zip(frame_ids, camera_ids, strict=False)):
+        for i, (frame_id, camera_id) in enumerate(
+            zip(frame_ids, camera_ids, strict=False)
+        ):
             # Extract single prediction from batch
             single_pred = self._extract_single_prediction(batch_predictions, i)
 
             result = self._postprocess_predictions(
-                single_pred, frame_id, camera_id,
-                inference_time / batch_size, preprocess_time / batch_size,
-                start_time
+                single_pred,
+                frame_id,
+                camera_id,
+                inference_time / batch_size,
+                preprocess_time / batch_size,
+                start_time,
             )
 
             results.append(result)
@@ -850,7 +886,7 @@ class OptimizedInferenceEngine:
         pad_w = (target_w - new_w) // 2
 
         padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
-        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = frame
+        padded[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = frame
 
         # Convert to tensor format (CHW, normalized)
         tensor = torch.from_numpy(padded).to(f"cuda:{device_id}")
@@ -860,7 +896,9 @@ class OptimizedInferenceEngine:
 
         return tensor
 
-    def _preprocess_batch(self, frames: list[np.ndarray], device_id: int) -> torch.Tensor:
+    def _preprocess_batch(
+        self, frames: list[np.ndarray], device_id: int
+    ) -> torch.Tensor:
         """Optimized batch preprocessing."""
         # Process each frame and stack into batch tensor
         batch_tensors = []
@@ -880,7 +918,7 @@ class OptimizedInferenceEngine:
             return None
 
         # Handle different output formats from YOLO11
-        if isinstance(batch_predictions, (list, tuple)):
+        if isinstance(batch_predictions, list | tuple):
             # Multiple outputs, take the first (main detection output)
             batch_predictions = batch_predictions[0]
 
@@ -890,14 +928,18 @@ class OptimizedInferenceEngine:
                 if index < batch_predictions.shape[0]:
                     return batch_predictions[index]
                 else:
-                    return torch.zeros((0, batch_predictions.shape[-1]),
-                                     device=batch_predictions.device)
+                    return torch.zeros(
+                        (0, batch_predictions.shape[-1]),
+                        device=batch_predictions.device,
+                    )
             elif len(batch_predictions.shape) == 2:
                 # Already single prediction
                 return batch_predictions
 
         # If we can't extract, return empty tensor
-        return torch.zeros((0, 85), device='cuda' if torch.cuda.is_available() else 'cpu')
+        return torch.zeros(
+            (0, 85), device="cuda" if torch.cuda.is_available() else "cpu"
+        )
 
     def _postprocess_predictions(
         self,
@@ -906,7 +948,7 @@ class OptimizedInferenceEngine:
         camera_id: str,
         inference_time: float,
         preprocess_time: float,
-        start_time: float
+        start_time: float,
     ) -> DetectionResult:
         """Convert model predictions to structured result."""
         # Apply NMS and confidence filtering
@@ -917,8 +959,11 @@ class OptimizedInferenceEngine:
 
         # Vehicle class names mapping (COCO classes)
         coco_to_vehicle = {
-            1: "bicycle", 2: "car", 3: "motorcycle",
-            5: "bus", 7: "truck"
+            1: "bicycle",
+            2: "car",
+            3: "motorcycle",
+            5: "bus",
+            7: "truck",
         }
 
         class_names = []
@@ -944,7 +989,7 @@ class OptimizedInferenceEngine:
             total_time_ms=0.0,  # Updated later
             detection_count=detection_count,
             avg_confidence=avg_confidence,
-            gpu_memory_used_mb=gpu_memory
+            gpu_memory_used_mb=gpu_memory,
         )
 
     def _apply_nms(self, predictions):
@@ -956,7 +1001,7 @@ class OptimizedInferenceEngine:
         # YOLO11 output format: [batch_size, num_detections, 85]
         # where 85 = 4 (bbox) + 1 (conf) + 80 (classes)
 
-        if isinstance(predictions, (list, tuple)):
+        if isinstance(predictions, list | tuple):
             predictions = predictions[0]  # Take first output
 
         if len(predictions.shape) == 3:
@@ -998,17 +1043,20 @@ class OptimizedInferenceEngine:
 
             # Apply NMS for this class
             from torchvision.ops import nms
+
             keep = nms(cls_boxes, cls_scores, self.config.iou_threshold)
             keep_indices.append(cls_indices[keep])
 
         if keep_indices:
             final_keep = torch.cat(keep_indices)
-            final_keep = final_keep[:self.config.max_detections]
+            final_keep = final_keep[: self.config.max_detections]
             return filtered_preds[final_keep]
         else:
             return torch.zeros((0, 85), device=predictions.device)
 
-    def _extract_detections(self, predictions) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _extract_detections(
+        self, predictions
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Extract boxes, scores, and classes from predictions."""
         if predictions is None or len(predictions) == 0:
             return np.array([]).reshape(0, 4), np.array([]), np.array([])
@@ -1054,9 +1102,11 @@ class OptimizedInferenceEngine:
         # Sort by confidence (highest first)
         sort_indices = np.argsort(filtered_scores)[::-1]
 
-        return (filtered_boxes[sort_indices],
-                filtered_scores[sort_indices],
-                filtered_classes[sort_indices])
+        return (
+            filtered_boxes[sort_indices],
+            filtered_scores[sort_indices],
+            filtered_classes[sort_indices],
+        )
 
     def _update_performance_metrics(self, total_time_ms: float):
         """Update running performance metrics."""
@@ -1083,13 +1133,14 @@ class OptimizedInferenceEngine:
             "p99_latency_ms": np.percentile(self.inference_times, 99),
             "throughput_fps": throughput,
             "gpu_utilization": self._get_gpu_utilization(),
-            "gpu_memory_used": self._get_gpu_memory_usage()
+            "gpu_memory_used": self._get_gpu_memory_usage(),
         }
 
     def _get_gpu_utilization(self) -> float:
         """Get average GPU utilization across all devices."""
         try:
             import pynvml
+
             pynvml.nvmlInit()
 
             total_util = 0
@@ -1099,7 +1150,7 @@ class OptimizedInferenceEngine:
                 total_util += util
 
             return total_util / len(self.config.device_ids)
-        except:
+        except Exception:
             return 0.0
 
     def _get_gpu_memory_usage(self) -> dict[str, float]:
@@ -1123,15 +1174,16 @@ class OptimizedInferenceEngine:
 
 # Model Selection Utility Functions
 
+
 def select_optimal_model_for_deployment(
     target_latency_ms: int,
     target_accuracy: float,
     available_memory_gb: float,
-    device_type: str = "gpu"
+    device_type: str = "gpu",
 ) -> tuple[ModelType, InferenceConfig]:
     """
     Select optimal YOLO11 model configuration based on deployment requirements.
-    
+
     Performance Guidelines:
     - NANO: 2-5ms inference, 85-88% mAP, 2.6M params, 5MB memory
     - SMALL: 5-12ms inference, 89-92% mAP, 9.4M params, 18MB memory
@@ -1163,7 +1215,11 @@ def select_optimal_model_for_deployment(
             batch_size = 3 if available_memory_gb >= 10 else 1
 
     # Determine optimization backend
-    backend = OptimizationBackend.TENSORRT if device_type == "gpu" else OptimizationBackend.ONNX
+    backend = (
+        OptimizationBackend.TENSORRT
+        if device_type == "gpu"
+        else OptimizationBackend.ONNX
+    )
     precision = "fp16" if device_type == "gpu" else "fp32"
 
     config = InferenceConfig(
@@ -1174,20 +1230,18 @@ def select_optimal_model_for_deployment(
         max_batch_size=batch_size * 2,
         batch_timeout_ms=max(5, target_latency_ms // 4),
         conf_threshold=0.25,
-        iou_threshold=0.45
+        iou_threshold=0.45,
     )
 
     return model_type, config
 
 
 def estimate_throughput(
-    model_type: ModelType,
-    batch_size: int,
-    gpu_type: str = "T4"
+    model_type: ModelType, batch_size: int, gpu_type: str = "T4"
 ) -> dict[str, float]:
     """
     Estimate throughput for different model and hardware combinations.
-    
+
     Benchmarks based on NVIDIA T4, V100, and A10G GPUs.
     """
 
@@ -1197,15 +1251,13 @@ def estimate_throughput(
         ModelType.SMALL: {"T4": 6.0, "V100": 4.2, "A10G": 3.5},
         ModelType.MEDIUM: {"T4": 14.0, "V100": 9.8, "A10G": 8.2},
         ModelType.LARGE: {"T4": 22.0, "V100": 15.4, "A10G": 12.8},
-        ModelType.XLARGE: {"T4": 42.0, "V100": 29.4, "A10G": 24.5}
+        ModelType.XLARGE: {"T4": 42.0, "V100": 29.4, "A10G": 24.5},
     }
 
     base_time = base_times[model_type].get(gpu_type, base_times[model_type]["T4"])
 
     # Batch scaling factor (non-linear due to GPU parallelization)
-    batch_scaling = {
-        1: 1.0, 2: 1.6, 4: 2.8, 8: 4.5, 16: 7.2, 32: 12.0
-    }
+    batch_scaling = {1: 1.0, 2: 1.6, 4: 2.8, 8: 4.5, 16: 7.2, 32: 12.0}
 
     scaling_factor = batch_scaling.get(batch_size, batch_size * 0.75)
     batch_time = base_time * scaling_factor
@@ -1215,5 +1267,5 @@ def estimate_throughput(
         "throughput_fps": (1000 * batch_size) / batch_time,
         "latency_ms": batch_time / batch_size,
         "gpu_utilization_pct": min(95, batch_size * 8),
-        "memory_usage_mb": batch_size * base_times[model_type]["T4"] * 2
+        "memory_usage_mb": batch_size * base_times[model_type]["T4"] * 2,
     }

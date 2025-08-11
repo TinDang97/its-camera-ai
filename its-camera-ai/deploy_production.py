@@ -40,9 +40,7 @@ logger = logging.getLogger(__name__)
 # Import pipeline components
 try:
     from its_camera_ai.production_pipeline import (
-        ProductionOrchestrator,
         DeploymentMode,
-        PipelineConfig,
         deploy_its_camera_ai_pipeline,
     )
 except ImportError as e:
@@ -63,7 +61,7 @@ class ProductionDeployment:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum, _frame):
         """Handle shutdown signals gracefully."""
         logger.info(f"Received signal {signum}, initiating graceful shutdown...")
         self.shutdown_event.set()
@@ -75,7 +73,7 @@ class ProductionDeployment:
             logger.info("Starting ITS Camera AI production deployment")
 
             # Load configuration
-            config = self._load_configuration()
+            self._load_configuration()
 
             # Deploy pipeline
             self.orchestrator = await deploy_its_camera_ai_pipeline(
@@ -213,7 +211,7 @@ class ProductionDeployment:
                 try:
                     await asyncio.wait_for(self.shutdown_event.wait(), timeout=10.0)
                     break  # Shutdown requested
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue  # Continue monitoring
 
             except Exception as e:
@@ -267,10 +265,10 @@ def parse_arguments():
 Examples:
   Production deployment:
     python deploy_production.py --mode production --config production_config.json
-  
+
   Staging deployment:
     python deploy_production.py --mode staging --cameras 50
-  
+
   Development testing:
     python deploy_production.py --mode development --test-mode --cameras 5
 """,
@@ -333,7 +331,7 @@ async def main():
 ║                  ITS Camera AI Production Deployment                        ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ Mode: {args.mode:<20} │ Cameras: {args.cameras:<10} │ Test: {str(args.test_mode):<10} ║
-║ Config: {(args.config or 'default'):<18} │ Log Level: {args.log_level:<8} │ Version: 1.0.0  ║
+║ Config: {(args.config or "default"):<18} │ Log Level: {args.log_level:<8} │ Version: 1.0.0  ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
     )

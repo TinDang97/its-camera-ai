@@ -17,6 +17,7 @@ Key Features:
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import defaultdict, deque
@@ -405,9 +406,8 @@ class ModelMonitor:
         """Perform comprehensive drift detection."""
         alerts = []
 
-        if not self.is_baseline_established:
-            if not self.establish_baseline():
-                return alerts
+        if not self.is_baseline_established and not self.establish_baseline():
+            return alerts
 
         self.last_drift_check = time.time()
 
@@ -587,10 +587,8 @@ class ProductionDashboard:
 
         if self.update_task:
             self.update_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.update_task
-            except asyncio.CancelledError:
-                pass
 
         logger.info("Production dashboard stopped")
 
@@ -637,10 +635,8 @@ class ProductionDashboard:
         # Aggregate metrics from all model monitors
         all_latencies = []
         all_health_scores = []
-        total_alerts = 0
-        critical_alerts = 0
 
-        for model_id, monitor in self.model_monitors.items():
+        for _model_id, monitor in self.model_monitors.items():
             # Check for new alerts
             alerts = await monitor._check_drift()
             for alert in alerts:
@@ -816,7 +812,7 @@ class PrometheusMetricsExporter:
     def start_server(self):
         """Start Prometheus metrics HTTP server."""
         try:
-            from prometheus_client import Counter, Gauge, start_http_server
+            from prometheus_client import Gauge, start_http_server
 
             # Define Prometheus metrics
             self.system_health = Gauge(

@@ -9,6 +9,7 @@ This is the **ITS Camera AI** project - an AI-powered camera traffic monitoring 
 ## Development Commands
 
 ### Environment Setup
+
 ```bash
 # Install dependencies using uv (Python package manager)
 uv sync
@@ -24,6 +25,7 @@ uv sync --group edge
 ```
 
 ### Code Quality & Testing
+
 ```bash
 # Run all tests with coverage
 pytest --cov=src/its_camera_ai --cov-report=html --cov-report=term-missing --cov-fail-under=90
@@ -49,6 +51,7 @@ pip-audit
 ```
 
 ### Running the Application
+
 ```bash
 # Run the main application
 python main.py
@@ -65,6 +68,7 @@ its-camera-ai --help
 The system follows an **event-driven microservices architecture** with the following key components:
 
 ### Core Structure
+
 - **`src/tca/`** - Main application code using Test-Driven Architecture (TCA) pattern
 - **`ml_architecture.py`** - Comprehensive ML pipeline with federated learning, model registry, and inference optimization
 - **`security/zero_trust_architecture.py`** - Zero-trust security framework with encryption, privacy controls, and threat detection
@@ -73,6 +77,7 @@ The system follows an **event-driven microservices architecture** with the follo
 ### Key Architectural Patterns
 
 #### ML Pipeline Components
+
 - **DataIngestionPipeline** - Real-time camera stream processing with quality validation
 - **ModelRegistry** - Centralized model versioning and deployment management  
 - **InferenceEngine** - High-performance batch inference with GPU optimization
@@ -81,6 +86,7 @@ The system follows an **event-driven microservices architecture** with the follo
 - **ExperimentationPlatform** - A/B testing for model variants
 
 #### Security Components
+
 - **EncryptionManager** - AES/RSA encryption for video data and communications
 - **PrivacyEngine** - GDPR-compliant anonymization with differential privacy
 - **MultiFactorAuthenticator** - JWT-based auth with TOTP/SMS MFA
@@ -89,7 +95,8 @@ The system follows an **event-driven microservices architecture** with the follo
 - **SecurityAuditLogger** - Comprehensive compliance logging
 
 ### Technology Stack
-- **Backend**: Python 3.11+, FastAPI, Pydantic v2
+
+- **Backend**: Python 3.12+, FastAPI, Pydantic v2
 - **ML/AI**: PyTorch 2.0+, YOLO11 (Ultralytics), OpenCV 4.8+
 - **Data**: PostgreSQL, Redis, InfluxDB, Apache Kafka
 - **Infrastructure**: Docker, Kubernetes, Prometheus/Grafana
@@ -97,18 +104,21 @@ The system follows an **event-driven microservices architecture** with the follo
 ## Development Guidelines
 
 ### ML Model Development
+
 - Models are managed through the `ModelRegistry` class with semantic versioning
 - Use `DeploymentStage` enum for promoting models (development → staging → canary → production)
 - Production models require >90% accuracy and <100ms latency
 - Implement proper model monitoring with drift detection
 
 ### Security Requirements
+
 - All video data must be encrypted using `EncryptionManager`
 - Apply privacy protections based on `SecurityLevel` classification
 - Use `SecurityContext` for all operations requiring authentication
 - Log security events using `SecurityAuditLogger`
 
 ### Testing Strategy
+
 - Unit tests for individual components
 - Integration tests for service interactions
 - ML model tests with performance benchmarks
@@ -116,6 +126,7 @@ The system follows an **event-driven microservices architecture** with the follo
 - Security tests for authentication/authorization
 
 ### Code Organization
+
 - Follow the established `src/tca/` structure for new components
 - Use type hints and Pydantic models for all data structures
 - Implement async/await patterns for I/O operations

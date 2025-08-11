@@ -1,4 +1,4 @@
-# Pre-commit hooks for Agentic Core Platform
+# Pre-commit hooks for ITS Camera AI
 # See https://pre-commit.com for more information
 
 repos:
@@ -8,7 +8,7 @@ repos:
     hooks:
       # Run the linter
       - id: ruff
-        args: [--fix, --select=I]
+        args: [--fix]
         types_or: [python, pyi, jupyter]
       # Run the formatter
       - id: ruff-format
@@ -19,7 +19,7 @@ repos:
     rev: 25.1.0
     hooks:
       - id: black
-        language_version: python3.13
+        language_version: python3.12
         types_or: [python, pyi]
 
   # isort - Import sorting
@@ -42,7 +42,7 @@ repos:
           - pydantic
           - pydantic-settings
           - fastapi
-        exclude: ^(alembic/|tests/)
+        exclude: ^(migrations/|tests/)
         args:
           [
             --ignore-missing-imports,
@@ -82,8 +82,16 @@ repos:
     rev: 1.8.0
     hooks:
       - id: bandit
-        args: [-r, -x, tests/]
+        args: [-r, -x, tests/, --skip, B101]
         exclude: ^tests/
+
+  # Safety - Check for known security vulnerabilities
+  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
+    rev: v1.3.2
+    hooks:
+      - id: python-safety-dependencies-check
+        files: pyproject.toml
+        args: [--ignore, "70612"] # Ignore jinja2 in jupyter
 
   # Dockerfile linting
   - repo: https://github.com/hadolint/hadolint
@@ -93,11 +101,40 @@ repos:
         entry: hadolint
         language: docker_image
         types: [dockerfile]
-        args: [--ignore, DL3008, --ignore, DL3009]
+        args: [--ignore, DL3008, --ignore, DL3009, --ignore, DL3015]
+
+  # Commit message validation
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.1.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: ["--strict"]
+
+  # File size checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=10000] # 10MB limit
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Pytest hooks for testing
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: pytest-check
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        args: ["--tb=short", "-x", "-q", "tests/unit/", "--maxfail=1"]
+        stages: [pre-push]
 
 # Global settings
 default_stages: [pre-commit]
-fail_fast: false
+fail_fast: true
 minimum_pre_commit_version: "3.0.0"
 
 # CI settings

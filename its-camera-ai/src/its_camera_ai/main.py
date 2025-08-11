@@ -8,7 +8,6 @@ from .api.app import get_app
 from .core.config import get_settings
 from .core.logging import setup_logging
 
-
 # Create the FastAPI application
 app = get_app()
 
@@ -16,10 +15,10 @@ app = get_app()
 def main() -> None:
     """Main entry point for the application."""
     import uvicorn
-    
+
     settings = get_settings()
     setup_logging(settings)
-    
+
     uvicorn.run(
         "its_camera_ai.main:app",
         host=settings.api_host,

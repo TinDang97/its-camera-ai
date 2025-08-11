@@ -1,0 +1,35 @@
+apiVersion: v2
+name: its-camera-ai
+description: ITS Camera AI - Intelligent Traffic Monitoring System with Cross-Platform Inference Optimization
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/your-org/its-camera-ai
+sources:
+  - https://github.com/your-org/its-camera-ai
+maintainers:
+  - name: ITS Camera AI Team
+    email: team@its-camera-ai.com
+keywords:
+  - ai
+  - computer-vision
+  - traffic-monitoring
+  - inference
+  - pytorch
+  - kubernetes
+annotations:
+  category: Analytics
+  licenses: MIT
+dependencies:
+  - name: postgresql
+    version: "12.8.2"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "17.13.2"  
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: kafka
+    version: "24.0.1"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled

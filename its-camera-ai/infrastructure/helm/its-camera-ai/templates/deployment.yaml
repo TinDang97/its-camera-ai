@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.app.name }}
+  labels:
+    app: {{ .Values.app.name }}
+    platform: {{ .Values.global.platform }}
+    architecture: {{ .Values.global.architecture }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.app.name }}
+        platform: {{ .Values.global.platform }}
+        architecture: {{ .Values.global.architecture }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      {{- if .Values.security.podSecurityContext }}
+      securityContext:
+        {{- toYaml .Values.security.podSecurityContext | nindent 8 }}
+      {{- end }}
+      
+      # Platform-specific node selection
+      {{- if .Values.nodeSelector.enabled }}
+      nodeSelector:
+        {{- if eq .Values.global.platform "linux" }}
+        {{- toYaml .Values.nodeSelector.linux | nindent 8 }}
+        {{- else if eq .Values.global.platform "macos" }}
+        {{- toYaml .Values.nodeSelector.macos | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      
+      # GPU tolerations if enabled
+      {{- if .Values.global.gpu.enabled }}
+      tolerations:
+        {{- toYaml .Values.tolerations.gpu | nindent 8 }}
+      {{- end }}
+      
+      containers:
+      - name: app
+        image: "{{ .Values.global.registry }}/{{ .Values.app.image.repository }}:{{ .Values.app.image.tag | default .Values.global.imageTag }}"
+        imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+        
+        {{- if .Values.security.securityContext }}
+        securityContext:
+          {{- toYaml .Values.security.securityContext | nindent 10 }}
+        {{- end }}
+        
+        ports:
+        - name: http
+          containerPort: {{ .Values.app.service.targetPort }}
+          protocol: TCP
+        - name: metrics
+          containerPort: 8001
+          protocol: TCP
+        
+        env:
+        {{- range .Values.app.env }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
+        - name: PLATFORM
+          value: {{ .Values.global.platform | quote }}
+        - name: ARCHITECTURE
+          value: {{ .Values.global.architecture | quote }}
+        {{- if .Values.global.gpu.enabled }}
+        - name: GPU_ENABLED
+          value: "true"
+        - name: GPU_VENDOR
+          value: {{ .Values.global.gpu.vendor | quote }}
+        {{- end }}
+        
+        # Platform-specific resource allocation
+        resources:
+          {{- if eq .Values.global.platform "linux" }}
+          {{- toYaml .Values.app.platformConfig.linux.resources | nindent 10 }}
+          {{- else if eq .Values.global.platform "macos" }}
+          {{- toYaml .Values.app.platformConfig.macos.resources | nindent 10 }}
+          {{- end }}
+        
+        # GPU resource requests
+        {{- if .Values.global.gpu.enabled }}
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1
+        {{- end }}
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        volumeMounts:
+        - name: models
+          mountPath: /app/models
+          readOnly: true
+        - name: data
+          mountPath: /app/data
+        - name: temp
+          mountPath: /app/temp
+        - name: logs
+          mountPath: /app/logs
+      
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: {{ .Values.app.name }}-models
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ .Values.app.name }}-data
+      - name: temp
+        emptyDir:
+          sizeLimit: 10Gi
+      - name: logs
+        emptyDir:
+          sizeLimit: 5Gi

@@ -26,15 +26,15 @@ spec:
     path: environments/production
     helm:
       valueFiles:
-      - values.yaml
-      - values-production.yaml
+        - values.yaml
+        - values-production.yaml
       parameters:
-      - name: image.tag
-        value: "latest"
-      - name: replicas.mlInference
-        value: "20"
-      - name: resources.requests.nvidia-gpu
-        value: "1"
+        - name: image.tag
+          value: "latest"
+        - name: replicas.mlInference
+          value: "20"
+        - name: resources.requests.nvidia-gpu
+          value: "1"
   destination:
     server: https://kubernetes.default.svc
     namespace: its-camera-ai-system
@@ -44,9 +44,9 @@ spec:
       selfHeal: true
       allowEmpty: false
     syncOptions:
-    - CreateNamespace=true
-    - PrunePropagationPolicy=foreground
-    - PruneLast=true
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
     retry:
       limit: 5
       backoff:
@@ -70,8 +70,8 @@ spec:
     path: environments/staging
     helm:
       valueFiles:
-      - values.yaml
-      - values-staging.yaml
+        - values.yaml
+        - values-staging.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: its-camera-ai-staging
@@ -80,7 +80,7 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-    - CreateNamespace=true
+      - CreateNamespace=true
 
 ---
 # ArgoCD Application for Edge Deployment
@@ -97,19 +97,19 @@ spec:
     path: environments/edge
     helm:
       valueFiles:
-      - values.yaml
-      - values-edge.yaml
+        - values.yaml
+        - values-edge.yaml
       parameters:
-      - name: edge.enabled
-        value: "true"
-      - name: cloud.fallback
-        value: "true"
+        - name: edge.enabled
+          value: "true"
+        - name: cloud.fallback
+          value: "true"
   destination:
     server: https://edge-cluster.its-camera-ai.com
     namespace: its-camera-edge
   syncPolicy:
     automated:
-      prune: false  # More conservative for edge
+      prune: false # More conservative for edge
       selfHeal: false
 
 ---
@@ -122,62 +122,62 @@ metadata:
 spec:
   description: ITS Camera AI Project
   sourceRepos:
-  - https://github.com/its-org/its-camera-ai-config
-  - https://github.com/its-org/its-camera-ai
+    - https://github.com/its-org/its-camera-ai-config
+    - https://github.com/its-org/its-camera-ai
   destinations:
-  - namespace: its-camera-ai-system
-    server: https://kubernetes.default.svc
-  - namespace: its-camera-ai-staging
-    server: https://kubernetes.default.svc
-  - namespace: its-camera-edge
-    server: https://edge-cluster.its-camera-ai.com
+    - namespace: its-camera-ai-system
+      server: https://kubernetes.default.svc
+    - namespace: its-camera-ai-staging
+      server: https://kubernetes.default.svc
+    - namespace: its-camera-edge
+      server: https://edge-cluster.its-camera-ai.com
   clusterResourceWhitelist:
-  - group: ""
-    kind: Namespace
-  - group: storage.k8s.io
-    kind: StorageClass
-  - group: rbac.authorization.k8s.io
-    kind: ClusterRole
-  - group: rbac.authorization.k8s.io
-    kind: ClusterRoleBinding
+    - group: ""
+      kind: Namespace
+    - group: storage.k8s.io
+      kind: StorageClass
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
   namespaceResourceWhitelist:
-  - group: ""
-    kind: ConfigMap
-  - group: ""
-    kind: Secret
-  - group: ""
-    kind: Service
-  - group: apps
-    kind: Deployment
-  - group: apps
-    kind: StatefulSet
-  - group: batch
-    kind: Job
-  - group: batch
-    kind: CronJob
-  - group: autoscaling
-    kind: HorizontalPodAutoscaler
-  - group: networking.k8s.io
-    kind: Ingress
-  - group: monitoring.coreos.com
-    kind: ServiceMonitor
-  - group: postgresql.cnpg.io
-    kind: Cluster
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: batch
+      kind: Job
+    - group: batch
+      kind: CronJob
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+    - group: postgresql.cnpg.io
+      kind: Cluster
   roles:
-  - name: developer
-    description: Developer access
-    policies:
-    - p, proj:its-camera-ai:developer, applications, get, its-camera-ai/*, allow
-    - p, proj:its-camera-ai:developer, applications, sync, its-camera-ai/its-camera-ai-staging, allow
-    groups:
-    - its-camera-ai:developers
-  - name: operator
-    description: Operator access
-    policies:
-    - p, proj:its-camera-ai:operator, applications, *, its-camera-ai/*, allow
-    - p, proj:its-camera-ai:operator, repositories, *, *, allow
-    groups:
-    - its-camera-ai:operators
+    - name: developer
+      description: Developer access
+      policies:
+        - p, proj:its-camera-ai:developer, applications, get, its-camera-ai/*, allow
+        - p, proj:its-camera-ai:developer, applications, sync, its-camera-ai/its-camera-ai-staging, allow
+      groups:
+        - its-camera-ai:developers
+    - name: operator
+      description: Operator access
+      policies:
+        - p, proj:its-camera-ai:operator, applications, *, its-camera-ai/*, allow
+        - p, proj:its-camera-ai:operator, repositories, *, *, allow
+      groups:
+        - its-camera-ai:operators
 
 ---
 # GitHub Actions Workflow Configuration
@@ -189,17 +189,17 @@ metadata:
 data:
   ci-cd.yaml: |
     name: ITS Camera AI CI/CD Pipeline
-    
+
     on:
       push:
         branches: [main, develop]
       pull_request:
         branches: [main, develop]
-    
+
     env:
       REGISTRY: ghcr.io
       IMAGE_NAME: its-camera-ai
-    
+
     jobs:
       # Code Quality and Security Scanning
       code-quality:
@@ -210,7 +210,7 @@ data:
         - name: Set up Python
           uses: actions/setup-python@v4
           with:
-            python-version: '3.11'
+            python-version: '3.12'
         
         - name: Install dependencies
           run: |
@@ -265,7 +265,7 @@ data:
         - name: Set up Python
           uses: actions/setup-python@v4
           with:
-            python-version: '3.11'
+            python-version: '3.12'
         
         - name: Install dependencies
           run: |
@@ -295,7 +295,7 @@ data:
         - name: Set up Python
           uses: actions/setup-python@v4
           with:
-            python-version: '3.11'
+            python-version: '3.12'
         
         - name: Install dependencies
           run: |
@@ -434,119 +434,119 @@ metadata:
   namespace: its-camera-gitops
 spec:
   params:
-  - name: repo-url
-    type: string
-    description: Repository URL
-  - name: repo-revision
-    type: string
-    description: Repository revision
-    default: main
-  - name: image-name
-    type: string
-    description: Container image name
-  
+    - name: repo-url
+      type: string
+      description: Repository URL
+    - name: repo-revision
+      type: string
+      description: Repository revision
+      default: main
+    - name: image-name
+      type: string
+      description: Container image name
+
   workspaces:
-  - name: shared-data
-    description: Workspace for sharing data between tasks
-  - name: docker-credentials
-    description: Docker registry credentials
-  
+    - name: shared-data
+      description: Workspace for sharing data between tasks
+    - name: docker-credentials
+      description: Docker registry credentials
+
   tasks:
-  # Source code checkout
-  - name: fetch-source
-    taskRef:
-      name: git-clone
-      kind: ClusterTask
-    workspaces:
-    - name: output
-      workspace: shared-data
-    params:
-    - name: url
-      value: $(params.repo-url)
-    - name: revision
-      value: $(params.repo-revision)
-  
-  # Code quality and security scanning
-  - name: code-analysis
-    taskRef:
-      name: sonarqube-scanner
-      kind: Task
-    runAfter: ["fetch-source"]
-    workspaces:
-    - name: source
-      workspace: shared-data
-    params:
-    - name: SONAR_HOST_URL
-      value: https://sonarcloud.io
-    - name: SONAR_PROJECT_KEY
-      value: its-camera-ai
-  
-  # Unit tests
-  - name: unit-tests
-    taskRef:
-      name: python-test
-      kind: Task
-    runAfter: ["fetch-source"]
-    workspaces:
-    - name: source
-      workspace: shared-data
-    params:
-    - name: REQUIREMENTS_FILE
-      value: pyproject.toml
-    - name: TEST_COMMAND
-      value: |
-        uv sync --group dev
-        uv run pytest --cov=src/its_camera_ai
-  
-  # Container image build
-  - name: build-image
-    taskRef:
-      name: buildah
-      kind: ClusterTask
-    runAfter: ["code-analysis", "unit-tests"]
-    workspaces:
-    - name: source
-      workspace: shared-data
-    - name: dockerconfig
-      workspace: docker-credentials
-    params:
-    - name: IMAGE
-      value: $(params.image-name)
-    - name: FORMAT
-      value: docker
-    - name: BUILD_EXTRA_ARGS
-      value: --platform=linux/amd64,linux/arm64
-  
-  # Security scanning of the built image
-  - name: image-scan
-    taskRef:
-      name: trivy-scanner
-      kind: Task
-    runAfter: ["build-image"]
-    workspaces:
-    - name: manifest-dir
-      workspace: shared-data
-    params:
-    - name: IMAGE
-      value: $(params.image-name)
-    - name: ARGS
-      value: ["--severity", "HIGH,CRITICAL", "--exit-code", "1"]
-  
-  # Deploy to staging
-  - name: deploy-staging
-    taskRef:
-      name: argocd-task-sync-and-wait
-      kind: Task
-    runAfter: ["image-scan"]
-    when:
-    - input: $(params.repo-revision)
-      operator: in
-      values: ["develop"]
-    params:
-    - name: application-name
-      value: its-camera-ai-staging
-    - name: flags
-      value: --insecure
+    # Source code checkout
+    - name: fetch-source
+      taskRef:
+        name: git-clone
+        kind: ClusterTask
+      workspaces:
+        - name: output
+          workspace: shared-data
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.repo-revision)
+
+    # Code quality and security scanning
+    - name: code-analysis
+      taskRef:
+        name: sonarqube-scanner
+        kind: Task
+      runAfter: ["fetch-source"]
+      workspaces:
+        - name: source
+          workspace: shared-data
+      params:
+        - name: SONAR_HOST_URL
+          value: https://sonarcloud.io
+        - name: SONAR_PROJECT_KEY
+          value: its-camera-ai
+
+    # Unit tests
+    - name: unit-tests
+      taskRef:
+        name: python-test
+        kind: Task
+      runAfter: ["fetch-source"]
+      workspaces:
+        - name: source
+          workspace: shared-data
+      params:
+        - name: REQUIREMENTS_FILE
+          value: pyproject.toml
+        - name: TEST_COMMAND
+          value: |
+            uv sync --group dev
+            uv run pytest --cov=src/its_camera_ai
+
+    # Container image build
+    - name: build-image
+      taskRef:
+        name: buildah
+        kind: ClusterTask
+      runAfter: ["code-analysis", "unit-tests"]
+      workspaces:
+        - name: source
+          workspace: shared-data
+        - name: dockerconfig
+          workspace: docker-credentials
+      params:
+        - name: IMAGE
+          value: $(params.image-name)
+        - name: FORMAT
+          value: docker
+        - name: BUILD_EXTRA_ARGS
+          value: --platform=linux/amd64,linux/arm64
+
+    # Security scanning of the built image
+    - name: image-scan
+      taskRef:
+        name: trivy-scanner
+        kind: Task
+      runAfter: ["build-image"]
+      workspaces:
+        - name: manifest-dir
+          workspace: shared-data
+      params:
+        - name: IMAGE
+          value: $(params.image-name)
+        - name: ARGS
+          value: ["--severity", "HIGH,CRITICAL", "--exit-code", "1"]
+
+    # Deploy to staging
+    - name: deploy-staging
+      taskRef:
+        name: argocd-task-sync-and-wait
+        kind: Task
+      runAfter: ["image-scan"]
+      when:
+        - input: $(params.repo-revision)
+          operator: in
+          values: ["develop"]
+      params:
+        - name: application-name
+          value: its-camera-ai-staging
+        - name: flags
+          value: --insecure
 
 ---
 # ArgoCD Notifications Configuration
@@ -560,14 +560,14 @@ data:
     token: $slack-token
     username: argocd
     channel: its-camera-alerts
-  
+
   service.email: |
     host: smtp.gmail.com
     port: 587
     username: $email-username
     password: $email-password
     from: $email-username
-  
+
   template.app-deployed: |
     email:
       subject: Application {{.app.metadata.name}} is now running new version.
@@ -575,14 +575,14 @@ data:
       {{if eq .serviceType "slack"}}:white_check_mark:{{end}} Application {{.app.metadata.name}} is now running new version of {{.context.repo.url}}.
       Sync Status: {{.app.status.sync.status}}.
       Health Status: {{.app.status.health.status}}.
-  
+
   template.app-health-degraded: |
     email:
       subject: Application {{.app.metadata.name}} has degraded.
     message: |
       {{if eq .serviceType "slack"}}:exclamation:{{end}} Application {{.app.metadata.name}} has degraded.
       Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}.
-  
+
   template.app-sync-failed: |
     email:
       subject: Application {{.app.metadata.name}} sync is failed.
@@ -590,26 +590,26 @@ data:
       {{if eq .serviceType "slack"}}:exclamation:{{end}} Application {{.app.metadata.name}} sync is failed.
       Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}.
       Error: {{.app.status.operationState.message}}.
-  
+
   trigger.on-deployed: |
     - description: Application is synced and healthy. Triggered once per commit.
       oncePer: app.status.sync.revision
       send:
       - app-deployed
       when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
-  
+
   trigger.on-health-degraded: |
     - description: Application has degraded
       send:
       - app-health-degraded
       when: app.status.health.status == 'Degraded'
-  
+
   trigger.on-sync-failed: |
     - description: Application syncing has failed
       send:
       - app-sync-failed
       when: app.status.operationState.phase in ['Error', 'Failed']
-  
+
   subscriptions: |
     - recipients:
       - slack:its-camera-alerts

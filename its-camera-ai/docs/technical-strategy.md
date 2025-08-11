@@ -11,12 +11,14 @@ This technical strategy outlines the architectural decisions, technology stack, 
 **Decision**: Adopt event-driven microservices architecture with domain-driven design principles.
 
 **Rationale**:
+
 - **Scalability**: Each service can scale independently based on demand
 - **Resilience**: Failure isolation prevents system-wide outages  
 - **Flexibility**: Easy to add new features without affecting existing services
 - **Technology Diversity**: Different services can use optimal technology stacks
 
 **Implementation Approach**:
+
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │  Camera Ingress │    │  Detection       │    │  Analytics      │
@@ -37,6 +39,7 @@ This technical strategy outlines the architectural decisions, technology stack, 
 **Technical Components**:
 
 #### Edge Computing Layer
+
 ```python
 # Edge deployment for latency-critical processing
 class EdgeProcessor:
@@ -56,6 +59,7 @@ class EdgeProcessor:
 ```
 
 #### Cloud Processing Layer
+
 ```python
 # Cloud deployment for heavy analytics and ML training
 class CloudOrchestrator:
@@ -81,6 +85,7 @@ class CloudOrchestrator:
 **Core ML Pipeline**:
 
 #### Model Stack Architecture
+
 ```python
 class AIModelStack:
     def __init__(self):
@@ -105,6 +110,7 @@ class AIModelStack:
 ```
 
 #### Ensemble Inference Strategy
+
 ```python
 async def ensemble_prediction(self, frame, context):
     # Context-aware model selection
@@ -129,6 +135,7 @@ async def ensemble_prediction(self, frame, context):
 **Decision**: Implement lambda architecture with real-time stream processing and batch analytics.
 
 **Data Flow Architecture**:
+
 ```python
 # Real-time stream processing
 class StreamProcessor:
@@ -149,6 +156,7 @@ class StreamProcessor:
 ```
 
 **Storage Strategy**:
+
 - **Hot Data**: Redis (< 1 hour) - Real-time queries and dashboards
 - **Warm Data**: InfluxDB (< 30 days) - Analytics and reporting  
 - **Cold Data**: S3/MinIO (> 30 days) - Historical analysis and ML training
@@ -159,14 +167,16 @@ class StreamProcessor:
 ### Core Technologies
 
 #### Backend Services
+
 ```yaml
-Programming Language: Python 3.11+
+Programming Language: Python 3.12+
 Framework: FastAPI + Pydantic v2
 API Gateway: Kong or AWS API Gateway
 Service Mesh: Istio (for large deployments)
 ```
 
 #### Computer Vision & ML
+
 ```yaml
 Deep Learning: PyTorch 2.0+ with CUDA 11.8+
 Computer Vision: OpenCV 4.8+, Ultralytics YOLO11
@@ -175,6 +185,7 @@ Model Registry: MLflow or DVC
 ```
 
 #### Data & Messaging
+
 ```yaml
 Message Broker: Apache Kafka + Schema Registry
 Cache: Redis Cluster
@@ -184,6 +195,7 @@ Object Storage: MinIO or AWS S3
 ```
 
 #### Infrastructure & DevOps
+
 ```yaml
 Container Runtime: Docker + containerd
 Orchestration: Kubernetes 1.27+
@@ -193,6 +205,7 @@ Logging: ELK Stack (Elasticsearch, Logstash, Kibana)
 ```
 
 #### Frontend & Visualization
+
 ```yaml
 Web Frontend: React 18+ with TypeScript
 UI Framework: Material-UI or Tailwind CSS
@@ -203,24 +216,28 @@ Mobile: React Native or Flutter
 ### Rationale for Key Technology Choices
 
 #### 1. Python + FastAPI for Backend Services
+
 - **Performance**: FastAPI provides high performance with automatic async support
 - **Ecosystem**: Rich ML/AI ecosystem with PyTorch, OpenCV, and scientific libraries
 - **Developer Productivity**: Type hints, automatic documentation, modern Python features
 - **Scalability**: Easy horizontal scaling with containerization
 
 #### 2. PyTorch for Deep Learning
+
 - **Research to Production**: Seamless transition from research to production
 - **Dynamic Graphs**: Better for research and experimentation
 - **Community**: Strong computer vision community and model availability
 - **Performance**: TorchScript and ONNX support for optimized inference
 
 #### 3. Apache Kafka for Event Streaming
+
 - **Scalability**: Handles millions of messages per second
 - **Durability**: Persistent message storage with replay capabilities
 - **Integration**: Rich ecosystem of connectors and stream processing tools
 - **Reliability**: Battle-tested in production environments
 
 #### 4. Kubernetes for Orchestration
+
 - **Cloud Native**: Standard for container orchestration
 - **Scalability**: Auto-scaling based on metrics and resource usage
 - **Portability**: Runs consistently across different cloud providers
@@ -231,6 +248,7 @@ Mobile: React Native or Flutter
 ### 1. Inference Optimization
 
 #### GPU Acceleration Strategy
+
 ```python
 class OptimizedInference:
     def __init__(self):
@@ -253,6 +271,7 @@ class OptimizedInference:
 ```
 
 #### Model Optimization Techniques
+
 - **Quantization**: INT8 quantization for 4x memory reduction
 - **Pruning**: Remove redundant model parameters (20-30% speedup)
 - **Knowledge Distillation**: Create smaller, faster student models
@@ -261,6 +280,7 @@ class OptimizedInference:
 ### 2. System-Level Optimizations
 
 #### Memory Management
+
 ```python
 class MemoryOptimizer:
     def __init__(self):
@@ -279,6 +299,7 @@ class MemoryOptimizer:
 ```
 
 #### Network Optimization
+
 - **Frame Compression**: H.264/H.265 encoding for bandwidth efficiency
 - **Adaptive Bitrate**: Dynamic quality adjustment based on network conditions
 - **Edge Caching**: Local caching of frequently accessed data
@@ -287,6 +308,7 @@ class MemoryOptimizer:
 ### 3. Database Performance
 
 #### Time Series Optimization
+
 ```python
 # InfluxDB configuration for high throughput
 influxdb_config = {
@@ -299,6 +321,7 @@ influxdb_config = {
 ```
 
 #### Caching Strategy
+
 ```python
 class CacheManager:
     def __init__(self):
@@ -328,6 +351,7 @@ class CacheManager:
 ### 1. Horizontal Scaling Strategy
 
 #### Auto-Scaling Configuration
+
 ```yaml
 # Kubernetes HPA configuration
 apiVersion: autoscaling/v2
@@ -364,6 +388,7 @@ spec:
 ```
 
 #### Load Balancing Strategy
+
 ```python
 class IntelligentLoadBalancer:
     def __init__(self):
@@ -391,6 +416,7 @@ class IntelligentLoadBalancer:
 ### 2. Multi-Region Deployment
 
 #### Global Architecture
+
 ```python
 class GlobalDeploymentManager:
     def __init__(self):
@@ -417,6 +443,7 @@ class GlobalDeploymentManager:
 ### 1. Data Protection Strategy
 
 #### Privacy-by-Design Implementation
+
 ```python
 class PrivacyEngine:
     def __init__(self):
@@ -438,6 +465,7 @@ class PrivacyEngine:
 ```
 
 #### GDPR/CCPA Compliance
+
 ```python
 class ComplianceManager:
     def __init__(self):
@@ -456,6 +484,7 @@ class ComplianceManager:
 ### 2. System Security
 
 #### Zero-Trust Architecture
+
 ```python
 class SecurityGateway:
     def __init__(self):
@@ -481,6 +510,7 @@ class SecurityGateway:
 ### 1. API Design & Standards
 
 #### RESTful API with OpenAPI 3.0
+
 ```python
 from fastapi import FastAPI, Depends
 from pydantic import BaseModel
@@ -513,6 +543,7 @@ async def submit_detections(
 ```
 
 #### GraphQL for Complex Queries
+
 ```python
 import graphene
 
@@ -537,6 +568,7 @@ class Query(graphene.ObjectType):
 ### 2. Third-Party Integration Framework
 
 #### Plugin Architecture
+
 ```python
 class IntegrationPlugin:
     def __init__(self, config):
@@ -563,6 +595,7 @@ class SlackNotificationPlugin(IntegrationPlugin):
 ### 1. CI/CD Pipeline
 
 #### Automated Testing & Deployment
+
 ```yaml
 # GitHub Actions workflow
 name: Deploy Traffic Monitoring System
@@ -602,6 +635,7 @@ jobs:
 ### 2. Monitoring & Observability
 
 #### Application Performance Monitoring
+
 ```python
 import prometheus_client
 from opentelemetry import trace
@@ -650,6 +684,7 @@ class MonitoredVehicleDetector:
 ### 1. Technical Risk Mitigation
 
 #### Model Performance Degradation
+
 ```python
 class ModelHealthMonitor:
     def __init__(self):
@@ -669,6 +704,7 @@ class ModelHealthMonitor:
 ```
 
 #### System Availability
+
 ```python
 class DisasterRecoveryManager:
     def __init__(self):
@@ -689,6 +725,7 @@ class DisasterRecoveryManager:
 ### 2. Data Quality & Integrity
 
 #### Data Validation Pipeline
+
 ```python
 class DataQualityChecker:
     def __init__(self):

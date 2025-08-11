@@ -22,6 +22,7 @@ import base64
 import gzip
 import json
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 class EdgeDeviceType(Enum):
     """Supported edge device types."""
+
     JETSON_NANO = "jetson_nano"
     JETSON_XAVIER_NX = "jetson_xavier_nx"
     JETSON_AGX_XAVIER = "jetson_agx_xavier"
@@ -46,10 +48,11 @@ class EdgeDeviceType(Enum):
 
 class CompressionLevel(Enum):
     """Compression levels for bandwidth optimization."""
+
     NONE = 0
-    LOW = 1      # 10-20% compression
-    MEDIUM = 2   # 30-50% compression
-    HIGH = 3     # 50-70% compression
+    LOW = 1  # 10-20% compression
+    MEDIUM = 2  # 30-50% compression
+    HIGH = 3  # 50-70% compression
     MAXIMUM = 4  # 70-80+ compression
 
 
@@ -98,7 +101,7 @@ class EdgeDeviceProfile:
             "batch_size": self.batch_size,
             "expected_bandwidth_mbps": self.expected_bandwidth_mbps,
             "compression_level": self.compression_level.value,
-            "cache_size_mb": self.cache_size_mb
+            "cache_size_mb": self.cache_size_mb,
         }
 
 
@@ -111,7 +114,7 @@ class BandwidthOptimizer:
             "high_bandwidth": {"quality": 95, "resize_factor": 1.0},
             "medium_bandwidth": {"quality": 80, "resize_factor": 0.9},
             "low_bandwidth": {"quality": 60, "resize_factor": 0.8},
-            "very_low_bandwidth": {"quality": 40, "resize_factor": 0.7}
+            "very_low_bandwidth": {"quality": 40, "resize_factor": 0.7},
         }
 
     def compress_inference_data(
@@ -119,12 +122,14 @@ class BandwidthOptimizer:
         frame: np.ndarray,
         detection_results: dict[str, Any],
         compression_level: CompressionLevel,
-        network_condition: str = "medium_bandwidth"
+        network_condition: str = "medium_bandwidth",
     ) -> dict[str, Any]:
         """Compress inference data for transmission."""
 
         # Get compression settings
-        settings = self.adaptive_settings.get(network_condition, self.adaptive_settings["medium_bandwidth"])
+        settings = self.adaptive_settings.get(
+            network_condition, self.adaptive_settings["medium_bandwidth"]
+        )
 
         # Compress frame if needed
         compressed_frame = None
@@ -132,7 +137,9 @@ class BandwidthOptimizer:
             compressed_frame = self._compress_frame(frame, settings, compression_level)
 
         # Compress detection results
-        compressed_results = self._compress_detection_results(detection_results, compression_level)
+        compressed_results = self._compress_detection_results(
+            detection_results, compression_level
+        )
 
         return {
             "compressed_frame": compressed_frame,
@@ -140,15 +147,15 @@ class BandwidthOptimizer:
             "compression_info": {
                 "level": compression_level.value,
                 "quality": settings["quality"],
-                "resize_factor": settings["resize_factor"]
-            }
+                "resize_factor": settings["resize_factor"],
+            },
         }
 
     def _compress_frame(
         self,
         frame: np.ndarray,
         settings: dict[str, Any],
-        compression_level: CompressionLevel
+        compression_level: CompressionLevel,
     ) -> str | None:
         """Compress frame based on settings."""
 
@@ -167,7 +174,7 @@ class BandwidthOptimizer:
 
             # JPEG compression
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), settings["quality"]]
-            success, buffer = cv2.imencode('.jpg', frame, encode_param)
+            success, buffer = cv2.imencode(".jpg", frame, encode_param)
 
             if success:
                 # Additional gzip compression for higher levels
@@ -177,7 +184,7 @@ class BandwidthOptimizer:
                     buffer = buffer.tobytes()
 
                 # Base64 encode for JSON transmission
-                return base64.b64encode(buffer).decode('utf-8')
+                return base64.b64encode(buffer).decode("utf-8")
 
         except ImportError:
             logger.warning("OpenCV not available for frame compression")
@@ -185,9 +192,7 @@ class BandwidthOptimizer:
         return None
 
     def _compress_detection_results(
-        self,
-        results: dict[str, Any],
-        compression_level: CompressionLevel
+        self, results: dict[str, Any], compression_level: CompressionLevel
     ) -> dict[str, Any]:
         """Compress detection results."""
 
@@ -224,8 +229,7 @@ class BandwidthOptimizer:
         return compressed
 
     def decompress_inference_data(
-        self,
-        compressed_data: dict[str, Any]
+        self, compressed_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Decompress inference data."""
 
@@ -243,6 +247,7 @@ class BandwidthOptimizer:
 
                 # Decode JPEG
                 import cv2
+
                 frame_array = np.frombuffer(frame_data, np.uint8)
                 frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
                 decompressed["frame"] = frame
@@ -256,7 +261,9 @@ class BandwidthOptimizer:
         # Restore boxes precision
         if "boxes" in results:
             boxes = np.array(results["boxes"])
-            compression_level = compressed_data.get("compression_info", {}).get("level", 0)
+            compression_level = compressed_data.get("compression_info", {}).get(
+                "level", 0
+            )
 
             if compression_level >= CompressionLevel.MEDIUM.value:
                 boxes = boxes.astype(np.float32) / 65535.0
@@ -266,7 +273,9 @@ class BandwidthOptimizer:
         # Restore scores precision
         if "scores" in results:
             scores = np.array(results["scores"])
-            compression_level = compressed_data.get("compression_info", {}).get("level", 0)
+            compression_level = compressed_data.get("compression_info", {}).get(
+                "level", 0
+            )
 
             if compression_level >= CompressionLevel.HIGH.value:
                 scores = scores.astype(np.float32) / 255.0
@@ -288,10 +297,7 @@ class EdgeModelOptimizer:
         self.optimization_cache = {}
 
     def optimize_for_device(
-        self,
-        model_path: Path,
-        device_profile: EdgeDeviceProfile,
-        output_dir: Path
+        self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
     ) -> dict[str, Path]:
         """Optimize model for specific edge device."""
 
@@ -303,30 +309,38 @@ class EdgeModelOptimizer:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Apply device-specific optimizations
-        if device_profile.device_type in [EdgeDeviceType.JETSON_NANO, EdgeDeviceType.JETSON_XAVIER_NX]:
+        if device_profile.device_type in [
+            EdgeDeviceType.JETSON_NANO,
+            EdgeDeviceType.JETSON_XAVIER_NX,
+        ]:
             # NVIDIA Jetson optimization
-            optimized_models = self._optimize_for_jetson(model_path, device_profile, output_dir)
+            optimized_models = self._optimize_for_jetson(
+                model_path, device_profile, output_dir
+            )
 
         elif device_profile.device_type == EdgeDeviceType.INTEL_NCS2:
             # Intel Neural Compute Stick optimization
-            optimized_models = self._optimize_for_intel_ncs(model_path, device_profile, output_dir)
+            optimized_models = self._optimize_for_intel_ncs(
+                model_path, device_profile, output_dir
+            )
 
         elif device_profile.device_type == EdgeDeviceType.RASPBERRY_PI_4:
             # Raspberry Pi optimization
-            optimized_models = self._optimize_for_raspberry_pi(model_path, device_profile, output_dir)
+            optimized_models = self._optimize_for_raspberry_pi(
+                model_path, device_profile, output_dir
+            )
 
         else:
             # Generic optimization
-            optimized_models = self._optimize_generic(model_path, device_profile, output_dir)
+            optimized_models = self._optimize_generic(
+                model_path, device_profile, output_dir
+            )
 
         logger.info(f"Model optimization completed: {list(optimized_models.keys())}")
         return optimized_models
 
     def _optimize_for_jetson(
-        self,
-        model_path: Path,
-        device_profile: EdgeDeviceProfile,
-        output_dir: Path
+        self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
     ) -> dict[str, Path]:
         """Optimize for NVIDIA Jetson devices."""
 
@@ -338,10 +352,12 @@ class EdgeModelOptimizer:
 
             # Simulate TensorRT conversion
             tensorrt_config = {
-                "precision": "FP16" if device_profile.quantization_bits == 16 else "INT8",
+                "precision": (
+                    "FP16" if device_profile.quantization_bits == 16 else "INT8"
+                ),
                 "max_batch_size": device_profile.batch_size,
                 "workspace_size": min(1024, device_profile.gpu_memory_mb // 2),  # MB
-                "device_type": device_profile.device_type.value
+                "device_type": device_profile.device_type.value,
             }
 
             self._create_tensorrt_config(tensorrt_path, tensorrt_config)
@@ -352,7 +368,7 @@ class EdgeModelOptimizer:
         onnx_config = {
             "optimization_level": "all",
             "quantization_bits": device_profile.quantization_bits,
-            "batch_size": device_profile.batch_size
+            "batch_size": device_profile.batch_size,
         }
 
         self._create_onnx_config(onnx_path, onnx_config)
@@ -361,10 +377,7 @@ class EdgeModelOptimizer:
         return optimized_models
 
     def _optimize_for_intel_ncs(
-        self,
-        model_path: Path,
-        device_profile: EdgeDeviceProfile,
-        output_dir: Path
+        self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
     ) -> dict[str, Path]:
         """Optimize for Intel Neural Compute Stick."""
 
@@ -375,7 +388,7 @@ class EdgeModelOptimizer:
             "data_type": "FP16",  # NCS2 uses FP16
             "input_shape": [1, 3, 640, 640],  # YOLO input shape
             "device": "MYRIAD",  # NCS2 device identifier
-            "num_requests": 1  # Single request for edge
+            "num_requests": 1,  # Single request for edge
         }
 
         self._create_openvino_config(openvino_path, openvino_config)
@@ -383,10 +396,7 @@ class EdgeModelOptimizer:
         return {"openvino": openvino_path}
 
     def _optimize_for_raspberry_pi(
-        self,
-        model_path: Path,
-        device_profile: EdgeDeviceProfile,
-        output_dir: Path
+        self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
     ) -> dict[str, Path]:
         """Optimize for Raspberry Pi 4."""
 
@@ -398,7 +408,7 @@ class EdgeModelOptimizer:
             "quantization_bits": 8,  # INT8 for CPU efficiency
             "batch_size": 1,  # Single batch for RPi
             "cpu_optimization": True,
-            "num_threads": device_profile.cpu_cores
+            "num_threads": device_profile.cpu_cores,
         }
 
         self._create_onnx_config(onnx_path, onnx_config)
@@ -406,10 +416,7 @@ class EdgeModelOptimizer:
         return {"onnx": onnx_path}
 
     def _optimize_generic(
-        self,
-        model_path: Path,
-        device_profile: EdgeDeviceProfile,
-        output_dir: Path
+        self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
     ) -> dict[str, Path]:
         """Generic optimization for unknown devices."""
 
@@ -420,7 +427,7 @@ class EdgeModelOptimizer:
         onnx_config = {
             "optimization_level": "basic",
             "quantization_bits": device_profile.quantization_bits,
-            "batch_size": device_profile.batch_size
+            "batch_size": device_profile.batch_size,
         }
 
         self._create_onnx_config(onnx_path, onnx_config)
@@ -432,36 +439,36 @@ class EdgeModelOptimizer:
         """Create TensorRT configuration file."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path.with_suffix('.json'), 'w') as f:
+        with open(output_path.with_suffix(".json"), "w") as f:
             json.dump(config, f, indent=2)
 
         # Create placeholder TensorRT engine file
-        with open(output_path, 'wb') as f:
+        with open(output_path, "wb") as f:
             f.write(b"# TensorRT Engine Placeholder\n")
 
     def _create_onnx_config(self, output_path: Path, config: dict[str, Any]):
         """Create ONNX configuration file."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path.with_suffix('.json'), 'w') as f:
+        with open(output_path.with_suffix(".json"), "w") as f:
             json.dump(config, f, indent=2)
 
         # Create placeholder ONNX model file
-        with open(output_path, 'wb') as f:
+        with open(output_path, "wb") as f:
             f.write(b"# ONNX Model Placeholder\n")
 
     def _create_openvino_config(self, output_path: Path, config: dict[str, Any]):
         """Create OpenVINO configuration file."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path.with_suffix('.json'), 'w') as f:
+        with open(output_path.with_suffix(".json"), "w") as f:
             json.dump(config, f, indent=2)
 
         # Create placeholder OpenVINO files
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             f.write("<?xml version='1.0'?>\n<!-- OpenVINO IR Placeholder -->\n")
 
-        with open(output_path.with_suffix('.bin'), 'wb') as f:
+        with open(output_path.with_suffix(".bin"), "wb") as f:
             f.write(b"# OpenVINO Weights Placeholder\n")
 
 
@@ -476,37 +483,41 @@ class EdgeContainerBuilder:
             EdgeDeviceType.INTEL_NCS2: "openvino/ubuntu20_dev:latest",
             EdgeDeviceType.RASPBERRY_PI_4: "python:3.9-slim-bullseye",
             EdgeDeviceType.GENERIC_ARM64: "python:3.9-slim-bullseye",
-            EdgeDeviceType.GENERIC_X86_64: "python:3.9-slim-bullseye"
+            EdgeDeviceType.GENERIC_X86_64: "python:3.9-slim-bullseye",
         }
 
     def create_dockerfile(
         self,
         device_profile: EdgeDeviceProfile,
         model_paths: dict[str, Path],
-        output_dir: Path
+        output_dir: Path,
     ) -> Path:
         """Create Dockerfile for edge device."""
 
         dockerfile_path = output_dir / "Dockerfile"
 
         # Generate Dockerfile content
-        dockerfile_content = self._generate_dockerfile_content(device_profile, model_paths)
+        dockerfile_content = self._generate_dockerfile_content(
+            device_profile, model_paths
+        )
 
         # Write Dockerfile
-        with open(dockerfile_path, 'w') as f:
+        with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
 
-        logger.info(f"Created Dockerfile for {device_profile.device_type.value} at {dockerfile_path}")
+        logger.info(
+            f"Created Dockerfile for {device_profile.device_type.value} at {dockerfile_path}"
+        )
         return dockerfile_path
 
     def _generate_dockerfile_content(
-        self,
-        device_profile: EdgeDeviceProfile,
-        model_paths: dict[str, Path]
+        self, device_profile: EdgeDeviceProfile, model_paths: dict[str, Path]
     ) -> str:
         """Generate Dockerfile content."""
 
-        base_image = self.base_images.get(device_profile.device_type, self.base_images[EdgeDeviceType.GENERIC_X86_64])
+        base_image = self.base_images.get(
+            device_profile.device_type, self.base_images[EdgeDeviceType.GENERIC_X86_64]
+        )
 
         dockerfile_content = f"""# Multi-stage build for ITS Camera AI Edge Deployment
 # Device: {device_profile.device_type.value}
@@ -542,7 +553,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 """
 
         # Add device-specific setup
-        if device_profile.device_type.value.startswith('jetson'):
+        if device_profile.device_type.value.startswith("jetson"):
             dockerfile_content += self._add_jetson_setup(device_profile)
         elif device_profile.device_type == EdgeDeviceType.INTEL_NCS2:
             dockerfile_content += self._add_intel_ncs_setup(device_profile)
@@ -637,7 +648,7 @@ RUN pip install --no-cache-dir \\
         self,
         device_profile: EdgeDeviceProfile,
         output_dir: Path,
-        additional_services: list[str] | None = None
+        additional_services: list[str] | None = None,
     ) -> Path:
         """Create Docker Compose configuration."""
 
@@ -647,52 +658,46 @@ RUN pip install --no-cache-dir \\
             "version": "3.8",
             "services": {
                 "its-camera-ai": {
-                    "build": {
-                        "context": ".",
-                        "dockerfile": "Dockerfile"
-                    },
+                    "build": {"context": ".", "dockerfile": "Dockerfile"},
                     "container_name": "its-camera-ai-edge",
                     "restart": "unless-stopped",
-                    "ports": [
-                        "8080:8080",
-                        "8081:8081"
-                    ],
+                    "ports": ["8080:8080", "8081:8081"],
                     "volumes": [
                         "./data:/app/data",
                         "./logs:/app/logs",
-                        "./models:/app/models:ro"
+                        "./models:/app/models:ro",
                     ],
                     "environment": {
                         "DEVICE_TYPE": device_profile.device_type.value,
                         "LOG_LEVEL": "INFO",
                         "MAX_WORKERS": str(device_profile.cpu_cores),
-                        "CACHE_SIZE_MB": str(device_profile.cache_size_mb)
+                        "CACHE_SIZE_MB": str(device_profile.cache_size_mb),
                     },
                     "healthcheck": {
                         "test": ["CMD", "curl", "-f", "http://localhost:8080/health"],
                         "interval": "30s",
                         "timeout": "10s",
                         "retries": 3,
-                        "start_period": "60s"
-                    }
+                        "start_period": "60s",
+                    },
                 }
             },
-            "networks": {
-                "its-network": {
-                    "driver": "bridge"
-                }
-            }
+            "networks": {"its-network": {"driver": "bridge"}},
         }
 
         # Add device-specific configurations
-        if device_profile.device_type.value.startswith('jetson'):
+        if device_profile.device_type.value.startswith("jetson"):
             compose_config["services"]["its-camera-ai"]["runtime"] = "nvidia"
-            compose_config["services"]["its-camera-ai"]["environment"]["NVIDIA_VISIBLE_DEVICES"] = "all"
+            compose_config["services"]["its-camera-ai"]["environment"][
+                "NVIDIA_VISIBLE_DEVICES"
+            ] = "all"
 
         # Add additional services
         if additional_services:
             if "prometheus" in additional_services:
-                compose_config["services"]["prometheus"] = self._create_prometheus_service()
+                compose_config["services"]["prometheus"] = (
+                    self._create_prometheus_service()
+                )
 
             if "grafana" in additional_services:
                 compose_config["services"]["grafana"] = self._create_grafana_service()
@@ -701,7 +706,7 @@ RUN pip install --no-cache-dir \\
                 compose_config["services"]["redis"] = self._create_redis_service()
 
         # Write docker-compose.yml
-        with open(compose_path, 'w') as f:
+        with open(compose_path, "w") as f:
             yaml.dump(compose_config, f, default_flow_style=False, indent=2)
 
         logger.info(f"Created docker-compose.yml at {compose_path}")
@@ -713,8 +718,13 @@ RUN pip install --no-cache-dir \\
             "image": "prom/prometheus:latest",
             "container_name": "prometheus",
             "ports": ["9090:9090"],
-            "volumes": ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"],
-            "command": ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+            "volumes": [
+                "./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+            ],
+            "command": [
+                "--config.file=/etc/prometheus/prometheus.yml",
+                "--storage.tsdb.path=/prometheus",
+            ],
         }
 
     def _create_grafana_service(self) -> dict[str, Any]:
@@ -725,11 +735,9 @@ RUN pip install --no-cache-dir \\
             "ports": ["3000:3000"],
             "volumes": [
                 "./monitoring/grafana:/var/lib/grafana",
-                "./monitoring/dashboards:/etc/grafana/provisioning/dashboards"
+                "./monitoring/dashboards:/etc/grafana/provisioning/dashboards",
             ],
-            "environment": {
-                "GF_SECURITY_ADMIN_PASSWORD": "admin123"
-            }
+            "environment": {"GF_SECURITY_ADMIN_PASSWORD": "admin123"},
         }
 
     def _create_redis_service(self) -> dict[str, Any]:
@@ -739,7 +747,7 @@ RUN pip install --no-cache-dir \\
             "container_name": "redis",
             "ports": ["6379:6379"],
             "volumes": ["redis_data:/data"],
-            "command": "redis-server --appendonly yes"
+            "command": "redis-server --appendonly yes",
         }
 
 
@@ -750,10 +758,7 @@ class KubernetesManifestGenerator:
         pass
 
     def create_deployment_manifest(
-        self,
-        device_profile: EdgeDeviceProfile,
-        image_name: str,
-        replicas: int = 1
+        self, device_profile: EdgeDeviceProfile, image_name: str, replicas: int = 1
     ) -> dict[str, Any]:
         """Create Kubernetes Deployment manifest."""
 
@@ -765,15 +770,15 @@ class KubernetesManifestGenerator:
                 "labels": {
                     "app": "its-camera-ai",
                     "component": "edge-inference",
-                    "device-type": device_profile.device_type.value
-                }
+                    "device-type": device_profile.device_type.value,
+                },
             },
             "spec": {
                 "replicas": replicas,
                 "selector": {
                     "matchLabels": {
                         "app": "its-camera-ai",
-                        "component": "edge-inference"
+                        "component": "edge-inference",
                     }
                 },
                 "template": {
@@ -781,85 +786,84 @@ class KubernetesManifestGenerator:
                         "labels": {
                             "app": "its-camera-ai",
                             "component": "edge-inference",
-                            "device-type": device_profile.device_type.value
+                            "device-type": device_profile.device_type.value,
                         }
                     },
                     "spec": {
-                        "containers": [{
-                            "name": "edge-inference",
-                            "image": image_name,
-                            "imagePullPolicy": "Always",
-                            "ports": [
-                                {"containerPort": 8080, "name": "api"},
-                                {"containerPort": 8081, "name": "metrics"}
-                            ],
-                            "env": [
-                                {"name": "DEVICE_TYPE", "value": device_profile.device_type.value},
-                                {"name": "MAX_WORKERS", "value": str(device_profile.cpu_cores)},
-                                {"name": "CACHE_SIZE_MB", "value": str(device_profile.cache_size_mb)}
-                            ],
-                            "resources": {
-                                "requests": {
-                                    "memory": f"{device_profile.ram_mb // 2}Mi",
-                                    "cpu": f"{device_profile.cpu_cores // 2}"
+                        "containers": [
+                            {
+                                "name": "edge-inference",
+                                "image": image_name,
+                                "imagePullPolicy": "Always",
+                                "ports": [
+                                    {"containerPort": 8080, "name": "api"},
+                                    {"containerPort": 8081, "name": "metrics"},
+                                ],
+                                "env": [
+                                    {
+                                        "name": "DEVICE_TYPE",
+                                        "value": device_profile.device_type.value,
+                                    },
+                                    {
+                                        "name": "MAX_WORKERS",
+                                        "value": str(device_profile.cpu_cores),
+                                    },
+                                    {
+                                        "name": "CACHE_SIZE_MB",
+                                        "value": str(device_profile.cache_size_mb),
+                                    },
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "memory": f"{device_profile.ram_mb // 2}Mi",
+                                        "cpu": f"{device_profile.cpu_cores // 2}",
+                                    },
+                                    "limits": {
+                                        "memory": f"{device_profile.ram_mb}Mi",
+                                        "cpu": str(device_profile.cpu_cores),
+                                    },
                                 },
-                                "limits": {
-                                    "memory": f"{device_profile.ram_mb}Mi",
-                                    "cpu": str(device_profile.cpu_cores)
-                                }
-                            },
-                            "livenessProbe": {
-                                "httpGet": {
-                                    "path": "/health",
-                                    "port": 8080
+                                "livenessProbe": {
+                                    "httpGet": {"path": "/health", "port": 8080},
+                                    "initialDelaySeconds": 60,
+                                    "periodSeconds": 30,
                                 },
-                                "initialDelaySeconds": 60,
-                                "periodSeconds": 30
-                            },
-                            "readinessProbe": {
-                                "httpGet": {
-                                    "path": "/ready",
-                                    "port": 8080
+                                "readinessProbe": {
+                                    "httpGet": {"path": "/ready", "port": 8080},
+                                    "initialDelaySeconds": 30,
+                                    "periodSeconds": 10,
                                 },
-                                "initialDelaySeconds": 30,
-                                "periodSeconds": 10
-                            },
-                            "volumeMounts": [
-                                {
-                                    "name": "models",
-                                    "mountPath": "/app/models",
-                                    "readOnly": True
-                                },
-                                {
-                                    "name": "data",
-                                    "mountPath": "/app/data"
-                                }
-                            ]
-                        }],
+                                "volumeMounts": [
+                                    {
+                                        "name": "models",
+                                        "mountPath": "/app/models",
+                                        "readOnly": True,
+                                    },
+                                    {"name": "data", "mountPath": "/app/data"},
+                                ],
+                            }
+                        ],
                         "volumes": [
                             {
                                 "name": "models",
-                                "persistentVolumeClaim": {
-                                    "claimName": "models-pvc"
-                                }
+                                "persistentVolumeClaim": {"claimName": "models-pvc"},
                             },
-                            {
-                                "name": "data",
-                                "emptyDir": {}
-                            }
+                            {"name": "data", "emptyDir": {}},
                         ],
                         "nodeSelector": {
                             "device-type": device_profile.device_type.value
-                        }
-                    }
-                }
-            }
+                        },
+                    },
+                },
+            },
         }
 
         # Add GPU resources for applicable devices
         if device_profile.enable_gpu_acceleration:
-            if device_profile.device_type.value.startswith('jetson'):
-                manifest["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]["nvidia.com/gpu"] = 1
+            if device_profile.device_type.value.startswith("jetson"):
+                manifest["spec"]["template"]["spec"]["containers"][0]["resources"][
+                    "limits"
+                ]["nvidia.com/gpu"] = 1
 
         return manifest
 
@@ -871,51 +875,39 @@ class KubernetesManifestGenerator:
             "kind": "Service",
             "metadata": {
                 "name": "its-camera-ai-edge-service",
-                "labels": {
-                    "app": "its-camera-ai",
-                    "component": "edge-inference"
-                }
+                "labels": {"app": "its-camera-ai", "component": "edge-inference"},
             },
             "spec": {
-                "selector": {
-                    "app": "its-camera-ai",
-                    "component": "edge-inference"
-                },
+                "selector": {"app": "its-camera-ai", "component": "edge-inference"},
                 "ports": [
-                    {
-                        "name": "api",
-                        "port": 80,
-                        "targetPort": 8080
-                    },
-                    {
-                        "name": "metrics",
-                        "port": 8081,
-                        "targetPort": 8081
-                    }
+                    {"name": "api", "port": 80, "targetPort": 8080},
+                    {"name": "metrics", "port": 8081, "targetPort": 8081},
                 ],
-                "type": "ClusterIP"
-            }
+                "type": "ClusterIP",
+            },
         }
 
     def create_configmap_manifest(
-        self,
-        device_profile: EdgeDeviceProfile
+        self, device_profile: EdgeDeviceProfile
     ) -> dict[str, Any]:
         """Create ConfigMap manifest."""
 
         config_data = {
-            "edge_config.json": json.dumps({
-                "device": device_profile.to_dict(),
-                "inference": {
-                    "batch_size": device_profile.batch_size,
-                    "max_latency_ms": device_profile.typical_latency_ms,
-                    "enable_gpu": device_profile.enable_gpu_acceleration
+            "edge_config.json": json.dumps(
+                {
+                    "device": device_profile.to_dict(),
+                    "inference": {
+                        "batch_size": device_profile.batch_size,
+                        "max_latency_ms": device_profile.typical_latency_ms,
+                        "enable_gpu": device_profile.enable_gpu_acceleration,
+                    },
+                    "networking": {
+                        "compression_level": device_profile.compression_level.value,
+                        "cache_size_mb": device_profile.cache_size_mb,
+                    },
                 },
-                "networking": {
-                    "compression_level": device_profile.compression_level.value,
-                    "cache_size_mb": device_profile.cache_size_mb
-                }
-            }, indent=2)
+                indent=2,
+            )
         }
 
         return {
@@ -923,18 +915,13 @@ class KubernetesManifestGenerator:
             "kind": "ConfigMap",
             "metadata": {
                 "name": "its-camera-ai-config",
-                "labels": {
-                    "app": "its-camera-ai",
-                    "component": "configuration"
-                }
+                "labels": {"app": "its-camera-ai", "component": "configuration"},
             },
-            "data": config_data
+            "data": config_data,
         }
 
     def save_manifests(
-        self,
-        manifests: list[dict[str, Any]],
-        output_dir: Path
+        self, manifests: list[dict[str, Any]], output_dir: Path
     ) -> list[Path]:
         """Save Kubernetes manifests to files."""
 
@@ -948,7 +935,7 @@ class KubernetesManifestGenerator:
             filename = f"{kind}_{name}.yaml"
             filepath = output_dir / filename
 
-            with open(filepath, 'w') as f:
+            with open(filepath, "w") as f:
                 yaml.dump(manifest, f, default_flow_style=False, indent=2)
 
             saved_files.append(filepath)
@@ -958,6 +945,7 @@ class KubernetesManifestGenerator:
 
 
 # Device profile presets
+
 
 def get_device_profiles() -> dict[EdgeDeviceType, EdgeDeviceProfile]:
     """Get predefined device profiles."""
@@ -978,9 +966,8 @@ def get_device_profiles() -> dict[EdgeDeviceType, EdgeDeviceProfile]:
             batch_size=1,
             expected_bandwidth_mbps=10.0,
             compression_level=CompressionLevel.MEDIUM,
-            cache_size_mb=500
+            cache_size_mb=500,
         ),
-
         EdgeDeviceType.JETSON_XAVIER_NX: EdgeDeviceProfile(
             device_type=EdgeDeviceType.JETSON_XAVIER_NX,
             cpu_cores=6,
@@ -996,9 +983,8 @@ def get_device_profiles() -> dict[EdgeDeviceType, EdgeDeviceProfile]:
             batch_size=4,
             expected_bandwidth_mbps=25.0,
             compression_level=CompressionLevel.LOW,
-            cache_size_mb=1000
+            cache_size_mb=1000,
         ),
-
         EdgeDeviceType.JETSON_AGX_XAVIER: EdgeDeviceProfile(
             device_type=EdgeDeviceType.JETSON_AGX_XAVIER,
             cpu_cores=8,
@@ -1014,9 +1000,8 @@ def get_device_profiles() -> dict[EdgeDeviceType, EdgeDeviceProfile]:
             batch_size=8,
             expected_bandwidth_mbps=50.0,
             compression_level=CompressionLevel.LOW,
-            cache_size_mb=2000
+            cache_size_mb=2000,
         ),
-
         EdgeDeviceType.INTEL_NCS2: EdgeDeviceProfile(
             device_type=EdgeDeviceType.INTEL_NCS2,
             cpu_cores=4,
@@ -1032,9 +1017,8 @@ def get_device_profiles() -> dict[EdgeDeviceType, EdgeDeviceProfile]:
             batch_size=1,
             expected_bandwidth_mbps=5.0,
             compression_level=CompressionLevel.HIGH,
-            cache_size_mb=200
+            cache_size_mb=200,
         ),
-
         EdgeDeviceType.RASPBERRY_PI_4: EdgeDeviceProfile(
             device_type=EdgeDeviceType.RASPBERRY_PI_4,
             cpu_cores=4,
@@ -1050,19 +1034,20 @@ def get_device_profiles() -> dict[EdgeDeviceType, EdgeDeviceProfile]:
             batch_size=1,
             expected_bandwidth_mbps=10.0,
             compression_level=CompressionLevel.HIGH,
-            cache_size_mb=300
-        )
+            cache_size_mb=300,
+        ),
     }
 
 
 # Deployment automation
+
 
 async def create_edge_deployment_package(
     model_path: Path,
     device_type: EdgeDeviceType,
     output_dir: Path,
     include_kubernetes: bool = True,
-    additional_services: list[str] | None = None
+    additional_services: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create complete edge deployment package."""
 
@@ -1081,7 +1066,7 @@ async def create_edge_deployment_package(
     # Initialize components
     model_optimizer = EdgeModelOptimizer()
     container_builder = EdgeContainerBuilder()
-    bandwidth_optimizer = BandwidthOptimizer()
+    BandwidthOptimizer()
 
     # Step 1: Optimize models for device
     logger.info("Optimizing models for target device...")
@@ -1108,11 +1093,10 @@ async def create_edge_deployment_package(
 
         manifests = [
             k8s_generator.create_deployment_manifest(
-                device_profile,
-                f"its-camera-ai-edge:{device_type.value}"
+                device_profile, f"its-camera-ai-edge:{device_type.value}"
             ),
             k8s_generator.create_service_manifest(),
-            k8s_generator.create_configmap_manifest(device_profile)
+            k8s_generator.create_configmap_manifest(device_profile),
         ]
 
         k8s_dir = output_dir / "kubernetes"
@@ -1124,11 +1108,12 @@ async def create_edge_deployment_package(
     scripts_dir.mkdir(exist_ok=True)
 
     deployment_script = scripts_dir / "deploy.sh"
-    with open(deployment_script, 'w') as f:
-        f.write(f"""#!/bin/bash
+    with open(deployment_script, "w") as f:
+        f.write(
+            f"""#!/bin/bash
 # ITS Camera AI Edge Deployment Script
 # Device: {device_type.value}
-# Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
+# Generated: {time.strftime("%Y-%m-%d %H:%M:%S")}
 
 set -e
 
@@ -1149,7 +1134,8 @@ timeout 60 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done
 echo "Deployment completed successfully!"
 echo "API available at: http://localhost:8080"
 echo "Metrics available at: http://localhost:8081"
-""")
+"""
+        )
 
     deployment_script.chmod(0o755)
 
@@ -1160,22 +1146,27 @@ echo "Metrics available at: http://localhost:8081"
 
     # Edge configuration
     edge_config = config_dir / "edge_config.json"
-    with open(edge_config, 'w') as f:
-        json.dump({
-            "device": device_profile.to_dict(),
-            "models": {name: str(path) for name, path in optimized_models.items()},
-            "optimization": {
-                "compression_enabled": True,
-                "compression_level": device_profile.compression_level.value,
-                "cache_enabled": True,
-                "cache_size_mb": device_profile.cache_size_mb
-            }
-        }, f, indent=2)
+    with open(edge_config, "w") as f:
+        json.dump(
+            {
+                "device": device_profile.to_dict(),
+                "models": {name: str(path) for name, path in optimized_models.items()},
+                "optimization": {
+                    "compression_enabled": True,
+                    "compression_level": device_profile.compression_level.value,
+                    "cache_enabled": True,
+                    "cache_size_mb": device_profile.cache_size_mb,
+                },
+            },
+            f,
+            indent=2,
+        )
 
     # Requirements file
     requirements_txt = output_dir / "requirements.txt"
-    with open(requirements_txt, 'w') as f:
-        f.write("""# ITS Camera AI Edge Requirements
+    with open(requirements_txt, "w") as f:
+        f.write(
+            """# ITS Camera AI Edge Requirements
 torch>=1.12.0
 torchvision>=0.13.0
 ultralytics>=8.0.0
@@ -1185,10 +1176,11 @@ fastapi>=0.70.0
 uvicorn>=0.15.0
 aiofiles>=0.7.0
 prometheus-client>=0.12.0
-""")
+"""
+        )
 
         # Add device-specific requirements
-        if device_type.value.startswith('jetson'):
+        if device_type.value.startswith("jetson"):
             f.write("tensorrt>=8.0.0\n")
         elif device_type == EdgeDeviceType.INTEL_NCS2:
             f.write("openvino>=2022.1.0\n")
@@ -1250,7 +1242,7 @@ docker-compose logs its-camera-ai
 - Max Throughput: {device_profile.max_throughput_fps} FPS
 """
 
-    with open(output_dir / "README.md", 'w') as f:
+    with open(output_dir / "README.md", "w") as f:
         f.write(readme_content)
 
     # Return deployment package summary
@@ -1265,12 +1257,12 @@ docker-compose logs its-camera-ai
             "kubernetes_manifests": [str(f) for f in k8s_files],
             "deployment_script": str(deployment_script),
             "configuration": str(edge_config),
-            "requirements": str(requirements_txt)
+            "requirements": str(requirements_txt),
         },
         "deployment_commands": {
             "docker": "./scripts/deploy.sh",
-            "kubernetes": "kubectl apply -f kubernetes/"
-        }
+            "kubernetes": "kubectl apply -f kubernetes/",
+        },
     }
 
     logger.info(f"Edge deployment package created successfully at {output_dir}")

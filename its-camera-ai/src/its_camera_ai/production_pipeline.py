@@ -30,17 +30,15 @@ import numpy as np
 
 # Import all pipeline components
 from .data.streaming_processor import StreamProcessor, create_stream_processor
-from .ml.ml_pipeline import ProductionMLPipeline, create_production_pipeline
-from .ml.inference_optimizer import (
-    InferenceConfig,
-    ModelType,
-    OptimizationBackend,
-    OptimizedInferenceEngine,
-)
 from .ml.federated_learning import (
     FederatedCoordinator,
     create_federated_coordinator,
 )
+from .ml.inference_optimizer import (
+    ModelType,
+    OptimizationBackend,
+)
+from .ml.ml_pipeline import ProductionMLPipeline, create_production_pipeline
 from .ml.production_monitoring import (
     ProductionDashboard,
     create_production_monitoring_system,
@@ -180,46 +178,11 @@ class ProductionOrchestrator:
     async def _initialize_data_pipeline(self):
         """Initialize data processing pipeline."""
 
-        data_config = {
-            "kafka_servers": [self.config.kafka_cluster],
-            "input_topic": "camera_frames",
-            "output_topic": "processed_frames",
-            "redis_url": f"redis://{self.config.redis_cluster}",
-            "max_concurrent_streams": self.config.max_concurrent_cameras,
-            "quality_threshold": 0.7,
-            "processing_timeout": 5.0,
-        }
-
         self.stream_processor = await create_stream_processor()
         logger.info("Data processing pipeline initialized")
 
     async def _initialize_ml_pipeline(self):
         """Initialize ML training and inference pipeline."""
-
-        ml_config = {
-            "data_ingestion": {
-                "kafka_servers": [self.config.kafka_cluster],
-                "redis_url": f"redis://{self.config.redis_cluster}",
-                "quality_threshold": 0.7,
-            },
-            "training": {
-                "use_ray": True,
-                "num_workers": 4,
-                "federated_enabled": self.config.federated_learning_enabled,
-                "output_dir": "training_outputs",
-            },
-            "model_registry": {"registry_path": "model_registry"},
-            "experiment_tracking": {
-                "enabled": True,
-                "tracking_uri": self.config.mlflow_uri,
-            },
-            "model_validation": {
-                "min_accuracy": self.config.target_accuracy,
-                "max_latency_ms": self.config.target_latency_ms,
-                "validation_dataset": "data/validation",
-            },
-            "monitoring": {"dashboard_port": 8080, "metrics_interval": 60},
-        }
 
         self.ml_pipeline = await create_production_pipeline()
         logger.info("ML pipeline initialized")
@@ -248,16 +211,6 @@ class ProductionOrchestrator:
 
     async def _initialize_federated_learning(self):
         """Initialize federated learning coordinator."""
-
-        fed_config = {
-            "min_clients_per_round": 3,
-            "max_clients_per_round": 20,
-            "client_selection_fraction": 0.2,
-            "global_rounds": 100,
-            "local_epochs": 5,
-            "convergence_threshold": 0.001,
-            "aggregation_method": "fedavg",
-        }
 
         self.federated_coordinator = await create_federated_coordinator()
         logger.info("Federated learning coordinator initialized")
@@ -425,7 +378,7 @@ class ProductionOrchestrator:
 
         # Calculate overall health score
         component_scores = []
-        for component, data in health_data.items():
+        for _component, data in health_data.items():
             if isinstance(data, dict) and "health_score" in data:
                 component_scores.append(data["health_score"])
 

@@ -3,7 +3,7 @@ name = "its-camera-ai"
 version = "0.1.0"
 description = "AI Camera Traffic Monitoring System - Real-time traffic analytics and vehicle tracking"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     {name = "ITS Camera AI Team", email = "team@its-camera-ai.com"},
 ]
@@ -12,7 +12,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -68,6 +68,8 @@ dependencies = [
     "opentelemetry-sdk>=1.36.0",
     "opentelemetry-instrumentation-fastapi>=0.57b0",
     "sentry-sdk[fastapi]>=2.34.1",
+    "onnx>=1.18.0",
+    "onnxruntime>=1.22.1",
 ]
 
 [dependency-groups]
@@ -111,26 +113,61 @@ ml = [
     "optuna>=4.4.0",
     "mlflow>=3.2.0",
     "tensorboard>=2.20.0",
-    "onnx>=1.18.0",
-    "onnxruntime-gpu>=1.22.0",
+    "wandb>=0.19.0",
+    # Model formats and optimization
+    "onnx>=1.16.0",
+    "onnxruntime-gpu>=1.19.0",
+    "onnxsim>=0.4.36",
+    # Model serving and deployment
+    "torchserve>=0.12.0",
+    # Performance profiling
+    "py-spy>=0.3.12",
 ]
 
 gpu = [
     # GPU-specific dependencies
-    "triton>=3.4.0",
-    "cupy-cuda12x>=13.5.1",
+    # Note: GPU packages often require specific CUDA versions
+    # Install manually if needed: pip install triton cupy-cuda12x
 ]
 
 linux = [
-    # Linux-specific dependencies
-    # "torch-tensorrt>=1.4.0",
+    # Linux system monitoring
+    "psutil>=6.1.0",
+    "py-cpuinfo>=9.0.0",
+]
+
+macos = [
+    # macOS-specific dependencies
+    "coremltools>=8.2.0",
+    "ane-transformers>=0.1.0",
+    # macOS system monitoring
+    "psutil>=6.1.0",
 ]
 
 edge = [
     # Edge deployment dependencies
     "optimum[onnxruntime]>=1.27.0",
-    "openvino>=2025.2.0",
-    "pycoral>=0.2.0",
+    "openvino>=2024.2.0",
+]
+
+tensorrt = [
+    # TensorRT-specific dependencies (Linux only)
+    # Note: TensorRT packages require manual installation from NVIDIA
+    "polygraphy>=0.49.0",
+]
+
+coreml = [
+    # CoreML-specific dependencies (macOS only)
+    "coremltools>=8.2.0",
+    "ane-transformers>=0.1.0",
+]
+
+inference = [
+    # Inference optimization dependencies
+    "tritonclient[all]>=2.32.0",
+    "bentoml>=1.3.28",
+    "ray[serve]>=2.38.0",
+    "torchserve>=0.12.0",
 ]
 
 [project.scripts]
@@ -158,7 +195,7 @@ include = ["its_camera_ai*"]
 # Black Configuration
 [tool.black]
 line-length = 88
-target-version = ['py311']
+target-version = ['py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -184,8 +221,19 @@ ensure_newline_before_comments = true
 
 # Ruff Configuration
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 88
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".venv",
+    "build",
+    "dist",
+    "migrations",
+]
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -203,23 +251,19 @@ ignore = [
     "E501",  # line too long (handled by black)
     "B008",  # do not perform function calls in argument defaults
     "S101",  # assert used (OK in tests)
-]
-exclude = [
-    ".git",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".venv",
-    "build",
-    "dist",
-    "migrations",
+    "S311",  # random module (OK for non-crypto use)
+    "S324",  # hashlib (OK for non-security use)
+    "S603",  # subprocess (OK with validation)
+    "S607",  # partial path (OK with validation)
 ]
 
-[tool.ruff.per-file-ignores]
-"tests/*" = ["S101", "ARG002", "ARG001"]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ARG002", "ARG001", "S311", "S324"]
+"scripts/*" = ["S603", "S607"]
 
 # MyPy Configuration
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -267,6 +311,9 @@ markers = [
     "integration: marks tests as integration tests",
     "gpu: marks tests that require GPU",
     "ml: marks tests for ML models",
+    "unit: marks tests as unit tests",
+    "e2e: marks tests as end-to-end tests",
+    "benchmark: marks performance benchmark tests",
 ]
 
 # Coverage Configuration

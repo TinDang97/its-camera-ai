@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 class ExperimentStatus(Enum):
     """A/B experiment status."""
+
     DRAFT = "draft"
     RUNNING = "running"
     PAUSED = "paused"
@@ -54,14 +55,16 @@ class ExperimentStatus(Enum):
 
 class DeploymentStrategy(Enum):
     """Model deployment strategies."""
-    BLUE_GREEN = "blue_green"        # Switch all traffic at once
-    CANARY = "canary"               # Gradual traffic increase
-    ROLLING = "rolling"             # Replace instances gradually
-    FEATURE_FLAG = "feature_flag"   # Use feature flags for control
+
+    BLUE_GREEN = "blue_green"  # Switch all traffic at once
+    CANARY = "canary"  # Gradual traffic increase
+    ROLLING = "rolling"  # Replace instances gradually
+    FEATURE_FLAG = "feature_flag"  # Use feature flags for control
 
 
 class ModelValidationResult(Enum):
     """Model validation results."""
+
     PASSED = "passed"
     FAILED = "failed"
     WARNING = "warning"
@@ -96,7 +99,9 @@ class ModelVersion:
 
     def __post_init__(self):
         # Generate unique model hash for caching
-        model_content = self.model_path.read_bytes() if self.model_path.exists() else b""
+        model_content = (
+            self.model_path.read_bytes() if self.model_path.exists() else b""
+        )
         self.model_hash = hashlib.sha256(model_content).hexdigest()[:16]
 
 
@@ -145,9 +150,11 @@ class ABExperiment:
             effect_size = self.minimum_effect_size
 
             # Calculate required sample size using power analysis
-            from statsmodels.stats.power import ttest_power
+            from statsmodels.stats.power import ttest_power  # noqa: F401
 
-            n = stats.norm.ppf(1 - self.significance_level/2) + stats.norm.ppf(self.power)
+            n = stats.norm.ppf(1 - self.significance_level / 2) + stats.norm.ppf(
+                self.power
+            )
             n = (n / effect_size) ** 2 * 2
 
             return max(self.min_sample_size, int(n))
@@ -169,12 +176,20 @@ class ModelValidator:
         self.min_throughput_fps = validation_config.get("min_throughput_fps", 10)
 
         # Test datasets
-        self.validation_dataset_path = Path(validation_config.get("validation_dataset", "data/validation"))
-        self.benchmark_dataset_path = Path(validation_config.get("benchmark_dataset", "data/benchmark"))
+        self.validation_dataset_path = Path(
+            validation_config.get("validation_dataset", "data/validation")
+        )
+        self.benchmark_dataset_path = Path(
+            validation_config.get("benchmark_dataset", "data/benchmark")
+        )
 
-    async def validate_model(self, model_version: ModelVersion) -> ModelValidationResult:
+    async def validate_model(
+        self, model_version: ModelVersion
+    ) -> ModelValidationResult:
         """Comprehensive model validation."""
-        logger.info(f"Starting validation for model {model_version.model_id} v{model_version.version}")
+        logger.info(
+            f"Starting validation for model {model_version.model_id} v{model_version.version}"
+        )
 
         try:
             # Initialize model for testing
@@ -203,8 +218,12 @@ class ModelValidator:
             model_version.validation_details = validation_results
 
             # Determine overall result
-            failed_tests = [k for k, v in validation_results.items() if v["status"] == "failed"]
-            warning_tests = [k for k, v in validation_results.items() if v["status"] == "warning"]
+            failed_tests = [
+                k for k, v in validation_results.items() if v["status"] == "failed"
+            ]
+            warning_tests = [
+                k for k, v in validation_results.items() if v["status"] == "warning"
+            ]
 
             if failed_tests:
                 model_version.validation_result = ModelValidationResult.FAILED
@@ -227,7 +246,9 @@ class ModelValidator:
             model_version.validation_details["error"] = str(e)
             return ModelValidationResult.FAILED
 
-    async def _initialize_model(self, model_version: ModelVersion) -> OptimizedInferenceEngine:
+    async def _initialize_model(
+        self, model_version: ModelVersion
+    ) -> OptimizedInferenceEngine:
         """Initialize model for validation."""
         # Load configuration
         config_path = model_version.config_path
@@ -246,7 +267,9 @@ class ModelValidator:
 
         return engine
 
-    async def _validate_accuracy(self, engine: OptimizedInferenceEngine, model_version: ModelVersion) -> dict[str, Any]:
+    async def _validate_accuracy(
+        self, engine: OptimizedInferenceEngine, model_version: ModelVersion
+    ) -> dict[str, Any]:
         """Validate model accuracy on test dataset."""
 
         if not self.validation_dataset_path.exists():
@@ -265,16 +288,16 @@ class ModelValidator:
 
             for sample in validation_samples[:100]:  # Limit for validation speed
                 result = await engine.predict_single(
-                    sample["image"],
-                    f"val_{sample['id']}",
-                    "validation_camera"
+                    sample["image"], f"val_{sample['id']}", "validation_camera"
                 )
 
                 # Compare with ground truth (simplified)
                 if self._compare_with_ground_truth(result, sample["ground_truth"]):
                     correct_predictions += 1
 
-            accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
+            accuracy = (
+                correct_predictions / total_predictions if total_predictions > 0 else 0
+            )
             model_version.accuracy_score = accuracy
 
             # Check against threshold
@@ -284,13 +307,15 @@ class ModelValidator:
                 "status": status,
                 "accuracy": accuracy,
                 "threshold": self.min_accuracy,
-                "samples_tested": total_predictions
+                "samples_tested": total_predictions,
             }
 
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    async def _validate_performance(self, engine: OptimizedInferenceEngine, model_version: ModelVersion) -> dict[str, Any]:
+    async def _validate_performance(
+        self, engine: OptimizedInferenceEngine, model_version: ModelVersion
+    ) -> dict[str, Any]:
         """Validate model performance metrics."""
 
         try:
@@ -305,7 +330,7 @@ class ModelValidator:
             latencies = []
             for i in range(50):
                 start_time = time.time()
-                result = await engine.predict_single(test_image, f"perf_{i}", "test_camera")
+                await engine.predict_single(test_image, f"perf_{i}", "test_camera")
                 end_time = time.time()
 
                 latency_ms = (end_time - start_time) * 1000
@@ -336,32 +361,35 @@ class ModelValidator:
                 "avg_latency_ms": avg_latency,
                 "throughput_fps": throughput_fps,
                 "latency_threshold": self.max_latency_ms,
-                "throughput_threshold": self.min_throughput_fps
+                "throughput_threshold": self.min_throughput_fps,
             }
 
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    async def _validate_regression(self, engine: OptimizedInferenceEngine, model_version: ModelVersion) -> dict[str, Any]:
+    async def _validate_regression(
+        self, _engine: OptimizedInferenceEngine, _model_version: ModelVersion
+    ) -> dict[str, Any]:
         """Check for regression against current production model."""
 
         # In production, this would compare against the current production model
         # For now, return a placeholder
-        return {
-            "status": "passed",
-            "message": "Regression testing not implemented yet"
-        }
+        return {"status": "passed", "message": "Regression testing not implemented yet"}
 
-    async def _validate_resources(self, engine: OptimizedInferenceEngine, model_version: ModelVersion) -> dict[str, Any]:
+    async def _validate_resources(
+        self, _engine: OptimizedInferenceEngine, _model_version: ModelVersion
+    ) -> dict[str, Any]:
         """Validate resource usage (memory, GPU, etc.)."""
 
         try:
             # Get current resource usage
-            performance_stats = engine.get_performance_stats()
+            performance_stats = _engine.get_performance_stats()
 
             # Check memory usage
             gpu_memory = performance_stats.get("gpu_memory_used", {})
-            total_memory_mb = sum(gpu_memory.values()) if isinstance(gpu_memory, dict) else 0
+            total_memory_mb = (
+                sum(gpu_memory.values()) if isinstance(gpu_memory, dict) else 0
+            )
 
             # Resource thresholds
             max_memory_mb = 4000  # 4GB limit
@@ -373,7 +401,7 @@ class ModelValidator:
                 "status": status,
                 "gpu_memory_mb": total_memory_mb,
                 "memory_threshold_mb": max_memory_mb,
-                "gpu_utilization": performance_stats.get("gpu_utilization", 0)
+                "gpu_utilization": performance_stats.get("gpu_utilization", 0),
             }
 
         except Exception as e:
@@ -386,19 +414,19 @@ class ModelValidator:
         samples = []
 
         for i in range(100):
-            samples.append({
-                "id": i,
-                "image": np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8),
-                "ground_truth": {
-                    "boxes": [],
-                    "classes": [],
-                    "scores": []
+            samples.append(
+                {
+                    "id": i,
+                    "image": np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8),
+                    "ground_truth": {"boxes": [], "classes": [], "scores": []},
                 }
-            })
+            )
 
         return samples
 
-    def _compare_with_ground_truth(self, result: DetectionResult, ground_truth: dict[str, Any]) -> bool:
+    def _compare_with_ground_truth(
+        self, _result: DetectionResult, _ground_truth: dict[str, Any]
+    ) -> bool:
         """Compare inference result with ground truth."""
         # Simplified comparison - in production, use IoU, mAP, etc.
         return random.random() > 0.15  # 85% accuracy simulation
@@ -421,7 +449,7 @@ class ABTestingFramework:
         description: str,
         control_model: ModelVersion,
         treatment_model: ModelVersion,
-        config: dict[str, Any]
+        config: dict[str, Any],
     ) -> ABExperiment:
         """Create new A/B testing experiment."""
 
@@ -433,7 +461,7 @@ class ABTestingFramework:
             description=description,
             control_model=control_model,
             treatment_model=treatment_model,
-            **config
+            **config,
         )
 
         logger.info(f"Created A/B experiment: {name} ({experiment_id})")
@@ -443,8 +471,11 @@ class ABTestingFramework:
         """Start A/B experiment."""
 
         # Validate models are ready
-        if (experiment.control_model.validation_result != ModelValidationResult.PASSED or
-            experiment.treatment_model.validation_result != ModelValidationResult.PASSED):
+        if (
+            experiment.control_model.validation_result != ModelValidationResult.PASSED
+            or experiment.treatment_model.validation_result
+            != ModelValidationResult.PASSED
+        ):
             logger.error("Cannot start experiment - models not validated")
             return False
 
@@ -453,8 +484,8 @@ class ABTestingFramework:
             experiment.experiment_id,
             {
                 experiment.control_model.model_id: 1.0 - experiment.traffic_split,
-                experiment.treatment_model.model_id: experiment.traffic_split
-            }
+                experiment.treatment_model.model_id: experiment.traffic_split,
+            },
         )
 
         # Start monitoring
@@ -466,7 +497,9 @@ class ABTestingFramework:
         # Start experiment monitoring task
         asyncio.create_task(self._monitor_experiment(experiment))
 
-        logger.info(f"Started A/B experiment {experiment.name} with {experiment.traffic_split*100}% traffic split")
+        logger.info(
+            f"Started A/B experiment {experiment.name} with {experiment.traffic_split * 100}% traffic split"
+        )
         return True
 
     async def _monitor_experiment(self, experiment: ABExperiment):
@@ -477,15 +510,23 @@ class ABTestingFramework:
                 # Check safety conditions
                 safety_check = await self._check_experiment_safety(experiment)
                 if not safety_check["safe"]:
-                    logger.warning(f"Experiment {experiment.name} safety violation: {safety_check['reason']}")
-                    await self.stop_experiment(experiment.experiment_id, reason="Safety violation")
+                    logger.warning(
+                        f"Experiment {experiment.name} safety violation: {safety_check['reason']}"
+                    )
+                    await self.stop_experiment(
+                        experiment.experiment_id, reason="Safety violation"
+                    )
                     break
 
                 # Check completion conditions
                 completion_check = await self._check_experiment_completion(experiment)
                 if completion_check["should_stop"]:
-                    logger.info(f"Experiment {experiment.name} completion: {completion_check['reason']}")
-                    await self.stop_experiment(experiment.experiment_id, reason=completion_check['reason'])
+                    logger.info(
+                        f"Experiment {experiment.name} completion: {completion_check['reason']}"
+                    )
+                    await self.stop_experiment(
+                        experiment.experiment_id, reason=completion_check["reason"]
+                    )
                     break
 
                 # Update experiment metrics
@@ -498,7 +539,9 @@ class ABTestingFramework:
                 logger.error(f"Experiment monitoring error: {e}")
                 await asyncio.sleep(60)
 
-    async def _check_experiment_safety(self, experiment: ABExperiment) -> dict[str, Any]:
+    async def _check_experiment_safety(
+        self, experiment: ABExperiment
+    ) -> dict[str, Any]:
         """Check if experiment is safe to continue."""
 
         if not experiment.safety_enabled:
@@ -506,7 +549,9 @@ class ABTestingFramework:
 
         # Get recent metrics for both variants
         control_metrics = self._get_recent_metrics(experiment.control_model.model_id)
-        treatment_metrics = self._get_recent_metrics(experiment.treatment_model.model_id)
+        treatment_metrics = self._get_recent_metrics(
+            experiment.treatment_model.model_id
+        )
 
         if not control_metrics or not treatment_metrics:
             return {"safe": True, "reason": "Insufficient data"}
@@ -515,10 +560,13 @@ class ABTestingFramework:
         control_error_rate = 1 - control_metrics.get("accuracy", 0.9)
         treatment_error_rate = 1 - treatment_metrics.get("accuracy", 0.9)
 
-        if treatment_error_rate - control_error_rate > experiment.max_error_rate_increase:
+        if (
+            treatment_error_rate - control_error_rate
+            > experiment.max_error_rate_increase
+        ):
             return {
                 "safe": False,
-                "reason": f"Error rate increase: {treatment_error_rate - control_error_rate:.3f} > {experiment.max_error_rate_increase}"
+                "reason": f"Error rate increase: {treatment_error_rate - control_error_rate:.3f} > {experiment.max_error_rate_increase}",
             }
 
         # Check latency increases
@@ -529,12 +577,14 @@ class ABTestingFramework:
         if latency_increase > experiment.max_latency_increase:
             return {
                 "safe": False,
-                "reason": f"Latency increase: {latency_increase:.3f} > {experiment.max_latency_increase}"
+                "reason": f"Latency increase: {latency_increase:.3f} > {experiment.max_latency_increase}",
             }
 
         return {"safe": True}
 
-    async def _check_experiment_completion(self, experiment: ABExperiment) -> dict[str, Any]:
+    async def _check_experiment_completion(
+        self, experiment: ABExperiment
+    ) -> dict[str, Any]:
         """Check if experiment should be stopped."""
 
         # Check maximum runtime
@@ -557,21 +607,32 @@ class ABTestingFramework:
         if significance_result["is_significant"]:
             return {
                 "should_stop": True,
-                "reason": f"Statistical significance achieved (p={significance_result['p_value']:.4f})"
+                "reason": f"Statistical significance achieved (p={significance_result['p_value']:.4f})",
             }
 
         return {"should_stop": False, "reason": "Experiment continuing"}
 
-    async def _calculate_statistical_significance(self, experiment: ABExperiment) -> dict[str, Any]:
+    async def _calculate_statistical_significance(
+        self, experiment: ABExperiment
+    ) -> dict[str, Any]:
         """Calculate statistical significance of experiment results."""
 
-        if len(experiment.control_metrics) < 50 or len(experiment.treatment_metrics) < 50:
-            return {"is_significant": False, "p_value": 1.0, "reason": "Insufficient data"}
+        if (
+            len(experiment.control_metrics) < 50
+            or len(experiment.treatment_metrics) < 50
+        ):
+            return {
+                "is_significant": False,
+                "p_value": 1.0,
+                "reason": "Insufficient data",
+            }
 
         try:
             # Extract primary metric (accuracy)
             control_values = [m.get("accuracy", 0) for m in experiment.control_metrics]
-            treatment_values = [m.get("accuracy", 0) for m in experiment.treatment_metrics]
+            treatment_values = [
+                m.get("accuracy", 0) for m in experiment.treatment_metrics
+            ]
 
             # Perform statistical test
             from scipy import stats
@@ -583,7 +644,9 @@ class ABTestingFramework:
             # Calculate effect size
             control_mean = np.mean(control_values)
             treatment_mean = np.mean(treatment_values)
-            pooled_std = np.sqrt((np.var(control_values) + np.var(treatment_values)) / 2)
+            pooled_std = np.sqrt(
+                (np.var(control_values) + np.var(treatment_values)) / 2
+            )
             effect_size = (treatment_mean - control_mean) / pooled_std
 
             return {
@@ -592,13 +655,17 @@ class ABTestingFramework:
                 "effect_size": effect_size,
                 "control_mean": control_mean,
                 "treatment_mean": treatment_mean,
-                "improvement": (treatment_mean - control_mean) / control_mean
+                "improvement": (treatment_mean - control_mean) / control_mean,
             }
 
         except ImportError:
             # Fallback statistical test
-            control_mean = np.mean([m.get("accuracy", 0) for m in experiment.control_metrics])
-            treatment_mean = np.mean([m.get("accuracy", 0) for m in experiment.treatment_metrics])
+            control_mean = np.mean(
+                [m.get("accuracy", 0) for m in experiment.control_metrics]
+            )
+            treatment_mean = np.mean(
+                [m.get("accuracy", 0) for m in experiment.treatment_metrics]
+            )
 
             improvement = (treatment_mean - control_mean) / control_mean
             is_significant = abs(improvement) > experiment.minimum_effect_size
@@ -608,7 +675,7 @@ class ABTestingFramework:
                 "p_value": 0.01 if is_significant else 0.1,
                 "control_mean": control_mean,
                 "treatment_mean": treatment_mean,
-                "improvement": improvement
+                "improvement": improvement,
             }
 
     async def _update_experiment_metrics(self, experiment: ABExperiment):
@@ -616,7 +683,9 @@ class ABTestingFramework:
 
         # Get recent performance data from dashboard
         control_metrics = self._get_recent_metrics(experiment.control_model.model_id)
-        treatment_metrics = self._get_recent_metrics(experiment.treatment_model.model_id)
+        treatment_metrics = self._get_recent_metrics(
+            experiment.treatment_model.model_id
+        )
 
         if control_metrics:
             experiment.control_metrics.append(control_metrics)
@@ -683,17 +752,28 @@ class ABTestingFramework:
             return None
 
         # Calculate results
-        if len(experiment.control_metrics) > 0 and len(experiment.treatment_metrics) > 0:
+        if (
+            len(experiment.control_metrics) > 0
+            and len(experiment.treatment_metrics) > 0
+        ):
             control_stats = {
-                "accuracy": np.mean([m.get("accuracy", 0) for m in experiment.control_metrics]),
-                "latency_p95": np.mean([m.get("p95_latency_ms", 0) for m in experiment.treatment_metrics]),
-                "sample_count": len(experiment.control_metrics)
+                "accuracy": np.mean(
+                    [m.get("accuracy", 0) for m in experiment.control_metrics]
+                ),
+                "latency_p95": np.mean(
+                    [m.get("p95_latency_ms", 0) for m in experiment.treatment_metrics]
+                ),
+                "sample_count": len(experiment.control_metrics),
             }
 
             treatment_stats = {
-                "accuracy": np.mean([m.get("accuracy", 0) for m in experiment.treatment_metrics]),
-                "latency_p95": np.mean([m.get("p95_latency_ms", 0) for m in experiment.treatment_metrics]),
-                "sample_count": len(experiment.treatment_metrics)
+                "accuracy": np.mean(
+                    [m.get("accuracy", 0) for m in experiment.treatment_metrics]
+                ),
+                "latency_p95": np.mean(
+                    [m.get("p95_latency_ms", 0) for m in experiment.treatment_metrics]
+                ),
+                "sample_count": len(experiment.treatment_metrics),
             }
         else:
             control_stats = {"accuracy": 0, "latency_p95": 0, "sample_count": 0}
@@ -708,14 +788,14 @@ class ABTestingFramework:
             "control_model": {
                 "model_id": experiment.control_model.model_id,
                 "version": experiment.control_model.version,
-                "stats": control_stats
+                "stats": control_stats,
             },
             "treatment_model": {
                 "model_id": experiment.treatment_model.model_id,
                 "version": experiment.treatment_model.version,
-                "stats": treatment_stats
+                "stats": treatment_stats,
             },
-            "traffic_split": experiment.traffic_split
+            "traffic_split": experiment.traffic_split,
         }
 
 
@@ -723,7 +803,9 @@ class TrafficRouter:
     """Route traffic between different model versions."""
 
     def __init__(self):
-        self.routing_rules: dict[str, dict[str, float]] = {}  # experiment_id -> {model_id: percentage}
+        self.routing_rules: dict[
+            str, dict[str, float]
+        ] = {}  # experiment_id -> {model_id: percentage}
         self.default_model: str | None = None
 
     async def configure_split(self, experiment_id: str, splits: dict[str, float]):
@@ -747,7 +829,7 @@ class TrafficRouter:
         hash_value = hash(request_id) % 100000 / 100000  # 0.0 to 1.0
 
         # Find matching rule
-        for experiment_id, splits in self.routing_rules.items():
+        for _experiment_id, splits in self.routing_rules.items():
             cumulative = 0.0
             for model_id, percentage in splits.items():
                 cumulative += percentage
@@ -775,7 +857,7 @@ class DeploymentPipeline:
         self,
         validator: ModelValidator,
         ab_framework: ABTestingFramework,
-        dashboard: ProductionDashboard
+        dashboard: ProductionDashboard,
     ):
         self.validator = validator
         self.ab_framework = ab_framework
@@ -786,23 +868,25 @@ class DeploymentPipeline:
             DeploymentStrategy.CANARY: {
                 "initial_traffic": 0.05,
                 "traffic_increments": [0.05, 0.10, 0.25, 0.50, 1.00],
-                "increment_interval_hours": 2
+                "increment_interval_hours": 2,
             },
             DeploymentStrategy.BLUE_GREEN: {
                 "validation_period_minutes": 30,
-                "rollback_threshold_errors": 0.05
-            }
+                "rollback_threshold_errors": 0.05,
+            },
         }
 
     async def deploy_model(
         self,
         model_version: ModelVersion,
         strategy: DeploymentStrategy = DeploymentStrategy.CANARY,
-        current_production_model: ModelVersion | None = None
+        current_production_model: ModelVersion | None = None,
     ) -> dict[str, Any]:
         """Deploy model using specified strategy."""
 
-        logger.info(f"Starting deployment of {model_version.model_id} v{model_version.version} using {strategy.value}")
+        logger.info(
+            f"Starting deployment of {model_version.model_id} v{model_version.version} using {strategy.value}"
+        )
 
         # Step 1: Validate model
         validation_result = await self.validator.validate_model(model_version)
@@ -812,7 +896,7 @@ class DeploymentPipeline:
                 "success": False,
                 "step": "validation",
                 "reason": f"Model validation {validation_result.value}",
-                "details": model_version.validation_details
+                "details": model_version.validation_details,
             }
 
         # Step 2: Execute deployment strategy
@@ -820,7 +904,9 @@ class DeploymentPipeline:
             return await self._deploy_canary(model_version, current_production_model)
 
         elif strategy == DeploymentStrategy.BLUE_GREEN:
-            return await self._deploy_blue_green(model_version, current_production_model)
+            return await self._deploy_blue_green(
+                model_version, current_production_model
+            )
 
         elif strategy == DeploymentStrategy.ROLLING:
             return await self._deploy_rolling(model_version)
@@ -828,13 +914,11 @@ class DeploymentPipeline:
         else:
             return {
                 "success": False,
-                "reason": f"Deployment strategy {strategy.value} not implemented"
+                "reason": f"Deployment strategy {strategy.value} not implemented",
             }
 
     async def _deploy_canary(
-        self,
-        model_version: ModelVersion,
-        current_model: ModelVersion | None
+        self, model_version: ModelVersion, current_model: ModelVersion | None
     ) -> dict[str, Any]:
         """Deploy using canary strategy."""
 
@@ -851,11 +935,13 @@ class DeploymentPipeline:
             control_model=current_model,
             treatment_model=model_version,
             config={
-                "traffic_split": self.deployment_configs[DeploymentStrategy.CANARY]["initial_traffic"],
+                "traffic_split": self.deployment_configs[DeploymentStrategy.CANARY][
+                    "initial_traffic"
+                ],
                 "min_sample_size": 500,
                 "max_runtime_hours": 24,
-                "safety_enabled": True
-            }
+                "safety_enabled": True,
+            },
         )
 
         # Start experiment
@@ -869,7 +955,7 @@ class DeploymentPipeline:
                 "success": True,
                 "strategy": "canary",
                 "experiment_id": experiment.experiment_id,
-                "initial_traffic": experiment.traffic_split
+                "initial_traffic": experiment.traffic_split,
             }
         else:
             return {"success": False, "reason": "Failed to start canary experiment"}
@@ -883,16 +969,21 @@ class DeploymentPipeline:
 
         current_increment_index = 0
 
-        while (experiment.status == ExperimentStatus.RUNNING and
-               current_increment_index < len(increments)):
-
+        while (
+            experiment.status == ExperimentStatus.RUNNING
+            and current_increment_index < len(increments)
+        ):
             await asyncio.sleep(interval_hours * 3600)  # Wait for interval
 
             # Check if experiment is still safe
             safety_check = await self.ab_framework._check_experiment_safety(experiment)
             if not safety_check["safe"]:
-                logger.warning(f"Canary rollout stopped due to safety: {safety_check['reason']}")
-                await self.ab_framework.stop_experiment(experiment.experiment_id, "Safety violation during rollout")
+                logger.warning(
+                    f"Canary rollout stopped due to safety: {safety_check['reason']}"
+                )
+                await self.ab_framework.stop_experiment(
+                    experiment.experiment_id, "Safety violation during rollout"
+                )
                 break
 
             # Increase traffic
@@ -904,8 +995,8 @@ class DeploymentPipeline:
                 experiment.experiment_id,
                 {
                     experiment.control_model.model_id: 1.0 - new_traffic,
-                    experiment.treatment_model.model_id: new_traffic
-                }
+                    experiment.treatment_model.model_id: new_traffic,
+                },
             )
 
             logger.info(f"Canary rollout: increased traffic to {new_traffic * 100}%")
@@ -914,13 +1005,13 @@ class DeploymentPipeline:
             # If we've reached 100%, complete the deployment
             if new_traffic >= 1.0:
                 logger.info("Canary rollout completed successfully")
-                await self.ab_framework.stop_experiment(experiment.experiment_id, "Canary rollout completed")
+                await self.ab_framework.stop_experiment(
+                    experiment.experiment_id, "Canary rollout completed"
+                )
                 break
 
     async def _deploy_blue_green(
-        self,
-        model_version: ModelVersion,
-        current_model: ModelVersion | None
+        self, model_version: ModelVersion, current_model: ModelVersion | None
     ) -> dict[str, Any]:
         """Deploy using blue-green strategy."""
 
@@ -930,10 +1021,12 @@ class DeploymentPipeline:
         model_version.is_active = False  # Not serving traffic yet
 
         # Validation period with synthetic traffic
-        logger.info(f"Blue-green: validation period of {config['validation_period_minutes']} minutes")
+        logger.info(
+            f"Blue-green: validation period of {config['validation_period_minutes']} minutes"
+        )
 
         # Simulate validation period
-        await asyncio.sleep(config['validation_period_minutes'] * 60)
+        await asyncio.sleep(config["validation_period_minutes"] * 60)
 
         # Check model health during validation
         monitor = self.dashboard.model_monitors.get(model_version.model_id)
@@ -943,7 +1036,7 @@ class DeploymentPipeline:
                 return {
                     "success": False,
                     "strategy": "blue_green",
-                    "reason": f"Model health score too low: {health_score}"
+                    "reason": f"Model health score too low: {health_score}",
                 }
 
         # Switch traffic (atomic operation)
@@ -956,11 +1049,7 @@ class DeploymentPipeline:
 
         logger.info("Blue-green deployment completed - traffic switched")
 
-        return {
-            "success": True,
-            "strategy": "blue_green",
-            "switch_time": time.time()
-        }
+        return {"success": True, "strategy": "blue_green", "switch_time": time.time()}
 
     async def _deploy_rolling(self, model_version: ModelVersion) -> dict[str, Any]:
         """Deploy using rolling update strategy."""
@@ -974,18 +1063,20 @@ class DeploymentPipeline:
         return {
             "success": True,
             "strategy": "rolling",
-            "message": "Rolling deployment completed"
+            "message": "Rolling deployment completed",
         }
 
     async def rollback_deployment(
         self,
         model_version: ModelVersion,
         previous_model: ModelVersion,
-        reason: str = "Manual rollback"
+        reason: str = "Manual rollback",
     ) -> dict[str, Any]:
         """Rollback to previous model version."""
 
-        logger.warning(f"Rolling back {model_version.model_id} v{model_version.version}: {reason}")
+        logger.warning(
+            f"Rolling back {model_version.model_id} v{model_version.version}: {reason}"
+        )
 
         # Deactivate current model
         model_version.is_active = False
@@ -1000,21 +1091,23 @@ class DeploymentPipeline:
             if experiment.treatment_model.model_id == model_version.model_id:
                 await self.ab_framework.stop_experiment(exp_id, f"Rollback: {reason}")
 
-        logger.info(f"Rollback completed - reverted to {previous_model.model_id} v{previous_model.version}")
+        logger.info(
+            f"Rollback completed - reverted to {previous_model.model_id} v{previous_model.version}"
+        )
 
         return {
             "success": True,
             "action": "rollback",
             "current_model": f"{previous_model.model_id} v{previous_model.version}",
-            "reason": reason
+            "reason": reason,
         }
 
 
 # Example usage and integration
 
+
 async def create_mlops_pipeline(
-    dashboard: ProductionDashboard,
-    validation_config: dict[str, Any]
+    dashboard: ProductionDashboard, validation_config: dict[str, Any]
 ) -> dict[str, Any]:
     """Create complete MLOps pipeline."""
 
@@ -1028,7 +1121,7 @@ async def create_mlops_pipeline(
     return {
         "validator": validator,
         "ab_framework": ab_framework,
-        "deployment_pipeline": deployment_pipeline
+        "deployment_pipeline": deployment_pipeline,
     }
 
 
@@ -1037,7 +1130,7 @@ async def deploy_new_model_version(
     model_id: str,
     version: str,
     pipeline_components: dict[str, Any],
-    deployment_strategy: DeploymentStrategy = DeploymentStrategy.CANARY
+    deployment_strategy: DeploymentStrategy = DeploymentStrategy.CANARY,
 ) -> dict[str, Any]:
     """Deploy new model version using MLOps pipeline."""
 
@@ -1047,7 +1140,7 @@ async def deploy_new_model_version(
         version=version,
         model_path=model_path,
         config_path=model_path.parent / f"{model_id}_config.json",
-        metadata_path=model_path.parent / f"{model_id}_metadata.json"
+        metadata_path=model_path.parent / f"{model_id}_metadata.json",
     )
 
     # Get current production model (simplified)
@@ -1056,9 +1149,7 @@ async def deploy_new_model_version(
     # Deploy using pipeline
     deployment_pipeline = pipeline_components["deployment_pipeline"]
     result = await deployment_pipeline.deploy_model(
-        model_version,
-        deployment_strategy,
-        current_model
+        model_version, deployment_strategy, current_model
     )
 
     logger.info(f"Deployment result: {result}")

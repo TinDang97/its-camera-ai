@@ -5,13 +5,13 @@ and FastAPI test client.
 """
 
 import asyncio
-from typing import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
+import redis.asyncio as redis
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
-import redis.asyncio as redis
 
 from its_camera_ai.api.app import create_app
 from its_camera_ai.core.config import get_settings_for_testing
@@ -36,12 +36,12 @@ def test_settings():
 async def test_db_manager(test_settings):
     """Database manager for tests."""
     db_manager = await create_database_engine(test_settings)
-    
+
     # Create tables
     await db_manager.create_tables()
-    
+
     yield db_manager
-    
+
     # Cleanup
     await db_manager.close()
 
@@ -58,12 +58,12 @@ async def db_session(test_db_manager) -> AsyncGenerator[AsyncSession, None]:
 async def redis_client(test_settings) -> AsyncGenerator[redis.Redis, None]:
     """Redis client for tests."""
     client = redis.from_url(test_settings.redis.url)
-    
+
     # Clear test database
     await client.flushdb()
-    
+
     yield client
-    
+
     # Cleanup
     await client.flushdb()
     await client.close()
@@ -114,13 +114,9 @@ def sample_camera_data() -> dict:
 
 # Markers for different test types
 pytest.main.add_option(
-    "--integration",
-    action="store_true",
-    help="Run integration tests"
+    "--integration", action="store_true", help="Run integration tests"
 )
 
 pytest.main.add_option(
-    "--performance",
-    action="store_true",
-    help="Run performance tests"
+    "--performance", action="store_true", help="Run performance tests"
 )

@@ -1,28 +1,27 @@
 """Cache service for Redis operations."""
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 import redis.asyncio as redis
 
 from ..core.logging import get_logger
-
 
 logger = get_logger(__name__)
 
 
 class CacheService:
     """Redis cache service for key-value operations."""
-    
+
     def __init__(self, redis_client: redis.Redis) -> None:
         self.redis = redis_client
-    
-    async def get(self, key: str) -> Optional[str]:
+
+    async def get(self, key: str) -> str | None:
         """Get value by key.
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             Value or None if not found
         """
@@ -31,20 +30,15 @@ class CacheService:
         except Exception as e:
             logger.error("Cache get error", key=key, error=str(e))
             return None
-    
-    async def set(
-        self,
-        key: str,
-        value: str,
-        ttl: Optional[int] = None
-    ) -> bool:
+
+    async def set(self, key: str, value: str, ttl: int | None = None) -> bool:
         """Set value by key.
-        
+
         Args:
             key: Cache key
             value: Value to store
             ttl: Time to live in seconds
-            
+
         Returns:
             True if successful
         """
@@ -53,13 +47,13 @@ class CacheService:
         except Exception as e:
             logger.error("Cache set error", key=key, error=str(e))
             return False
-    
-    async def get_json(self, key: str) -> Optional[Any]:
+
+    async def get_json(self, key: str) -> Any | None:
         """Get JSON value by key.
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             Parsed JSON value or None
         """
@@ -70,20 +64,15 @@ class CacheService:
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in cache", key=key)
         return None
-    
-    async def set_json(
-        self,
-        key: str,
-        value: Any,
-        ttl: Optional[int] = None
-    ) -> bool:
+
+    async def set_json(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Set JSON value by key.
-        
+
         Args:
             key: Cache key
             value: Value to serialize and store
             ttl: Time to live in seconds
-            
+
         Returns:
             True if successful
         """
@@ -93,13 +82,13 @@ class CacheService:
         except (TypeError, ValueError) as e:
             logger.error("JSON serialization error", key=key, error=str(e))
             return False
-    
+
     async def delete(self, key: str) -> bool:
         """Delete key.
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             True if key was deleted
         """
@@ -109,14 +98,14 @@ class CacheService:
         except Exception as e:
             logger.error("Cache delete error", key=key, error=str(e))
             return False
-    
-    async def get_counter(self, key: str, window: int) -> int:
+
+    async def get_counter(self, key: str, _window: int) -> int:
         """Get counter value for rate limiting.
-        
+
         Args:
             key: Counter key
             window: Time window in seconds
-            
+
         Returns:
             Current counter value
         """
@@ -125,14 +114,14 @@ class CacheService:
             return int(value) if value else 0
         except Exception:
             return 0
-    
+
     async def increment_counter(self, key: str, window: int) -> int:
         """Increment counter for rate limiting.
-        
+
         Args:
             key: Counter key
             window: Time window in seconds
-            
+
         Returns:
             New counter value
         """

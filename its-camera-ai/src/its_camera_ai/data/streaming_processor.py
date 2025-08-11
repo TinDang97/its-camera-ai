@@ -38,12 +38,14 @@ from PIL import Image
 # Async messaging
 try:
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
     KAFKA_AVAILABLE = True
 except ImportError:
     KAFKA_AVAILABLE = False
 
 try:
     import redis.asyncio as aioredis
+
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
@@ -54,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 class StreamStatus(Enum):
     """Camera stream status."""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
     ERROR = "error"
@@ -62,6 +65,7 @@ class StreamStatus(Enum):
 
 class ProcessingStage(Enum):
     """Data processing stages."""
+
     INGESTION = "ingestion"
     VALIDATION = "validation"
     FEATURE_EXTRACTION = "feature_extraction"
@@ -83,7 +87,9 @@ class CameraStream:
     encoding: str = "h264"
 
     # Processing configuration
-    roi_boxes: list[tuple[int, int, int, int]] = field(default_factory=list)  # Regions of interest
+    roi_boxes: list[tuple[int, int, int, int]] = field(
+        default_factory=list
+    )  # Regions of interest
     quality_threshold: float = 0.7
     processing_enabled: bool = True
 
@@ -158,19 +164,19 @@ class ImageQualityAnalyzer:
             gray = image.copy()
 
         # Blur detection using Laplacian variance
-        metrics['blur_score'] = self._calculate_blur_score(gray)
+        metrics["blur_score"] = self._calculate_blur_score(gray)
 
         # Brightness analysis
-        metrics['brightness_score'] = self._calculate_brightness_score(gray)
+        metrics["brightness_score"] = self._calculate_brightness_score(gray)
 
         # Contrast analysis
-        metrics['contrast_score'] = self._calculate_contrast_score(gray)
+        metrics["contrast_score"] = self._calculate_contrast_score(gray)
 
         # Noise estimation
-        metrics['noise_level'] = self._estimate_noise_level(gray)
+        metrics["noise_level"] = self._estimate_noise_level(gray)
 
         # Overall quality score (weighted combination)
-        metrics['quality_score'] = self._calculate_overall_quality(metrics)
+        metrics["quality_score"] = self._calculate_overall_quality(metrics)
 
         return metrics
 
@@ -192,7 +198,7 @@ class ImageQualityAnalyzer:
         else:
             distance = min(
                 abs(mean_brightness - self.brightness_range[0]),
-                abs(mean_brightness - self.brightness_range[1])
+                abs(mean_brightness - self.brightness_range[1]),
             )
             score = max(0.0, 1.0 - (distance / 100.0))
 
@@ -223,10 +229,10 @@ class ImageQualityAnalyzer:
     def _calculate_overall_quality(self, metrics: dict[str, float]) -> float:
         """Calculate overall quality score from individual metrics."""
         weights = {
-            'blur_score': 0.3,
-            'brightness_score': 0.25,
-            'contrast_score': 0.25,
-            'noise_level': 0.2
+            "blur_score": 0.3,
+            "brightness_score": 0.25,
+            "contrast_score": 0.25,
+            "noise_level": 0.2,
         }
 
         score = sum(metrics[key] * weights[key] for key in weights if key in metrics)
@@ -242,11 +248,7 @@ class TrafficFeatureExtractor:
         )
 
         # Traffic density thresholds
-        self.density_thresholds = {
-            'low': 0.1,
-            'medium': 0.3,
-            'high': 0.6
-        }
+        self.density_thresholds = {"low": 0.1, "medium": 0.3, "high": 0.6}
 
     def extract_features(self, frame: ProcessedFrame) -> dict[str, Any]:
         """Extract traffic and environmental features."""
@@ -255,19 +257,21 @@ class TrafficFeatureExtractor:
         features = {}
 
         # Vehicle density estimation
-        features['vehicle_density'] = self._estimate_vehicle_density(image)
-        features['congestion_level'] = self._classify_congestion(features['vehicle_density'])
+        features["vehicle_density"] = self._estimate_vehicle_density(image)
+        features["congestion_level"] = self._classify_congestion(
+            features["vehicle_density"]
+        )
 
         # Environmental conditions
-        features['lighting_conditions'] = self._analyze_lighting(image)
-        features['weather_conditions'] = self._estimate_weather(image)
+        features["lighting_conditions"] = self._analyze_lighting(image)
+        features["weather_conditions"] = self._estimate_weather(image)
 
         # Motion analysis
-        features['motion_intensity'] = self._analyze_motion(image)
+        features["motion_intensity"] = self._analyze_motion(image)
 
         # ROI-specific features
-        if hasattr(frame, 'roi_boxes') and frame.roi_boxes:
-            features['roi_analysis'] = self._analyze_rois(image, frame.roi_boxes)
+        if hasattr(frame, "roi_boxes") and frame.roi_boxes:
+            features["roi_analysis"] = self._analyze_rois(image, frame.roi_boxes)
 
         return features
 
@@ -287,14 +291,14 @@ class TrafficFeatureExtractor:
     def _classify_congestion(self, density: float) -> str:
         """Classify traffic congestion level."""
 
-        if density >= self.density_thresholds['high']:
-            return 'high'
-        elif density >= self.density_thresholds['medium']:
-            return 'medium'
-        elif density >= self.density_thresholds['low']:
-            return 'low'
+        if density >= self.density_thresholds["high"]:
+            return "high"
+        elif density >= self.density_thresholds["medium"]:
+            return "medium"
+        elif density >= self.density_thresholds["low"]:
+            return "low"
         else:
-            return 'free_flow'
+            return "free_flow"
 
     def _analyze_lighting(self, image: np.ndarray) -> str:
         """Analyze lighting conditions."""
@@ -304,13 +308,13 @@ class TrafficFeatureExtractor:
         brightness = np.mean(hsv[:, :, 2])  # V channel
 
         if brightness > 180:
-            return 'bright'
+            return "bright"
         elif brightness > 100:
-            return 'normal'
+            return "normal"
         elif brightness > 50:
-            return 'dim'
+            return "dim"
         else:
-            return 'dark'
+            return "dark"
 
     def _estimate_weather(self, image: np.ndarray) -> str:
         """Estimate weather conditions from image characteristics."""
@@ -324,29 +328,31 @@ class TrafficFeatureExtractor:
 
         # Basic weather classification
         if std_intensity < 30 and mean_intensity < 100:
-            return 'foggy'
+            return "foggy"
         elif mean_intensity < 80:
-            return 'overcast'
+            return "overcast"
         elif std_intensity > 60:
-            return 'clear'
+            return "clear"
         else:
-            return 'partly_cloudy'
+            return "partly_cloudy"
 
     def _analyze_motion(self, image: np.ndarray) -> float:
         """Analyze motion intensity in the scene."""
 
         # Apply Gaussian blur and calculate optical flow
-        if hasattr(self, 'previous_frame'):
+        if hasattr(self, "previous_frame"):
             gray_current = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             gray_previous = self.previous_frame
 
             # Calculate optical flow
             flow = cv2.calcOpticalFlowPyrLK(
-                gray_previous, gray_current,
-                None, None,
+                gray_previous,
+                gray_current,
+                None,
+                None,
                 winSize=(15, 15),
                 maxLevel=2,
-                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
+                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
             )
 
             # Calculate motion intensity
@@ -359,7 +365,9 @@ class TrafficFeatureExtractor:
         self.previous_frame = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         return 0.0
 
-    def _analyze_rois(self, image: np.ndarray, roi_boxes: list[tuple[int, int, int, int]]) -> dict[str, Any]:
+    def _analyze_rois(
+        self, image: np.ndarray, roi_boxes: list[tuple[int, int, int, int]]
+    ) -> dict[str, Any]:
         """Analyze specific regions of interest."""
 
         roi_analysis = {}
@@ -368,7 +376,7 @@ class TrafficFeatureExtractor:
             roi_id = f"roi_{i}"
 
             # Extract ROI
-            roi = image[y:y+h, x:x+w]
+            roi = image[y : y + h, x : x + w]
 
             if roi.size > 0:
                 # Analyze ROI
@@ -376,9 +384,9 @@ class TrafficFeatureExtractor:
                 roi_brightness = np.mean(cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY))
 
                 roi_analysis[roi_id] = {
-                    'density': roi_density,
-                    'brightness': roi_brightness,
-                    'congestion': self._classify_congestion(roi_density)
+                    "density": roi_density,
+                    "brightness": roi_brightness,
+                    "congestion": self._classify_congestion(roi_density),
                 }
 
         return roi_analysis
@@ -403,25 +411,25 @@ class StreamProcessor:
         self.quality_stats = defaultdict(lambda: deque(maxlen=1000))
 
         # Kafka integration
-        self.kafka_bootstrap_servers = config.get('kafka_servers', ['localhost:9092'])
-        self.input_topic = config.get('input_topic', 'camera_frames')
-        self.output_topic = config.get('output_topic', 'processed_frames')
+        self.kafka_bootstrap_servers = config.get("kafka_servers", ["localhost:9092"])
+        self.input_topic = config.get("input_topic", "camera_frames")
+        self.output_topic = config.get("output_topic", "processed_frames")
 
         # Redis for caching
-        self.redis_url = config.get('redis_url', 'redis://localhost:6379')
+        self.redis_url = config.get("redis_url", "redis://localhost:6379")
 
         # Processing settings
-        self.max_concurrent_streams = config.get('max_concurrent_streams', 1000)
-        self.quality_threshold = config.get('quality_threshold', 0.7)
-        self.processing_timeout = config.get('processing_timeout', 5.0)
+        self.max_concurrent_streams = config.get("max_concurrent_streams", 1000)
+        self.quality_threshold = config.get("quality_threshold", 0.7)
+        self.processing_timeout = config.get("processing_timeout", 5.0)
 
         # Performance tracking
         self.performance_metrics = {
-            'frames_processed': 0,
-            'frames_rejected': 0,
-            'avg_processing_time': 0.0,
-            'throughput_fps': 0.0,
-            'error_count': 0
+            "frames_processed": 0,
+            "frames_rejected": 0,
+            "avg_processing_time": 0.0,
+            "throughput_fps": 0.0,
+            "error_count": 0,
         }
 
         self.kafka_consumer = None
@@ -452,14 +460,14 @@ class StreamProcessor:
         self.kafka_consumer = AIOKafkaConsumer(
             self.input_topic,
             bootstrap_servers=self.kafka_bootstrap_servers,
-            group_id='stream_processor',
-            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            max_poll_records=100
+            group_id="stream_processor",
+            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+            max_poll_records=100,
         )
 
         self.kafka_producer = AIOKafkaProducer(
             bootstrap_servers=self.kafka_bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v, default=str).encode('utf-8')
+            value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
         )
 
         await self.kafka_consumer.start()
@@ -471,8 +479,7 @@ class StreamProcessor:
         """Setup Redis connection."""
 
         self.redis_client = await aioredis.from_url(
-            self.redis_url,
-            decode_responses=True
+            self.redis_url, decode_responses=True
         )
 
         logger.info("Redis connection established")
@@ -492,7 +499,7 @@ class StreamProcessor:
 
                 except Exception as e:
                     logger.error(f"Frame processing error: {e}")
-                    self.performance_metrics['error_count'] += 1
+                    self.performance_metrics["error_count"] += 1
 
         except Exception as e:
             logger.error(f"Frame consumption error: {e}")
@@ -516,9 +523,9 @@ class StreamProcessor:
                 self.processed_frames.append(processed_frame)
                 await self._emit_processed_frame(processed_frame)
 
-                self.performance_metrics['frames_processed'] += 1
+                self.performance_metrics["frames_processed"] += 1
             else:
-                self.performance_metrics['frames_rejected'] += 1
+                self.performance_metrics["frames_rejected"] += 1
 
             # Update performance metrics
             processing_time = (time.time() - start_time) * 1000
@@ -526,29 +533,31 @@ class StreamProcessor:
 
         except Exception as e:
             logger.error(f"Frame pipeline error: {e}")
-            self.performance_metrics['error_count'] += 1
+            self.performance_metrics["error_count"] += 1
 
-    async def _parse_frame_data(self, frame_data: dict[str, Any]) -> ProcessedFrame | None:
+    async def _parse_frame_data(
+        self, frame_data: dict[str, Any]
+    ) -> ProcessedFrame | None:
         """Parse incoming frame data."""
 
         try:
             # Decode image data
-            if 'image_base64' in frame_data:
-                image_data = base64.b64decode(frame_data['image_base64'])
+            if "image_base64" in frame_data:
+                image_data = base64.b64decode(frame_data["image_base64"])
                 image = np.array(Image.open(io.BytesIO(image_data)))
-            elif 'image_array' in frame_data:
-                image = np.array(frame_data['image_array'], dtype=np.uint8)
+            elif "image_array" in frame_data:
+                image = np.array(frame_data["image_array"], dtype=np.uint8)
             else:
                 logger.warning("No valid image data found in frame")
                 return None
 
             # Create processed frame
             frame = ProcessedFrame(
-                frame_id=frame_data['frame_id'],
-                camera_id=frame_data['camera_id'],
-                timestamp=frame_data.get('timestamp', time.time()),
+                frame_id=frame_data["frame_id"],
+                camera_id=frame_data["camera_id"],
+                timestamp=frame_data.get("timestamp", time.time()),
                 original_image=image,
-                source_hash=hashlib.md5(image.tobytes()).hexdigest()[:16]
+                source_hash=hashlib.md5(image.tobytes()).hexdigest()[:16],
             )
 
             return frame
@@ -566,11 +575,11 @@ class StreamProcessor:
         frame.processing_stage = ProcessingStage.VALIDATION
         quality_metrics = self.quality_analyzer.analyze_quality(frame.original_image)
 
-        frame.quality_score = quality_metrics['quality_score']
-        frame.blur_score = quality_metrics['blur_score']
-        frame.brightness_score = quality_metrics['brightness_score']
-        frame.contrast_score = quality_metrics['contrast_score']
-        frame.noise_level = quality_metrics['noise_level']
+        frame.quality_score = quality_metrics["quality_score"]
+        frame.blur_score = quality_metrics["blur_score"]
+        frame.brightness_score = quality_metrics["brightness_score"]
+        frame.contrast_score = quality_metrics["contrast_score"]
+        frame.noise_level = quality_metrics["noise_level"]
 
         # Stage 2: Quality validation
         frame.validation_passed = frame.quality_score >= self.quality_threshold
@@ -583,11 +592,11 @@ class StreamProcessor:
         frame.processing_stage = ProcessingStage.FEATURE_EXTRACTION
         features = self.feature_extractor.extract_features(frame)
 
-        frame.vehicle_density = features.get('vehicle_density', 0.0)
-        frame.congestion_level = features.get('congestion_level', 'unknown')
-        frame.weather_conditions = features.get('weather_conditions', 'unknown')
-        frame.lighting_conditions = features.get('lighting_conditions', 'unknown')
-        frame.roi_features = features.get('roi_analysis', {})
+        frame.vehicle_density = features.get("vehicle_density", 0.0)
+        frame.congestion_level = features.get("congestion_level", "unknown")
+        frame.weather_conditions = features.get("weather_conditions", "unknown")
+        frame.lighting_conditions = features.get("lighting_conditions", "unknown")
+        frame.roi_features = features.get("roi_analysis", {})
 
         # Stage 4: Image preprocessing for ML
         frame.processing_stage = ProcessingStage.QUALITY_CONTROL
@@ -618,11 +627,13 @@ class StreamProcessor:
         pad_h = (target_size[1] - new_h) // 2
 
         padded = np.full((*target_size, 3), 114, dtype=np.uint8)
-        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = resized
+        padded[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
 
         return padded
 
-    def _create_thumbnail(self, image: np.ndarray, size: tuple[int, int] = (128, 128)) -> np.ndarray:
+    def _create_thumbnail(
+        self, image: np.ndarray, size: tuple[int, int] = (128, 128)
+    ) -> np.ndarray:
         """Create thumbnail for storage and display."""
 
         return cv2.resize(image, size, interpolation=cv2.INTER_AREA)
@@ -632,17 +643,17 @@ class StreamProcessor:
 
         # Prepare output data
         output_data = {
-            'frame_id': frame.frame_id,
-            'camera_id': frame.camera_id,
-            'timestamp': frame.timestamp,
-            'quality_score': frame.quality_score,
-            'vehicle_density': frame.vehicle_density,
-            'congestion_level': frame.congestion_level,
-            'weather_conditions': frame.weather_conditions,
-            'lighting_conditions': frame.lighting_conditions,
-            'processing_time_ms': frame.processing_time_ms,
-            'validation_passed': frame.validation_passed,
-            'source_hash': frame.source_hash
+            "frame_id": frame.frame_id,
+            "camera_id": frame.camera_id,
+            "timestamp": frame.timestamp,
+            "quality_score": frame.quality_score,
+            "vehicle_density": frame.vehicle_density,
+            "congestion_level": frame.congestion_level,
+            "weather_conditions": frame.weather_conditions,
+            "lighting_conditions": frame.lighting_conditions,
+            "processing_time_ms": frame.processing_time_ms,
+            "validation_passed": frame.validation_passed,
+            "source_hash": frame.source_hash,
         }
 
         # Send to Kafka
@@ -654,28 +665,33 @@ class StreamProcessor:
             cache_key = f"frame:{frame.camera_id}:{frame.frame_id}"
             await self.redis_client.setex(
                 cache_key,
-                3600,  # 1 hour TTL
-                json.dumps(output_data, default=str)
+                3600,
+                json.dumps(output_data, default=str),  # 1 hour TTL
             )
 
         # Update quality statistics
-        self.quality_stats[frame.camera_id].append({
-            'timestamp': frame.timestamp,
-            'quality_score': frame.quality_score,
-            'processing_time': frame.processing_time_ms
-        })
+        self.quality_stats[frame.camera_id].append(
+            {
+                "timestamp": frame.timestamp,
+                "quality_score": frame.quality_score,
+                "processing_time": frame.processing_time_ms,
+            }
+        )
 
     def _update_processing_metrics(self, processing_time_ms: float):
         """Update processing performance metrics."""
 
         # Update average processing time
-        current_avg = self.performance_metrics['avg_processing_time']
-        total_processed = self.performance_metrics['frames_processed'] + self.performance_metrics['frames_rejected']
+        current_avg = self.performance_metrics["avg_processing_time"]
+        total_processed = (
+            self.performance_metrics["frames_processed"]
+            + self.performance_metrics["frames_rejected"]
+        )
 
         if total_processed > 0:
-            self.performance_metrics['avg_processing_time'] = (
-                (current_avg * (total_processed - 1) + processing_time_ms) / total_processed
-            )
+            self.performance_metrics["avg_processing_time"] = (
+                current_avg * (total_processed - 1) + processing_time_ms
+            ) / total_processed
 
     async def _monitor_performance(self):
         """Monitor and log performance metrics."""
@@ -688,7 +704,7 @@ class StreamProcessor:
                 await asyncio.sleep(60)  # Check every minute
 
                 current_time = time.time()
-                current_frame_count = self.performance_metrics['frames_processed']
+                current_frame_count = self.performance_metrics["frames_processed"]
 
                 # Calculate throughput
                 time_diff = current_time - last_check_time
@@ -696,7 +712,7 @@ class StreamProcessor:
 
                 if time_diff > 0:
                     throughput = frame_diff / time_diff
-                    self.performance_metrics['throughput_fps'] = throughput
+                    self.performance_metrics["throughput_fps"] = throughput
 
                 # Log metrics
                 logger.info(
@@ -719,12 +735,14 @@ class StreamProcessor:
 
         try:
             stream = CameraStream(
-                camera_id=stream_config['camera_id'],
-                location=stream_config['location'],
-                coordinates=tuple(stream_config['coordinates']),
-                resolution=tuple(stream_config.get('resolution', [1920, 1080])),
-                fps=stream_config.get('fps', 30),
-                quality_threshold=stream_config.get('quality_threshold', self.quality_threshold)
+                camera_id=stream_config["camera_id"],
+                location=stream_config["location"],
+                coordinates=tuple(stream_config["coordinates"]),
+                resolution=tuple(stream_config.get("resolution", [1920, 1080])),
+                fps=stream_config.get("fps", 30),
+                quality_threshold=stream_config.get(
+                    "quality_threshold", self.quality_threshold
+                ),
             )
 
             self.active_streams[stream.camera_id] = stream
@@ -747,29 +765,29 @@ class StreamProcessor:
         quality_history = list(self.quality_stats[camera_id])
 
         return {
-            'camera_id': stream.camera_id,
-            'status': stream.status.value,
-            'location': stream.location,
-            'resolution': stream.resolution,
-            'fps': stream.fps,
-            'total_frames_processed': stream.total_frames_processed,
-            'avg_processing_latency_ms': stream.avg_processing_latency_ms,
-            'quality_score_avg': stream.quality_score_avg,
-            'error_rate': stream.error_rate,
-            'last_frame_time': stream.last_frame_time,
-            'recent_quality_samples': len(quality_history)
+            "camera_id": stream.camera_id,
+            "status": stream.status.value,
+            "location": stream.location,
+            "resolution": stream.resolution,
+            "fps": stream.fps,
+            "total_frames_processed": stream.total_frames_processed,
+            "avg_processing_latency_ms": stream.avg_processing_latency_ms,
+            "quality_score_avg": stream.quality_score_avg,
+            "error_rate": stream.error_rate,
+            "last_frame_time": stream.last_frame_time,
+            "recent_quality_samples": len(quality_history),
         }
 
     def get_processing_stats(self) -> dict[str, Any]:
         """Get overall processing statistics."""
 
         return {
-            'active_streams': len(self.active_streams),
-            'performance_metrics': self.performance_metrics,
-            'processed_frames_buffer': len(self.processed_frames),
-            'quality_stats_cameras': len(self.quality_stats),
-            'kafka_available': self.kafka_consumer is not None,
-            'redis_available': self.redis_client is not None
+            "active_streams": len(self.active_streams),
+            "performance_metrics": self.performance_metrics,
+            "processed_frames_buffer": len(self.processed_frames),
+            "quality_stats_cameras": len(self.quality_stats),
+            "kafka_available": self.kafka_consumer is not None,
+            "redis_available": self.redis_client is not None,
         }
 
     async def stop(self):
@@ -799,13 +817,13 @@ async def create_stream_processor(config_path: str | Path = None) -> StreamProce
     else:
         # Default configuration
         config = {
-            'kafka_servers': ['localhost:9092'],
-            'input_topic': 'camera_frames',
-            'output_topic': 'processed_frames',
-            'redis_url': 'redis://localhost:6379',
-            'max_concurrent_streams': 1000,
-            'quality_threshold': 0.7,
-            'processing_timeout': 5.0
+            "kafka_servers": ["localhost:9092"],
+            "input_topic": "camera_frames",
+            "output_topic": "processed_frames",
+            "redis_url": "redis://localhost:6379",
+            "max_concurrent_streams": 1000,
+            "quality_threshold": 0.7,
+            "processing_timeout": 5.0,
         }
 
     processor = StreamProcessor(config)

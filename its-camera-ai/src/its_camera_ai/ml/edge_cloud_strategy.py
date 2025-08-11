@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 class InferenceLocation(Enum):
     """Inference execution location options."""
+
     EDGE_ONLY = "edge_only"
     CLOUD_ONLY = "cloud_only"
     EDGE_PRIMARY = "edge_primary"  # Edge first, cloud fallback
@@ -46,11 +47,12 @@ class InferenceLocation(Enum):
 
 class NetworkCondition(Enum):
     """Network condition assessment."""
+
     EXCELLENT = "excellent"  # <10ms latency, >50Mbps, 100% uptime
-    GOOD = "good"          # <50ms latency, >10Mbps, >99% uptime
-    FAIR = "fair"          # <100ms latency, >2Mbps, >95% uptime
-    POOR = "poor"          # >100ms latency, <2Mbps, <95% uptime
-    OFFLINE = "offline"    # No connectivity
+    GOOD = "good"  # <50ms latency, >10Mbps, >99% uptime
+    FAIR = "fair"  # <100ms latency, >2Mbps, >95% uptime
+    POOR = "poor"  # >100ms latency, <2Mbps, <95% uptime
+    OFFLINE = "offline"  # No connectivity
 
 
 @dataclass
@@ -164,13 +166,11 @@ class BandwidthOptimizer:
             NetworkCondition.GOOD: {"quality": 85, "resize_factor": 0.9},
             NetworkCondition.FAIR: {"quality": 70, "resize_factor": 0.8},
             NetworkCondition.POOR: {"quality": 50, "resize_factor": 0.7},
-            NetworkCondition.OFFLINE: {"quality": 30, "resize_factor": 0.6}
+            NetworkCondition.OFFLINE: {"quality": 30, "resize_factor": 0.6},
         }
 
     def compress_frame(
-        self,
-        frame: np.ndarray,
-        network_condition: NetworkCondition
+        self, frame: np.ndarray, network_condition: NetworkCondition
     ) -> bytes:
         """Compress frame based on network conditions."""
         if not self.compression_enabled:
@@ -181,6 +181,7 @@ class BandwidthOptimizer:
         # Resize frame if needed
         if settings["resize_factor"] < 1.0:
             import cv2
+
             h, w = frame.shape[:2]
             new_h = int(h * settings["resize_factor"])
             new_w = int(w * settings["resize_factor"])
@@ -189,8 +190,9 @@ class BandwidthOptimizer:
         # JPEG compression
         try:
             import cv2
+
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), settings["quality"]]
-            result, compressed = cv2.imencode('.jpg', frame, encode_param)
+            result, compressed = cv2.imencode(".jpg", frame, encode_param)
 
             if result:
                 return compressed.tobytes()
@@ -206,18 +208,13 @@ class BandwidthOptimizer:
         # In production, use perceptual hashing
         cache_key = f"{result.camera_id}_{len(result.boxes)}"
 
-        self.frame_cache[cache_key] = {
-            'result': result,
-            'timestamp': time.time()
-        }
+        self.frame_cache[cache_key] = {"result": result, "timestamp": time.time()}
 
         # Cleanup old cache entries
         self._cleanup_cache()
 
     def get_cached_result(
-        self,
-        frame: np.ndarray,
-        camera_id: str
+        self, frame: np.ndarray, camera_id: str
     ) -> DetectionResult | None:
         """Try to get cached result for similar frame."""
         # Simplified similarity check
@@ -228,8 +225,8 @@ class BandwidthOptimizer:
             cached = self.frame_cache[cache_key]
 
             # Check if cache is still fresh (within 5 seconds)
-            if time.time() - cached['timestamp'] < 5.0:
-                return cached['result']
+            if time.time() - cached["timestamp"] < 5.0:
+                return cached["result"]
 
         return None
 
@@ -239,8 +236,9 @@ class BandwidthOptimizer:
 
         # Remove entries older than 30 seconds
         expired_keys = [
-            key for key, value in self.frame_cache.items()
-            if current_time - value['timestamp'] > 30.0
+            key
+            for key, value in self.frame_cache.items()
+            if current_time - value["timestamp"] > 30.0
         ]
 
         for key in expired_keys:
@@ -253,7 +251,7 @@ class EdgeCloudRouter:
     def __init__(
         self,
         edge_devices: list[EdgeDevice],
-        cloud_endpoint: str = "https://api.its-camera-ai.com/inference"
+        cloud_endpoint: str = "https://api.its-camera-ai.com/inference",
     ):
         self.edge_devices = {device.device_id: device for device in edge_devices}
         self.cloud_endpoint = cloud_endpoint
@@ -272,7 +270,7 @@ class EdgeCloudRouter:
             "cloud_requests": 0,
             "fallback_requests": 0,
             "cache_hits": 0,
-            "total_requests": 0
+            "total_requests": 0,
         }
 
         # Performance tracking
@@ -284,7 +282,7 @@ class EdgeCloudRouter:
         logger.info("Initializing edge-cloud router...")
 
         # Initialize edge inference engines
-        for device_id, device in self.edge_devices.items():
+        for _device_id, device in self.edge_devices.items():
             if device.is_available:
                 await self._initialize_edge_engine(device)
 
@@ -305,13 +303,17 @@ class EdgeCloudRouter:
             # Configure for edge deployment
             config = InferenceConfig(
                 model_type=model_type,
-                backend=OptimizationBackend.ONNX if device.gpu_memory_gb < 4 else OptimizationBackend.TENSORRT,
+                backend=(
+                    OptimizationBackend.ONNX
+                    if device.gpu_memory_gb < 4
+                    else OptimizationBackend.TENSORRT
+                ),
                 precision="fp16" if device.gpu_memory_gb >= 4 else "int8",
                 batch_size=min(4, int(device.gpu_memory_gb)),
                 max_batch_size=min(8, int(device.gpu_memory_gb * 2)),
                 batch_timeout_ms=20,
                 device_ids=[0],  # Assume single GPU per edge device
-                enable_edge_optimization=True
+                enable_edge_optimization=True,
             )
 
             engine = OptimizedInferenceEngine(config)
@@ -322,10 +324,14 @@ class EdgeCloudRouter:
 
             self.edge_engines[device.device_id] = engine
 
-            logger.info(f"Initialized edge engine for {device.device_id} with {model_type.value}")
+            logger.info(
+                f"Initialized edge engine for {device.device_id} with {model_type.value}"
+            )
 
         except Exception as e:
-            logger.error(f"Failed to initialize edge engine for {device.device_id}: {e}")
+            logger.error(
+                f"Failed to initialize edge engine for {device.device_id}: {e}"
+            )
             device.is_available = False
 
     def _select_model_for_device(self, device: EdgeDevice) -> ModelType:
@@ -351,7 +357,7 @@ class EdgeCloudRouter:
             self.cloud_client = httpx.AsyncClient(
                 base_url=self.cloud_endpoint,
                 timeout=httpx.Timeout(30.0),
-                limits=httpx.Limits(max_connections=20)
+                limits=httpx.Limits(max_connections=20),
             )
 
             logger.info("Cloud inference client initialized")
@@ -405,7 +411,9 @@ class EdgeCloudRouter:
 
             raise
 
-    def _select_inference_location(self, request: InferenceRequest) -> InferenceLocation:
+    def _select_inference_location(
+        self, request: InferenceRequest
+    ) -> InferenceLocation:
         """Select optimal inference location based on current conditions."""
 
         # Use explicit preference if set
@@ -417,7 +425,8 @@ class EdgeCloudRouter:
 
         # Check edge device availability
         available_edge_devices = [
-            device for device in self.edge_devices.values()
+            device
+            for device in self.edge_devices.values()
             if device.is_available and device.current_load < 0.8
         ]
 
@@ -429,13 +438,14 @@ class EdgeCloudRouter:
             return InferenceLocation.EDGE_ONLY
 
         # High priority or low latency requirements favor edge
-        if (request.priority == "high" or
-            request.max_latency_ms < 50):
+        if request.priority == "high" or request.max_latency_ms < 50:
             return InferenceLocation.EDGE_PRIMARY
 
         # Good network conditions and high accuracy requirements favor cloud
-        if (network_condition in [NetworkCondition.EXCELLENT, NetworkCondition.GOOD] and
-            request.min_accuracy > 0.95):
+        if (
+            network_condition in [NetworkCondition.EXCELLENT, NetworkCondition.GOOD]
+            and request.min_accuracy > 0.95
+        ):
             return InferenceLocation.CLOUD_PRIMARY
 
         # Default adaptive behavior
@@ -445,9 +455,7 @@ class EdgeCloudRouter:
             return InferenceLocation.CLOUD_PRIMARY
 
     async def _execute_inference(
-        self,
-        request: InferenceRequest,
-        location: InferenceLocation
+        self, request: InferenceRequest, location: InferenceLocation
     ) -> DetectionResult:
         """Execute inference at specified location."""
 
@@ -489,9 +497,7 @@ class EdgeCloudRouter:
 
         try:
             result = await engine.predict_single(
-                request.frame,
-                request.frame_id,
-                request.camera_id
+                request.frame, request.frame_id, request.camera_id
             )
 
             logger.debug(f"Edge inference completed for {request.frame_id}")
@@ -520,15 +526,13 @@ class EdgeCloudRouter:
             "timestamp": request.timestamp,
             "frame_data": compressed_frame.hex(),  # Hex encode for JSON
             "max_latency_ms": request.max_latency_ms,
-            "min_accuracy": request.min_accuracy
+            "min_accuracy": request.min_accuracy,
         }
 
         # Send request to cloud
         try:
             response = await self.cloud_client.post(
-                "/infer",
-                json=payload,
-                timeout=request.max_latency_ms / 1000.0
+                "/infer", json=payload, timeout=request.max_latency_ms / 1000.0
             )
 
             response.raise_for_status()
@@ -547,7 +551,9 @@ class EdgeCloudRouter:
     async def _infer_adaptive(self, request: InferenceRequest) -> DetectionResult:
         """Adaptive inference based on real-time conditions."""
         # Simple adaptive logic - could be much more sophisticated
-        edge_load = np.mean([device.current_load for device in self.edge_devices.values()])
+        edge_load = np.mean(
+            [device.current_load for device in self.edge_devices.values()]
+        )
         network_condition = self.network_metrics.get_condition()
 
         if edge_load < 0.5 and network_condition != NetworkCondition.EXCELLENT:
@@ -558,7 +564,8 @@ class EdgeCloudRouter:
     def _select_best_edge_device(self) -> EdgeDevice | None:
         """Select best available edge device based on load and capabilities."""
         available_devices = [
-            device for device in self.edge_devices.values()
+            device
+            for device in self.edge_devices.values()
             if device.is_available and device.current_load < 0.9
         ]
 
@@ -569,21 +576,19 @@ class EdgeCloudRouter:
         return min(available_devices, key=lambda d: d.current_load)
 
     def _parse_cloud_response(
-        self,
-        response_data: dict,
-        request: InferenceRequest
+        self, response_data: dict, request: InferenceRequest
     ) -> DetectionResult:
         """Parse cloud inference response into DetectionResult."""
 
         # Extract detection data
-        boxes = np.array(response_data.get('boxes', []))
-        scores = np.array(response_data.get('scores', []))
-        classes = np.array(response_data.get('classes', []))
-        class_names = response_data.get('class_names', [])
+        boxes = np.array(response_data.get("boxes", []))
+        scores = np.array(response_data.get("scores", []))
+        classes = np.array(response_data.get("classes", []))
+        class_names = response_data.get("class_names", [])
 
         # Extract performance metrics
-        inference_time = response_data.get('inference_time_ms', 0)
-        total_time = response_data.get('total_time_ms', 0)
+        inference_time = response_data.get("inference_time_ms", 0)
+        total_time = response_data.get("total_time_ms", 0)
 
         return DetectionResult(
             boxes=boxes,
@@ -599,7 +604,7 @@ class EdgeCloudRouter:
             total_time_ms=total_time,
             detection_count=len(boxes),
             avg_confidence=np.mean(scores) if len(scores) > 0 else 0.0,
-            gpu_memory_used_mb=0  # Not available from cloud
+            gpu_memory_used_mb=0,  # Not available from cloud
         )
 
     async def _try_fallback(self, request: InferenceRequest) -> DetectionResult:
@@ -633,19 +638,33 @@ class EdgeCloudRouter:
                 "condition": self.network_metrics.get_condition().value,
                 "latency_ms": self.network_metrics.latency_ms,
                 "bandwidth_mbps": self.network_metrics.bandwidth_mbps,
-                "uptime_pct": self.network_metrics.uptime_pct
+                "uptime_pct": self.network_metrics.uptime_pct,
             },
             "edge_performance": {
-                "available_devices": len([d for d in self.edge_devices.values() if d.is_available]),
-                "avg_load": np.mean([d.current_load for d in self.edge_devices.values()]),
-                "avg_latency_ms": np.mean(self.edge_latencies) if self.edge_latencies else 0,
-                "p95_latency_ms": np.percentile(self.edge_latencies, 95) if self.edge_latencies else 0
+                "available_devices": len(
+                    [d for d in self.edge_devices.values() if d.is_available]
+                ),
+                "avg_load": np.mean(
+                    [d.current_load for d in self.edge_devices.values()]
+                ),
+                "avg_latency_ms": (
+                    np.mean(self.edge_latencies) if self.edge_latencies else 0
+                ),
+                "p95_latency_ms": (
+                    np.percentile(self.edge_latencies, 95) if self.edge_latencies else 0
+                ),
             },
             "cloud_performance": {
                 "client_available": self.cloud_client is not None,
-                "avg_latency_ms": np.mean(self.cloud_latencies) if self.cloud_latencies else 0,
-                "p95_latency_ms": np.percentile(self.cloud_latencies, 95) if self.cloud_latencies else 0
-            }
+                "avg_latency_ms": (
+                    np.mean(self.cloud_latencies) if self.cloud_latencies else 0
+                ),
+                "p95_latency_ms": (
+                    np.percentile(self.cloud_latencies, 95)
+                    if self.cloud_latencies
+                    else 0
+                ),
+            },
         }
 
         return stats
@@ -667,9 +686,10 @@ class EdgeCloudRouter:
 
 # Utility functions for deployment configuration
 
+
 def create_jetson_device_config(
     device_id: str,
-    model: str = "nano"  # "nano", "xavier_nx", "agx_xavier"
+    model: str = "nano",  # "nano", "xavier_nx", "agx_xavier"
 ) -> EdgeDevice:
     """Create EdgeDevice configuration for NVIDIA Jetson devices."""
 
@@ -680,7 +700,7 @@ def create_jetson_device_config(
             "max_power_watts": 10.0,
             "supported_models": [ModelType.NANO, ModelType.SMALL],
             "max_throughput_fps": 15,
-            "typical_latency_ms": 80
+            "typical_latency_ms": 80,
         },
         "xavier_nx": {
             "gpu_memory_gb": 8.0,
@@ -688,30 +708,31 @@ def create_jetson_device_config(
             "max_power_watts": 15.0,
             "supported_models": [ModelType.NANO, ModelType.SMALL, ModelType.MEDIUM],
             "max_throughput_fps": 30,
-            "typical_latency_ms": 40
+            "typical_latency_ms": 40,
         },
         "agx_xavier": {
             "gpu_memory_gb": 16.0,
             "cpu_cores": 8,
             "max_power_watts": 30.0,
-            "supported_models": [ModelType.NANO, ModelType.SMALL, ModelType.MEDIUM, ModelType.LARGE],
+            "supported_models": [
+                ModelType.NANO,
+                ModelType.SMALL,
+                ModelType.MEDIUM,
+                ModelType.LARGE,
+            ],
             "max_throughput_fps": 60,
-            "typical_latency_ms": 25
-        }
+            "typical_latency_ms": 25,
+        },
     }
 
     specs = jetson_specs.get(model, jetson_specs["nano"])
 
-    return EdgeDevice(
-        device_id=device_id,
-        device_type=f"jetson_{model}",
-        **specs
-    )
+    return EdgeDevice(device_id=device_id, device_type=f"jetson_{model}", **specs)
 
 
 def create_intel_device_config(
     device_id: str,
-    model: str = "ncs2"  # "ncs2", "cpu_inference"
+    model: str = "ncs2",  # "ncs2", "cpu_inference"
 ) -> EdgeDevice:
     """Create EdgeDevice configuration for Intel devices."""
 
@@ -722,7 +743,7 @@ def create_intel_device_config(
             "max_power_watts": 2.5,
             "supported_models": [ModelType.NANO],
             "max_throughput_fps": 8,
-            "typical_latency_ms": 120
+            "typical_latency_ms": 120,
         },
         "cpu_inference": {
             "gpu_memory_gb": 0.0,  # CPU-only inference
@@ -730,26 +751,23 @@ def create_intel_device_config(
             "max_power_watts": 65.0,
             "supported_models": [ModelType.NANO, ModelType.SMALL],
             "max_throughput_fps": 5,
-            "typical_latency_ms": 200
-        }
+            "typical_latency_ms": 200,
+        },
     }
 
     specs = intel_specs.get(model, intel_specs["ncs2"])
 
-    return EdgeDevice(
-        device_id=device_id,
-        device_type=f"intel_{model}",
-        **specs
-    )
+    return EdgeDevice(device_id=device_id, device_type=f"intel_{model}", **specs)
 
 
 async def benchmark_edge_cloud_performance(
-    router: EdgeCloudRouter,
-    num_requests: int = 100
+    router: EdgeCloudRouter, num_requests: int = 100
 ) -> dict:
     """Benchmark edge vs cloud performance."""
 
-    logger.info(f"Starting edge-cloud performance benchmark with {num_requests} requests")
+    logger.info(
+        f"Starting edge-cloud performance benchmark with {num_requests} requests"
+    )
 
     # Generate test requests
     test_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
@@ -762,7 +780,7 @@ async def benchmark_edge_cloud_performance(
             frame_id=f"edge_test_{i}",
             camera_id="benchmark_camera",
             timestamp=time.time(),
-            preferred_location=InferenceLocation.EDGE_ONLY
+            preferred_location=InferenceLocation.EDGE_ONLY,
         )
         edge_requests.append(request)
 
@@ -785,7 +803,7 @@ async def benchmark_edge_cloud_performance(
             frame_id=f"cloud_test_{i}",
             camera_id="benchmark_camera",
             timestamp=time.time(),
-            preferred_location=InferenceLocation.CLOUD_ONLY
+            preferred_location=InferenceLocation.CLOUD_ONLY,
         )
         cloud_requests.append(request)
 
@@ -806,17 +824,23 @@ async def benchmark_edge_cloud_performance(
             "requests": len(edge_requests),
             "successful": len(edge_results),
             "total_time_s": edge_time,
-            "avg_latency_ms": np.mean([r.total_time_ms for r in edge_results]) if edge_results else 0,
-            "throughput_rps": len(edge_results) / edge_time if edge_time > 0 else 0
+            "avg_latency_ms": (
+                np.mean([r.total_time_ms for r in edge_results]) if edge_results else 0
+            ),
+            "throughput_rps": len(edge_results) / edge_time if edge_time > 0 else 0,
         },
         "cloud_performance": {
             "requests": len(cloud_requests),
             "successful": len(cloud_results),
             "total_time_s": cloud_time,
-            "avg_latency_ms": np.mean([r.total_time_ms for r in cloud_results]) if cloud_results else 0,
-            "throughput_rps": len(cloud_results) / cloud_time if cloud_time > 0 else 0
+            "avg_latency_ms": (
+                np.mean([r.total_time_ms for r in cloud_results])
+                if cloud_results
+                else 0
+            ),
+            "throughput_rps": len(cloud_results) / cloud_time if cloud_time > 0 else 0,
         },
-        "router_stats": router.get_performance_stats()
+        "router_stats": router.get_performance_stats(),
     }
 
     logger.info(f"Benchmark completed: {benchmark_results}")
