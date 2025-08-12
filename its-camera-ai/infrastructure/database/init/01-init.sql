@@ -129,7 +129,7 @@ CREATE TRIGGER update_model_registry_updated_at BEFORE UPDATE ON model_registry
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Create default admin user (password: admin123)
-INSERT INTO users (username, email, password_hash, role) 
+INSERT INTO users (username, email, password_hash, role)
 VALUES (
     'admin',
     'admin@its-camera-ai.com',
@@ -138,15 +138,15 @@ VALUES (
 ) ON CONFLICT (username) DO NOTHING;
 
 -- Create sample camera entries
-INSERT INTO cameras (name, location, stream_url) VALUES 
+INSERT INTO cameras (name, location, stream_url) VALUES
     ('Main Entrance', '{"lat": 37.7749, "lng": -122.4194, "address": "123 Main St, San Francisco, CA"}', 'rtsp://demo:demo@192.168.1.100:554/stream'),
     ('Parking Lot A', '{"lat": 37.7849, "lng": -122.4094, "address": "456 Oak Ave, San Francisco, CA"}', 'rtsp://demo:demo@192.168.1.101:554/stream'),
     ('Traffic Junction', '{"lat": 37.7649, "lng": -122.4294, "address": "789 Pine St, San Francisco, CA"}', 'rtsp://demo:demo@192.168.1.102:554/stream')
 ON CONFLICT DO NOTHING;
 
 -- Create sample model registry entry
-INSERT INTO model_registry (name, version, model_path, metrics, metadata) VALUES 
-    ('YOLOv11n', '1.0.0', '/models/yolo11n.pt', 
+INSERT INTO model_registry (name, version, model_path, metrics, metadata) VALUES
+    ('YOLOv11n', '1.0.0', '/models/yolo11n.pt',
      '{"accuracy": 0.85, "latency_ms": 45, "map50": 0.78}',
      '{"description": "YOLOv11 nano model for real-time inference", "input_size": [640, 640], "classes": 80}')
 ON CONFLICT (name, version) DO NOTHING;

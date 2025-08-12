@@ -1,0 +1,332 @@
+# ConfigMaps for ITS Camera AI System
+# Application configuration for production deployment
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+data:
+  # FastAPI Configuration
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  API_WORKERS: "4"
+  API_RELOAD: "false"
+  API_DEBUG: "false"
+  LOG_LEVEL: "INFO"
+
+  # Database Configuration
+  DB_HOST: "postgresql-primary.its-camera-ai.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "its_camera_ai"
+  DB_POOL_SIZE: "20"
+  DB_MAX_OVERFLOW: "30"
+  DB_POOL_TIMEOUT: "30"
+
+  # Redis Configuration
+  REDIS_HOST: "redis-master.its-camera-ai.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_POOL_SIZE: "20"
+  REDIS_TIMEOUT: "5"
+
+  # ML Configuration
+  MODEL_PATH: "/models"
+  MODEL_VERSION: "yolo11n"
+  INFERENCE_BATCH_SIZE: "8"
+  INFERENCE_TIMEOUT: "100"
+  GPU_MEMORY_FRACTION: "0.8"
+
+  # Security Configuration
+  JWT_ALGORITHM: "HS256"
+  JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  JWT_REFRESH_TOKEN_EXPIRE_DAYS: "7"
+  CORS_ORIGINS: "https://its-camera-ai.com,https://api.its-camera-ai.com"
+
+  # Monitoring Configuration
+  METRICS_ENABLED: "true"
+  METRICS_PORT: "9090"
+  HEALTH_CHECK_INTERVAL: "30"
+
+  # Kafka Configuration
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-cluster-kafka-bootstrap.kafka:9092"
+  KAFKA_TOPIC_CAMERA_FRAMES: "camera-frames"
+  KAFKA_TOPIC_TRAFFIC_EVENTS: "traffic-events"
+  KAFKA_CONSUMER_GROUP: "its-camera-ai-group"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-inference-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ml-inference
+    app.kubernetes.io/version: "0.1.0"
+data:
+  # YOLO11 Model Configuration
+  MODEL_TYPE: "yolo11n"
+  MODEL_WEIGHTS: "/models/yolo11n.pt"
+  MODEL_CONFIDENCE: "0.5"
+  MODEL_IOU_THRESHOLD: "0.45"
+
+  # TensorRT Optimization
+  TENSORRT_ENABLED: "true"
+  TENSORRT_PRECISION: "fp16"
+  TENSORRT_MAX_BATCH_SIZE: "16"
+  TENSORRT_WORKSPACE_SIZE: "2147483648"  # 2GB
+
+  # Inference Configuration
+  BATCH_SIZE: "8"
+  MAX_QUEUE_SIZE: "100"
+  INFERENCE_TIMEOUT_MS: "100"
+  GPU_DEVICE_ID: "0"
+
+  # Performance Tuning
+  NUM_WORKERS: "4"
+  PREFETCH_FACTOR: "2"
+  PIN_MEMORY: "true"
+  NON_BLOCKING: "true"
+
+  # Model Registry
+  MODEL_REGISTRY_URL: "http://model-registry.its-camera-ai.svc.cluster.local:8080"
+  MODEL_UPDATE_INTERVAL: "300"  # 5 minutes
+
+  # Monitoring
+  PROMETHEUS_METRICS: "true"
+  LOG_PREDICTIONS: "false"
+  PERFORMANCE_LOGGING: "true"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/version: "15"
+data:
+  # PostgreSQL Configuration
+  postgresql.conf: |
+    # Connection settings
+    listen_addresses = '*'
+    port = 5432
+    max_connections = 200
+
+    # Memory settings
+    shared_buffers = 2GB
+    effective_cache_size = 6GB
+    work_mem = 32MB
+    maintenance_work_mem = 512MB
+
+    # WAL settings
+    wal_level = replica
+    max_wal_size = 2GB
+    min_wal_size = 1GB
+    checkpoint_completion_target = 0.9
+
+    # Performance settings
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    max_worker_processes = 8
+    max_parallel_workers_per_gather = 4
+    max_parallel_workers = 8
+    max_parallel_maintenance_workers = 4
+
+    # Logging
+    logging_collector = on
+    log_directory = 'log'
+    log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+    log_min_duration_statement = 1000
+    log_checkpoints = on
+    log_connections = on
+    log_disconnections = on
+    log_lock_waits = on
+
+    # Replication
+    hot_standby = on
+    hot_standby_feedback = on
+    max_standby_streaming_delay = 30s
+
+  pg_hba.conf: |
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+    local   all             all                                     trust
+    host    all             all             127.0.0.1/32            md5
+    host    all             all             ::1/128                 md5
+    host    all             all             0.0.0.0/0               md5
+    host    replication     postgres        0.0.0.0/0               md5
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/version: "7.0"
+data:
+  redis.conf: |
+    # Network
+    bind 0.0.0.0
+    port 6379
+    tcp-backlog 511
+    tcp-keepalive 300
+
+    # General
+    daemonize no
+    supervised systemd
+    pidfile /var/run/redis_6379.pid
+    loglevel notice
+    logfile ""
+
+    # Memory
+    maxmemory 2gb
+    maxmemory-policy allkeys-lru
+
+    # Persistence
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+
+    # AOF
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+
+    # Performance
+    timeout 0
+    client-output-buffer-limit normal 0 0 0
+    client-output-buffer-limit replica 256mb 64mb 60
+    client-output-buffer-limit pubsub 32mb 8mb 60
+
+    # Security
+    protected-mode no
+    requirepass ${REDIS_PASSWORD}
+
+  redis-sentinel.conf: |
+    port 26379
+    sentinel monitor mymaster redis-master 6379 2
+    sentinel auth-pass mymaster ${REDIS_PASSWORD}
+    sentinel down-after-milliseconds mymaster 30000
+    sentinel parallel-syncs mymaster 1
+    sentinel failover-timeout mymaster 180000
+    sentinel deny-scripts-reconfig yes
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/component: proxy
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+
+        # Logging
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /var/log/nginx/access.log main;
+        error_log /var/log/nginx/error.log warn;
+
+        # Performance
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+
+        # Rate limiting
+        limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+        limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/s;
+
+        # Upstream servers
+        upstream api_backend {
+            least_conn;
+            server api-service.its-camera-ai.svc.cluster.local:8000 max_fails=3 fail_timeout=30s;
+        }
+
+        upstream ml_backend {
+            least_conn;
+            server ml-inference-service.its-camera-ai.svc.cluster.local:8080 max_fails=3 fail_timeout=30s;
+        }
+
+        # Main server block
+        server {
+            listen 80;
+            server_name api.its-camera-ai.com;
+
+            # Security headers
+            add_header X-Frame-Options DENY;
+            add_header X-Content-Type-Options nosniff;
+            add_header X-XSS-Protection "1; mode=block";
+            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
+
+            # API endpoints
+            location /api/ {
+                limit_req zone=api burst=20 nodelay;
+                proxy_pass http://api_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_timeout 30s;
+            }
+
+            # ML inference endpoints
+            location /inference/ {
+                limit_req zone=api burst=50 nodelay;
+                proxy_pass http://ml_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_timeout 120s;
+                client_max_body_size 50M;
+            }
+
+            # Authentication endpoints
+            location /auth/ {
+                limit_req zone=auth burst=10 nodelay;
+                proxy_pass http://api_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            # Health checks
+            location /health {
+                access_log off;
+                return 200 "healthy";
+                add_header Content-Type text/plain;
+            }
+        }
+    }

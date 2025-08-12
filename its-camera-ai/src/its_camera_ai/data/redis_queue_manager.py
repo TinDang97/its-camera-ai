@@ -1,0 +1,831 @@
+"""Redis Queue Manager for High-Performance Stream Processing.
+
+This module provides Redis-based queue management to replace Kafka,
+optimized for high-throughput video frame processing with gRPC serialization.
+
+Key Features:
+- Redis Streams for ordered message processing
+- Connection pooling and automatic reconnection
+- Batch processing for improved throughput
+- Dead letter queue for failed messages
+- Comprehensive monitoring and metrics
+- gRPC-optimized serialization
+"""
+
+import asyncio
+import logging
+import time
+import uuid
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, AsyncGenerator, Callable, Optional
+
+import redis.asyncio as aioredis
+from redis.asyncio import Redis
+from redis.exceptions import ConnectionError, ResponseError, TimeoutError
+
+
+logger = logging.getLogger(__name__)
+
+
+class QueueType(Enum):
+    """Redis queue implementation types."""
+    
+    STREAM = "stream"  # Redis Streams (ordered, persistent)
+    LIST = "list"  # Redis Lists (FIFO, simple)
+    PUBSUB = "pubsub"  # Redis Pub/Sub (fire-and-forget)
+
+
+class QueueStatus(Enum):
+    """Queue processing status."""
+    
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DRAINING = "draining"
+    STOPPED = "stopped"
+    ERROR = "error"
+
+
+@dataclass
+class QueueConfig:
+    """Configuration for Redis queue."""
+    
+    name: str
+    queue_type: QueueType = QueueType.STREAM
+    max_length: int = 10000
+    consumer_group: str = "default"
+    consumer_name: str = "worker"
+    batch_size: int = 10
+    block_time_ms: int = 1000
+    retry_attempts: int = 3
+    dead_letter_queue: bool = True
+    enable_compression: bool = True
+    compression_level: int = 6
+
+
+@dataclass
+class QueueMetrics:
+    """Queue performance metrics."""
+    
+    queue_name: str
+    pending_count: int = 0
+    processing_count: int = 0
+    completed_count: int = 0
+    failed_count: int = 0
+    avg_processing_time_ms: float = 0.0
+    throughput_fps: float = 0.0
+    last_updated: float = field(default_factory=time.time)
+    
+    # Consumer group metrics (for streams)
+    consumer_count: int = 0
+    lag: int = 0
+    
+    # Memory and performance
+    memory_usage_bytes: int = 0
+    cpu_usage_percent: float = 0.0
+
+
+class RedisQueueManager:
+    """High-performance Redis queue manager for stream processing."""
+    
+    def __init__(
+        self,
+        redis_url: str = "redis://localhost:6379",
+        pool_size: int = 20,
+        timeout: int = 30,
+        retry_on_failure: bool = True
+    ):
+        """Initialize Redis queue manager.
+        
+        Args:
+            redis_url: Redis connection URL
+            pool_size: Maximum connections in pool
+            timeout: Connection timeout in seconds
+            retry_on_failure: Enable automatic retry on connection failure
+        """
+        self.redis_url = redis_url
+        self.pool_size = pool_size
+        self.timeout = timeout
+        self.retry_on_failure = retry_on_failure
+        
+        # Connection management
+        self.redis: Optional[Redis] = None
+        self._connection_pool: Optional[aioredis.ConnectionPool] = None
+        
+        # Queue management
+        self.queues: dict[str, QueueConfig] = {}
+        self.metrics: dict[str, QueueMetrics] = {}
+        self.status: QueueStatus = QueueStatus.STOPPED
+        
+        # Performance tracking
+        self.processing_times: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self.last_metrics_update = time.time()
+        
+        # Error handling
+        self.error_count = 0
+        self.last_error: Optional[Exception] = None
+        
+        logger.info(f"Redis queue manager initialized with URL: {redis_url}")
+    
+    async def connect(self) -> None:
+        """Establish Redis connection with pool."""
+        try:
+            self._connection_pool = aioredis.ConnectionPool.from_url(
+                self.redis_url,
+                max_connections=self.pool_size,
+                socket_timeout=self.timeout,
+                socket_connect_timeout=self.timeout,
+                retry_on_timeout=True,
+                health_check_interval=30
+            )
+            
+            self.redis = aioredis.Redis(
+                connection_pool=self._connection_pool,
+                decode_responses=False  # Keep bytes for binary data
+            )
+            
+            # Test connection
+            await self.redis.ping()
+            self.status = QueueStatus.ACTIVE
+            
+            logger.info("Redis connection established successfully")
+            
+        except Exception as e:
+            self.status = QueueStatus.ERROR
+            self.last_error = e
+            logger.error(f"Failed to connect to Redis: {e}")
+            raise
+    
+    async def disconnect(self) -> None:
+        """Close Redis connection and cleanup."""
+        try:
+            if self.redis:
+                await self.redis.close()
+            
+            if self._connection_pool:
+                await self._connection_pool.disconnect()
+            
+            self.status = QueueStatus.STOPPED
+            logger.info("Redis connection closed")
+            
+        except Exception as e:
+            logger.error(f"Error closing Redis connection: {e}")
+    
+    async def create_queue(
+        self,
+        config: QueueConfig,
+        initialize_consumer_group: bool = True
+    ) -> bool:
+        """Create or configure a Redis queue.
+        
+        Args:
+            config: Queue configuration
+            initialize_consumer_group: Whether to create consumer group for streams
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            if not self.redis:
+                raise ConnectionError("Redis not connected")
+            
+            self.queues[config.name] = config
+            self.metrics[config.name] = QueueMetrics(queue_name=config.name)
+            
+            # Initialize based on queue type
+            if config.queue_type == QueueType.STREAM:
+                await self._initialize_stream(config, initialize_consumer_group)
+            elif config.queue_type == QueueType.LIST:
+                await self._initialize_list(config)
+            
+            logger.info(f"Queue '{config.name}' created with type {config.queue_type.value}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create queue '{config.name}': {e}")
+            return False
+    
+    async def _initialize_stream(
+        self,
+        config: QueueConfig,
+        create_consumer_group: bool
+    ) -> None:
+        """Initialize Redis Stream with consumer group."""
+        try:
+            # Create consumer group if it doesn't exist
+            if create_consumer_group:
+                try:
+                    await self.redis.xgroup_create(
+                        config.name,
+                        config.consumer_group,
+                        id="0",
+                        mkstream=True
+                    )
+                    logger.info(
+                        f"Created consumer group '{config.consumer_group}' for stream '{config.name}'"
+                    )
+                except ResponseError as e:
+                    if "BUSYGROUP" not in str(e):
+                        raise
+                    # Consumer group already exists
+                    pass
+            
+            # Set max length if specified
+            if config.max_length > 0:
+                await self.redis.xtrim(config.name, maxlen=config.max_length, approximate=True)
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize stream '{config.name}': {e}")
+            raise
+    
+    async def _initialize_list(self, config: QueueConfig) -> None:
+        """Initialize Redis List queue."""
+        # Lists don't require special initialization
+        # Just ensure the key exists
+        await self.redis.lpush(config.name, "__init__")
+        await self.redis.lpop(config.name)
+    
+    async def enqueue(
+        self,
+        queue_name: str,
+        data: bytes,
+        priority: int = 0,
+        metadata: Optional[dict[str, Any]] = None
+    ) -> str:
+        """Enqueue data to specified queue.
+        
+        Args:
+            queue_name: Name of the queue
+            data: Binary data to enqueue
+            priority: Message priority (higher = more important)
+            metadata: Additional metadata
+            
+        Returns:
+            str: Message ID
+        """
+        if not self.redis or queue_name not in self.queues:
+            raise ValueError(f"Queue '{queue_name}' not found or Redis not connected")
+        
+        config = self.queues[queue_name]
+        message_id = str(uuid.uuid4())
+        
+        try:
+            # Prepare message with metadata
+            message_data = {
+                "id": message_id,
+                "data": data,
+                "timestamp": time.time(),
+                "priority": priority,
+                "attempts": 0
+            }
+            
+            if metadata:
+                message_data.update(metadata)
+            
+            # Enqueue based on queue type
+            if config.queue_type == QueueType.STREAM:
+                stream_id = await self.redis.xadd(
+                    queue_name,
+                    message_data,
+                    maxlen=config.max_length
+                )
+                message_id = stream_id.decode()
+                
+            elif config.queue_type == QueueType.LIST:
+                # Use priority scoring for lists
+                if priority > 0:
+                    await self.redis.lpush(queue_name, message_id)
+                    await self.redis.hset(f"{queue_name}:data", message_id, data)
+                else:
+                    await self.redis.rpush(queue_name, message_id)
+                    await self.redis.hset(f"{queue_name}:data", message_id, data)
+                    
+            elif config.queue_type == QueueType.PUBSUB:
+                await self.redis.publish(queue_name, data)
+            
+            # Update metrics
+            self.metrics[queue_name].pending_count += 1
+            
+            return message_id
+            
+        except Exception as e:
+            self.error_count += 1
+            self.last_error = e
+            logger.error(f"Failed to enqueue to '{queue_name}': {e}")
+            raise
+    
+    async def enqueue_batch(
+        self,
+        queue_name: str,
+        data_batch: list[bytes],
+        priorities: Optional[list[int]] = None,
+        metadata_batch: Optional[list[dict[str, Any]]] = None
+    ) -> list[str]:
+        """Enqueue multiple messages in a batch for efficiency.
+        
+        Args:
+            queue_name: Name of the queue
+            data_batch: List of binary data to enqueue
+            priorities: Optional list of priorities
+            metadata_batch: Optional list of metadata dicts
+            
+        Returns:
+            list[str]: List of message IDs
+        """
+        if not data_batch:
+            return []
+        
+        message_ids = []
+        
+        # Use Redis pipeline for batch operations
+        async with self.redis.pipeline() as pipe:
+            for i, data in enumerate(data_batch):
+                priority = priorities[i] if priorities else 0
+                metadata = metadata_batch[i] if metadata_batch else None
+                
+                message_id = str(uuid.uuid4())
+                message_ids.append(message_id)
+                
+                # Add to pipeline based on queue type
+                config = self.queues[queue_name]
+                
+                if config.queue_type == QueueType.STREAM:
+                    message_data = {
+                        "id": message_id,
+                        "data": data,
+                        "timestamp": time.time(),
+                        "priority": priority,
+                        "attempts": 0
+                    }
+                    if metadata:
+                        message_data.update(metadata)
+                    
+                    pipe.xadd(queue_name, message_data, maxlen=config.max_length)
+                    
+                elif config.queue_type == QueueType.LIST:
+                    if priority > 0:
+                        pipe.lpush(queue_name, message_id)
+                    else:
+                        pipe.rpush(queue_name, message_id)
+                    pipe.hset(f"{queue_name}:data", message_id, data)
+            
+            # Execute pipeline
+            await pipe.execute()
+        
+        # Update metrics
+        self.metrics[queue_name].pending_count += len(data_batch)
+        
+        return message_ids
+    
+    async def dequeue(
+        self,
+        queue_name: str,
+        timeout_ms: Optional[int] = None
+    ) -> Optional[tuple[str, bytes]]:
+        """Dequeue single message from queue.
+        
+        Args:
+            queue_name: Name of the queue
+            timeout_ms: Block timeout in milliseconds
+            
+        Returns:
+            tuple[str, bytes]: Message ID and data, or None if timeout
+        """
+        if not self.redis or queue_name not in self.queues:
+            return None
+        
+        config = self.queues[queue_name]
+        
+        try:
+            if config.queue_type == QueueType.STREAM:
+                return await self._dequeue_stream(config, timeout_ms)
+            elif config.queue_type == QueueType.LIST:
+                return await self._dequeue_list(config, timeout_ms)
+            else:
+                raise ValueError(f"Dequeue not supported for {config.queue_type}")
+                
+        except Exception as e:
+            logger.error(f"Failed to dequeue from '{queue_name}': {e}")
+            return None
+    
+    async def _dequeue_stream(
+        self,
+        config: QueueConfig,
+        timeout_ms: Optional[int]
+    ) -> Optional[tuple[str, bytes]]:
+        """Dequeue from Redis Stream."""
+        try:
+            timeout = timeout_ms or config.block_time_ms
+            
+            # Read from consumer group
+            messages = await self.redis.xreadgroup(
+                config.consumer_group,
+                config.consumer_name,
+                {config.name: ">"},
+                count=1,
+                block=timeout
+            )
+            
+            if not messages or not messages[0][1]:
+                return None
+            
+            stream_name, stream_messages = messages[0]
+            message_id, fields = stream_messages[0]
+            
+            # Extract data
+            data = fields.get(b"data", b"")
+            
+            # Update metrics
+            self.metrics[config.name].pending_count = max(0, self.metrics[config.name].pending_count - 1)
+            self.metrics[config.name].processing_count += 1
+            
+            return message_id.decode(), data
+            
+        except Exception as e:
+            logger.error(f"Stream dequeue error: {e}")
+            return None
+    
+    async def _dequeue_list(
+        self,
+        config: QueueConfig,
+        timeout_ms: Optional[int]
+    ) -> Optional[tuple[str, bytes]]:
+        """Dequeue from Redis List."""
+        try:
+            timeout = (timeout_ms or config.block_time_ms) / 1000
+            
+            # Blocking left pop
+            result = await self.redis.blpop([config.name], timeout=timeout)
+            
+            if not result:
+                return None
+            
+            queue_name, message_id = result
+            message_id = message_id.decode()
+            
+            # Get data
+            data = await self.redis.hget(f"{config.name}:data", message_id)
+            
+            if data:
+                # Clean up
+                await self.redis.hdel(f"{config.name}:data", message_id)
+                
+                # Update metrics
+                self.metrics[config.name].pending_count = max(0, self.metrics[config.name].pending_count - 1)
+                self.metrics[config.name].processing_count += 1
+                
+                return message_id, data
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"List dequeue error: {e}")
+            return None
+    
+    async def dequeue_batch(
+        self,
+        queue_name: str,
+        batch_size: Optional[int] = None,
+        timeout_ms: Optional[int] = None
+    ) -> list[tuple[str, bytes]]:
+        """Dequeue multiple messages in a batch.
+        
+        Args:
+            queue_name: Name of the queue
+            batch_size: Number of messages to dequeue
+            timeout_ms: Block timeout in milliseconds
+            
+        Returns:
+            list[tuple[str, bytes]]: List of (message_id, data) tuples
+        """
+        if not self.redis or queue_name not in self.queues:
+            return []
+        
+        config = self.queues[queue_name]
+        batch_size = batch_size or config.batch_size
+        
+        messages = []
+        
+        try:
+            if config.queue_type == QueueType.STREAM:
+                timeout = timeout_ms or config.block_time_ms
+                
+                # Read batch from consumer group
+                stream_messages = await self.redis.xreadgroup(
+                    config.consumer_group,
+                    config.consumer_name,
+                    {config.name: ">"},
+                    count=batch_size,
+                    block=timeout
+                )
+                
+                if stream_messages and stream_messages[0][1]:
+                    for message_id, fields in stream_messages[0][1]:
+                        data = fields.get(b"data", b"")
+                        messages.append((message_id.decode(), data))
+                        
+            elif config.queue_type == QueueType.LIST:
+                # Dequeue multiple from list
+                for _ in range(batch_size):
+                    result = await self.dequeue(queue_name, timeout_ms=100)  # Short timeout for batch
+                    if result:
+                        messages.append(result)
+                    else:
+                        break
+            
+            # Update metrics
+            if messages:
+                self.metrics[config.name].pending_count = max(
+                    0, self.metrics[config.name].pending_count - len(messages)
+                )
+                self.metrics[config.name].processing_count += len(messages)
+            
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Batch dequeue error from '{queue_name}': {e}")
+            return []
+    
+    async def acknowledge(
+        self,
+        queue_name: str,
+        message_id: str,
+        processing_time_ms: Optional[float] = None
+    ) -> bool:
+        """Acknowledge successful message processing.
+        
+        Args:
+            queue_name: Name of the queue
+            message_id: Message ID to acknowledge
+            processing_time_ms: Processing time for metrics
+            
+        Returns:
+            bool: Success status
+        """
+        if not self.redis or queue_name not in self.queues:
+            return False
+        
+        config = self.queues[queue_name]
+        
+        try:
+            if config.queue_type == QueueType.STREAM:
+                # Acknowledge in consumer group
+                await self.redis.xack(config.name, config.consumer_group, message_id)
+            
+            # Update metrics
+            metrics = self.metrics[queue_name]
+            metrics.processing_count = max(0, metrics.processing_count - 1)
+            metrics.completed_count += 1
+            
+            if processing_time_ms:
+                self.processing_times[queue_name].append(processing_time_ms)
+                # Update average processing time
+                times = list(self.processing_times[queue_name])
+                metrics.avg_processing_time_ms = sum(times) / len(times)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to acknowledge message '{message_id}': {e}")
+            return False
+    
+    async def reject(
+        self,
+        queue_name: str,
+        message_id: str,
+        reason: str = "processing_failed",
+        send_to_dlq: bool = True
+    ) -> bool:
+        """Reject message and optionally send to dead letter queue.
+        
+        Args:
+            queue_name: Name of the queue
+            message_id: Message ID to reject
+            reason: Rejection reason
+            send_to_dlq: Whether to send to dead letter queue
+            
+        Returns:
+            bool: Success status
+        """
+        if not self.redis or queue_name not in self.queues:
+            return False
+        
+        config = self.queues[queue_name]
+        
+        try:
+            # Update metrics
+            metrics = self.metrics[queue_name]
+            metrics.processing_count = max(0, metrics.processing_count - 1)
+            metrics.failed_count += 1
+            
+            if config.queue_type == QueueType.STREAM:
+                # For streams, we need to handle failed messages differently
+                if send_to_dlq and config.dead_letter_queue:
+                    # Move to dead letter queue
+                    dlq_name = f"{queue_name}:dlq"
+                    dlq_data = {
+                        "original_id": message_id,
+                        "failed_at": time.time(),
+                        "reason": reason,
+                        "queue": queue_name
+                    }
+                    await self.redis.xadd(dlq_name, dlq_data)
+                
+                # Acknowledge to remove from pending
+                await self.redis.xack(config.name, config.consumer_group, message_id)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to reject message '{message_id}': {e}")
+            return False
+    
+    async def get_queue_metrics(self, queue_name: str) -> Optional[QueueMetrics]:
+        """Get current metrics for a queue.
+        
+        Args:
+            queue_name: Name of the queue
+            
+        Returns:
+            QueueMetrics: Current queue metrics
+        """
+        if queue_name not in self.queues:
+            return None
+        
+        try:
+            config = self.queues[queue_name]
+            metrics = self.metrics[queue_name]
+            
+            # Update real-time metrics
+            if config.queue_type == QueueType.STREAM:
+                # Get stream length
+                length = await self.redis.xlen(queue_name)
+                
+                # Get consumer group info
+                try:
+                    groups = await self.redis.xinfo_groups(queue_name)
+                    for group in groups:
+                        if group[b"name"].decode() == config.consumer_group:
+                            metrics.pending_count = group[b"pending"]
+                            metrics.consumer_count = group[b"consumers"]
+                            break
+                except ResponseError:
+                    # Consumer group might not exist
+                    pass
+                    
+            elif config.queue_type == QueueType.LIST:
+                # Get list length
+                metrics.pending_count = await self.redis.llen(queue_name)
+            
+            # Calculate throughput
+            current_time = time.time()
+            time_diff = current_time - metrics.last_updated
+            if time_diff > 0:
+                # Estimate throughput based on completed count
+                metrics.throughput_fps = metrics.completed_count / time_diff
+            
+            metrics.last_updated = current_time
+            
+            # Get memory usage
+            try:
+                memory_info = await self.redis.memory_usage(queue_name)
+                metrics.memory_usage_bytes = memory_info or 0
+            except (ResponseError, AttributeError):
+                # Memory usage command might not be available
+                pass
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Failed to get metrics for '{queue_name}': {e}")
+            return None
+    
+    async def get_all_metrics(self) -> dict[str, QueueMetrics]:
+        """Get metrics for all queues.
+        
+        Returns:
+            dict[str, QueueMetrics]: Metrics for all queues
+        """
+        all_metrics = {}
+        
+        for queue_name in self.queues:
+            metrics = await self.get_queue_metrics(queue_name)
+            if metrics:
+                all_metrics[queue_name] = metrics
+        
+        return all_metrics
+    
+    async def purge_queue(self, queue_name: str, force: bool = False) -> int:
+        """Purge all messages from a queue.
+        
+        Args:
+            queue_name: Name of the queue to purge
+            force: Force purge even if queue is active
+            
+        Returns:
+            int: Number of messages purged
+        """
+        if not self.redis or queue_name not in self.queues:
+            return 0
+        
+        if not force and self.status == QueueStatus.ACTIVE:
+            logger.warning(f"Cannot purge active queue '{queue_name}' without force=True")
+            return 0
+        
+        config = self.queues[queue_name]
+        purged_count = 0
+        
+        try:
+            if config.queue_type == QueueType.STREAM:
+                # Get current length
+                length = await self.redis.xlen(queue_name)
+                # Delete the stream
+                await self.redis.delete(queue_name)
+                purged_count = length
+                
+            elif config.queue_type == QueueType.LIST:
+                # Get current length
+                length = await self.redis.llen(queue_name)
+                # Delete the list and data hash
+                await self.redis.delete(queue_name, f"{queue_name}:data")
+                purged_count = length
+            
+            # Reset metrics
+            self.metrics[queue_name] = QueueMetrics(queue_name=queue_name)
+            
+            logger.info(f"Purged {purged_count} messages from queue '{queue_name}'")
+            return purged_count
+            
+        except Exception as e:
+            logger.error(f"Failed to purge queue '{queue_name}': {e}")
+            return 0
+    
+    async def health_check(self) -> dict[str, Any]:
+        """Perform health check on Redis connection and queues.
+        
+        Returns:
+            dict[str, Any]: Health status information
+        """
+        health_info = {
+            "status": "unknown",
+            "timestamp": time.time(),
+            "redis_connected": False,
+            "queue_count": len(self.queues),
+            "total_pending": 0,
+            "total_processing": 0,
+            "error_count": self.error_count,
+            "last_error": str(self.last_error) if self.last_error else None
+        }
+        
+        try:
+            if self.redis:
+                # Test Redis connection
+                await self.redis.ping()
+                health_info["redis_connected"] = True
+                
+                # Get Redis info
+                redis_info = await self.redis.info()
+                health_info["redis_version"] = redis_info.get("redis_version")
+                health_info["used_memory"] = redis_info.get("used_memory")
+                health_info["connected_clients"] = redis_info.get("connected_clients")
+                
+                # Calculate total pending/processing
+                for queue_name in self.queues:
+                    metrics = await self.get_queue_metrics(queue_name)
+                    if metrics:
+                        health_info["total_pending"] += metrics.pending_count
+                        health_info["total_processing"] += metrics.processing_count
+                
+                health_info["status"] = "healthy"
+                
+        except Exception as e:
+            health_info["status"] = "unhealthy"
+            health_info["error"] = str(e)
+            logger.error(f"Health check failed: {e}")
+        
+        return health_info
+    
+    def get_status(self) -> QueueStatus:
+        """Get current queue manager status."""
+        return self.status
+    
+    async def pause(self) -> None:
+        """Pause queue processing."""
+        self.status = QueueStatus.PAUSED
+        logger.info("Queue processing paused")
+    
+    async def resume(self) -> None:
+        """Resume queue processing."""
+        if self.redis and self.status == QueueStatus.PAUSED:
+            self.status = QueueStatus.ACTIVE
+            logger.info("Queue processing resumed")
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.disconnect()

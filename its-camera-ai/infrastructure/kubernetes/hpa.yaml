@@ -1,0 +1,489 @@
+# Horizontal Pod Autoscaler configurations for ITS Camera AI System
+# Dynamic scaling based on CPU, memory, and custom metrics
+
+# HPA for API deployment
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-deployment
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  # Custom metric: Request rate
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"  # Scale up when more than 100 RPS per pod
+  # External metric: Queue depth from Kafka
+  - type: External
+    external:
+      metric:
+        name: kafka_consumer_lag
+        selector:
+          matchLabels:
+            topic: api-requests
+      target:
+        type: AverageValue
+        averageValue: "50"  # Scale up when lag > 50 messages
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+# HPA for ML Inference deployment
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml-inference-hpa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-inference-deployment
+  minReplicas: 6
+  maxReplicas: 50
+  metrics:
+  # GPU memory utilization
+  - type: External
+    external:
+      metric:
+        name: nvidia_gpu_memory_utilization
+      target:
+        type: AverageValue
+        averageValue: "80"  # Scale when GPU memory > 80%
+  # Inference queue depth
+  - type: Pods
+    pods:
+      metric:
+        name: inference_queue_length
+      target:
+        type: AverageValue
+        averageValue: "10"  # Max 10 requests per pod in queue
+  # Inference latency (custom metric)
+  - type: Pods
+    pods:
+      metric:
+        name: inference_latency_p95
+      target:
+        type: AverageValue
+        averageValue: "80"  # Scale when P95 latency > 80ms
+  # CPU utilization (for non-GPU workloads)
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30  # Faster scaling for ML workloads
+      policies:
+      - type: Percent
+        value: 200
+        periodSeconds: 15
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 180  # Slower scale down to avoid thrashing
+      policies:
+      - type: Percent
+        value: 20
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+# HPA for Camera Stream Processor
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: camera-stream-hpa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: camera-stream-processor
+  minReplicas: 10
+  maxReplicas: 100
+  metrics:
+  # CPU utilization
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  # Memory utilization
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Active camera streams per pod
+  - type: Pods
+    pods:
+      metric:
+        name: active_camera_streams
+      target:
+        type: AverageValue
+        averageValue: "10"  # 10 cameras per pod max
+  # Network I/O (custom metric)
+  - type: Pods
+    pods:
+      metric:
+        name: network_bytes_per_second
+      target:
+        type: AverageValue
+        averageValue: "100000000"  # 100MB/s per pod
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 200
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 180
+      policies:
+      - type: Percent
+        value: 20
+        periodSeconds: 60
+
+---
+# HPA for Event Processor
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: event-processor-hpa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: event-processor
+  minReplicas: 5
+  maxReplicas: 30
+  metrics:
+  # CPU utilization
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Kafka consumer lag
+  - type: External
+    external:
+      metric:
+        name: kafka_consumer_lag
+        selector:
+          matchLabels:
+            topic: traffic-events
+      target:
+        type: AverageValue
+        averageValue: "200"  # Scale when lag > 200 messages
+  # Event processing rate
+  - type: Pods
+    pods:
+      metric:
+        name: events_processed_per_second
+      target:
+        type: AverageValue
+        averageValue: "50"  # 50 events per second per pod
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 45
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+
+---
+# KEDA ScaledObject for advanced Kafka-based scaling
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ml-inference-kafka-scaler
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: autoscaling
+spec:
+  scaleTargetRef:
+    name: ml-inference-deployment
+  pollingInterval: 5
+  cooldownPeriod: 60
+  idleReplicaCount: 6
+  minReplicaCount: 6
+  maxReplicaCount: 50
+  triggers:
+  # Kafka trigger for camera frames
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-cluster-kafka-bootstrap.kafka:9092
+      consumerGroup: ml-inference-group
+      topic: camera-frames
+      lagThreshold: '100'
+      offsetResetPolicy: latest
+      scaleToZeroOnInvalidOffset: 'false'
+    authenticationRef:
+      name: kafka-auth
+  # Prometheus trigger for queue depth
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.monitoring:9090
+      metricName: inference_queue_depth
+      threshold: '200'
+      query: sum(inference_queue_length{namespace="its-camera-ai"})
+
+---
+# KEDA ScaledObject for stream processing
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: stream-processor-scaler
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: autoscaling
+spec:
+  scaleTargetRef:
+    name: camera-stream-processor
+  pollingInterval: 10
+  cooldownPeriod: 120
+  idleReplicaCount: 5
+  minReplicaCount: 10
+  maxReplicaCount: 100
+  triggers:
+  # Redis trigger for active connections
+  - type: redis
+    metadata:
+      address: redis-master.its-camera-ai.svc.cluster.local:6379
+      listName: active_camera_connections
+      listLength: '50'  # Scale when > 50 connections per replica
+    authenticationRef:
+      name: redis-auth
+  # Prometheus trigger for bandwidth usage
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.monitoring:9090
+      metricName: network_bandwidth_utilization
+      threshold: '70'
+      query: avg(rate(container_network_receive_bytes_total{namespace="its-camera-ai"}[5m]))
+
+---
+# KEDA TriggerAuthentication for Kafka
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-auth
+  namespace: its-camera-ai
+spec:
+  secretTargetRef:
+  - parameter: sasl
+    name: kafka-credentials
+    key: sasl
+  - parameter: username
+    name: kafka-credentials
+    key: username
+  - parameter: password
+    name: kafka-credentials
+    key: password
+
+---
+# KEDA TriggerAuthentication for Redis
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: redis-auth
+  namespace: its-camera-ai
+spec:
+  secretTargetRef:
+  - parameter: password
+    name: redis-secrets
+    key: redis-password
+
+---
+# Custom metrics API adapter configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+data:
+  config.yaml: |
+    # Custom metrics configuration for HPA
+    rules:
+    # Inference metrics
+    - seriesQuery: 'inference_duration_seconds{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^inference_duration_seconds"
+        as: "inference_latency_p95"
+      metricsQuery: 'histogram_quantile(0.95, rate(<<.Series>>{<<.LabelMatchers>>}[2m]))'
+
+    # Queue depth metrics
+    - seriesQuery: 'inference_queue_length{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_queue_length"
+        as: "${1}_queue_depth"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>}[1m])'
+
+    # Camera stream metrics
+    - seriesQuery: 'camera_streams_active{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_active"
+        as: "${1}_count"
+      metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>}[30s]) by (<<.GroupBy>>)'
+
+    # HTTP request rate
+    - seriesQuery: 'http_requests_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^http_requests_total"
+        as: "http_requests_per_second"
+      metricsQuery: 'rate(<<.Series>>{<<.LabelMatchers>>}[1m])'
+
+    # Network bandwidth
+    - seriesQuery: 'container_network_receive_bytes_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^container_network_receive_bytes_total"
+        as: "network_bytes_per_second"
+      metricsQuery: 'rate(<<.Series>>{<<.LabelMatchers>>}[1m])'
+
+---
+# PodDisruptionBudget for API pods
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: availability
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: its-camera-ai
+      app.kubernetes.io/component: api
+
+---
+# PodDisruptionBudget for ML Inference pods
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ml-inference-pdb
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: availability
+spec:
+  minAvailable: 50%  # Keep at least 50% of inference pods running
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: its-camera-ai
+      app.kubernetes.io/component: ml-inference
+
+---
+# PodDisruptionBudget for Stream Processors
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: stream-processor-pdb
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: availability
+spec:
+  minAvailable: 70%  # Keep most stream processors running
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: its-camera-ai
+      app.kubernetes.io/component: stream-processor

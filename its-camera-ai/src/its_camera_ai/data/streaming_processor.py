@@ -29,26 +29,31 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import cv2
 import numpy as np
 from PIL import Image
 
-# Async messaging
-try:
-    from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-
-    KAFKA_AVAILABLE = True
-except ImportError:
-    KAFKA_AVAILABLE = False
-
+# Async messaging and serialization
 try:
     import redis.asyncio as aioredis
+    from .redis_queue_manager import RedisQueueManager, QueueConfig, QueueType
+    from .grpc_serialization import ProcessedFrameSerializer
 
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
+    
+    # Fallback classes for development
+    class RedisQueueManager:
+        pass
+    class QueueConfig:
+        pass
+    class QueueType:
+        STREAM = "stream"
+    class ProcessedFrameSerializer:
+        pass
 
 
 logger = logging.getLogger(__name__)
@@ -410,13 +415,16 @@ class StreamProcessor:
         self.processed_frames = deque(maxlen=10000)
         self.quality_stats = defaultdict(lambda: deque(maxlen=1000))
 
-        # Kafka integration
-        self.kafka_bootstrap_servers = config.get("kafka_servers", ["localhost:9092"])
-        self.input_topic = config.get("input_topic", "camera_frames")
-        self.output_topic = config.get("output_topic", "processed_frames")
-
-        # Redis for caching
+        # Redis Queue configuration
         self.redis_url = config.get("redis_url", "redis://localhost:6379")
+        self.input_queue = config.get("input_queue", "camera_frames")
+        self.output_queue = config.get("output_queue", "processed_frames")
+        self.queue_pool_size = config.get("queue_pool_size", 20)
+        
+        # gRPC serialization
+        self.enable_compression = config.get("enable_compression", True)
+        self.compression_format = config.get("compression_format", "jpeg")
+        self.compression_quality = config.get("compression_quality", 85)
 
         # Processing settings
         self.max_concurrent_streams = config.get("max_concurrent_streams", 1000)
@@ -432,8 +440,8 @@ class StreamProcessor:
             "error_count": 0,
         }
 
-        self.kafka_consumer = None
-        self.kafka_producer = None
+        self.queue_manager: Optional[RedisQueueManager] = None
+        self.serializer: Optional[ProcessedFrameSerializer] = None
         self.redis_client = None
 
         logger.info("Stream processor initialized")
@@ -441,48 +449,87 @@ class StreamProcessor:
     async def start(self):
         """Start the stream processing pipeline."""
 
-        # Initialize connections
-        if KAFKA_AVAILABLE:
-            await self._setup_kafka()
-
+        # Initialize Redis queue manager
         if REDIS_AVAILABLE:
-            await self._setup_redis()
+            await self._setup_redis_queues()
+            await self._setup_redis_cache()
+        else:
+            raise RuntimeError("Redis is required for queue management")
+
+        # Initialize gRPC serializer
+        self._setup_serializer()
 
         # Start processing tasks
         asyncio.create_task(self._consume_frames())
         asyncio.create_task(self._monitor_performance())
 
-        logger.info("Stream processor started")
+        logger.info("Stream processor started with Redis queues and gRPC serialization")
 
-    async def _setup_kafka(self):
-        """Setup Kafka consumer and producer."""
-
-        self.kafka_consumer = AIOKafkaConsumer(
-            self.input_topic,
-            bootstrap_servers=self.kafka_bootstrap_servers,
-            group_id="stream_processor",
-            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-            max_poll_records=100,
+    async def _setup_redis_queues(self):
+        """Setup Redis queue manager for high-performance streaming."""
+        
+        self.queue_manager = RedisQueueManager(
+            redis_url=self.redis_url,
+            pool_size=self.queue_pool_size,
+            timeout=30,
+            retry_on_failure=True
         )
-
-        self.kafka_producer = AIOKafkaProducer(
-            bootstrap_servers=self.kafka_bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+        
+        await self.queue_manager.connect()
+        
+        # Create input and output queues
+        input_config = QueueConfig(
+            name=self.input_queue,
+            queue_type=QueueType.STREAM,
+            max_length=10000,
+            consumer_group="stream_processor",
+            consumer_name="processor_worker",
+            batch_size=20,
+            block_time_ms=1000,
+            enable_compression=self.enable_compression
         )
+        
+        output_config = QueueConfig(
+            name=self.output_queue,
+            queue_type=QueueType.STREAM,
+            max_length=50000,
+            consumer_group="output_consumers",
+            consumer_name="output_worker",
+            batch_size=50,
+            enable_compression=self.enable_compression
+        )
+        
+        await self.queue_manager.create_queue(input_config)
+        await self.queue_manager.create_queue(output_config)
+        
+        logger.info("Redis queue connections established")
 
-        await self.kafka_consumer.start()
-        await self.kafka_producer.start()
+    async def _setup_redis_cache(self):
+        """Setup Redis connection for caching."""
 
-        logger.info("Kafka connections established")
-
-    async def _setup_redis(self):
-        """Setup Redis connection."""
-
+        # Separate Redis connection for caching (different DB)
+        cache_url = self.redis_url
+        if "/0" in cache_url:
+            cache_url = cache_url.replace("/0", "/1")  # Use DB 1 for cache
+        elif not cache_url.endswith(("/1", "/2", "/3")):
+            cache_url += "/1"
+        
         self.redis_client = await aioredis.from_url(
-            self.redis_url, decode_responses=True
+            cache_url, decode_responses=True
         )
 
-        logger.info("Redis connection established")
+        logger.info("Redis cache connection established")
+    
+    def _setup_serializer(self):
+        """Setup gRPC serializer for efficient data transfer."""
+        
+        self.serializer = ProcessedFrameSerializer(
+            compression_format=self.compression_format,
+            compression_quality=self.compression_quality,
+            enable_compression=self.enable_compression
+        )
+        
+        logger.info(f"gRPC serializer initialized with {self.compression_format} compression")
 
     async def _consume_frames(self):
         """Consume and process frames from Kafka."""

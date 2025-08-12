@@ -76,7 +76,7 @@ async def liveness_check() -> dict[str, str]:
 
 @router.get("/health/ready", response_model=ReadinessResponse)
 async def readiness_check(
-    settings: Settings = Depends(get_settings),
+    _settings: Settings = Depends(get_settings),
 ) -> ReadinessResponse:
     """Kubernetes readiness probe endpoint.
 

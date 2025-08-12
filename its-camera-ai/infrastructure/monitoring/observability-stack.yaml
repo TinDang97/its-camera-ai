@@ -20,7 +20,7 @@ spec:
   replicas: 2
   retention: 30d
   retentionSize: 500GB
-  
+
   # Storage configuration
   storage:
     volumeClaimTemplate:
@@ -30,7 +30,7 @@ spec:
         resources:
           requests:
             storage: 500Gi
-  
+
   # Resource allocation
   resources:
     requests:
@@ -39,33 +39,33 @@ spec:
     limits:
       cpu: "4"
       memory: "16Gi"
-  
+
   # Service monitor selector
   serviceMonitorSelector:
     matchLabels:
       team: its-camera-ai
-  
+
   # Pod monitor selector
   podMonitorSelector:
     matchLabels:
       team: its-camera-ai
-  
+
   # Rule selector
   ruleSelector:
     matchLabels:
       team: its-camera-ai
-  
+
   # Prometheus configuration
   additionalScrapeConfigs:
     name: prometheus-additional-scrape-configs
     key: prometheus-additional.yaml
-  
+
   # Security context
   securityContext:
     runAsUser: 1000
     runAsGroup: 1000
     fsGroup: 1000
-  
+
   # Affinity rules
   affinity:
     podAntiAffinity:
@@ -96,7 +96,7 @@ stringData:
         - 'edge-camera-processor-service.its-camera-edge:9090'
       scrape_interval: 5s
       metrics_path: '/metrics'
-      
+
     # ML inference metrics
     - job_name: 'ml-inference'
       static_configs:
@@ -105,7 +105,7 @@ stringData:
         - 'edge-ml-inference-service.its-camera-edge:9090'
       scrape_interval: 5s
       metrics_path: '/metrics'
-      
+
     # Database metrics
     - job_name: 'postgresql'
       static_configs:
@@ -113,14 +113,14 @@ stringData:
         - 'postgresql-cluster-rw.its-camera-ai-system:9187'
         - 'postgresql-cluster-ro.its-camera-ai-system:9187'
       scrape_interval: 30s
-      
+
     # Redis metrics
     - job_name: 'redis'
       static_configs:
       - targets:
         - 'redis-cluster-service.its-camera-ai-system:9121'
       scrape_interval: 30s
-      
+
     # InfluxDB metrics
     - job_name: 'influxdb'
       static_configs:
@@ -128,7 +128,7 @@ stringData:
         - 'influxdb-service.its-camera-ai-system:8086'
       scrape_interval: 30s
       metrics_path: '/metrics'
-      
+
     # Node exporter metrics
     - job_name: 'node-exporter'
       kubernetes_sd_configs:
@@ -139,7 +139,7 @@ stringData:
       - source_labels: [__meta_kubernetes_endpoints_name]
         regex: node-exporter
         action: keep
-      
+
     # GPU metrics
     - job_name: 'gpu-metrics'
       kubernetes_sd_configs:
@@ -232,7 +232,7 @@ spec:
             port: 3000
           initialDelaySeconds: 30
           periodSeconds: 30
-      
+
       volumes:
       - name: grafana-storage
         persistentVolumeClaim:
@@ -263,17 +263,17 @@ data:
       access: proxy
       url: http://prometheus-main:9090
       isDefault: true
-      
+
     - name: Loki
       type: loki
       access: proxy
       url: http://loki-gateway:3100
-      
+
     - name: Jaeger
       type: jaeger
       access: proxy
       url: http://jaeger-query:16686
-      
+
     - name: InfluxDB
       type: influxdb
       access: proxy
@@ -477,12 +477,12 @@ spec:
           mountPath: /etc/loki
         - name: loki-storage
           mountPath: /loki
-      
+
       volumes:
       - name: loki-config
         configMap:
           name: loki-config
-  
+
   volumeClaimTemplates:
   - metadata:
       name: loki-storage
@@ -503,12 +503,12 @@ metadata:
 data:
   local-config.yaml: |
     auth_enabled: false
-    
+
     server:
       http_listen_port: 3100
       grpc_listen_port: 9096
       log_level: info
-    
+
     common:
       path_prefix: /loki
       storage:
@@ -516,7 +516,7 @@ data:
           chunks_directory: /loki/chunks
           rules_directory: /loki/rules
       replication_factor: 3
-    
+
     schema_config:
       configs:
         - from: 2023-01-01
@@ -526,7 +526,7 @@ data:
           index:
             prefix: index_
             period: 24h
-    
+
     storage_config:
       boltdb_shipper:
         active_index_directory: /loki/boltdb-shipper-active
@@ -534,7 +534,7 @@ data:
         shared_store: filesystem
       filesystem:
         directory: /loki/chunks
-    
+
     limits_config:
       enforce_metric_name: false
       reject_old_samples: true
@@ -544,14 +544,14 @@ data:
       per_stream_rate_limit: 8MB
       per_stream_rate_limit_burst: 16MB
       max_concurrent_tail_requests: 20
-    
+
     chunk_store_config:
       max_look_back_period: 0s
-    
+
     table_manager:
       retention_deletes_enabled: true
       retention_period: 30d
-    
+
     ruler:
       storage:
         type: local
@@ -607,7 +607,7 @@ spec:
           limits:
             cpu: 200m
             memory: 256Mi
-      
+
       volumes:
       - name: config
         configMap:
@@ -618,7 +618,7 @@ spec:
       - name: varlibdockercontainers
         hostPath:
           path: /var/lib/docker/containers
-      
+
       tolerations:
       - effect: NoSchedule
         operator: Exists
@@ -633,7 +633,7 @@ metadata:
 spec:
   replicas: 3
   retention: 120h
-  
+
   resources:
     requests:
       cpu: 100m
@@ -641,7 +641,7 @@ spec:
     limits:
       cpu: 200m
       memory: 512Mi
-  
+
   storage:
     volumeClaimTemplate:
       spec:
@@ -674,7 +674,7 @@ spec:
       annotations:
         summary: "ML inference latency is above 100ms"
         description: "95th percentile inference latency is {{ $value }}s, above the 100ms target"
-    
+
     # Camera offline alert
     - alert: CameraOffline
       expr: increase(camera_disconnections_total[5m]) > 0
@@ -685,7 +685,7 @@ spec:
       annotations:
         summary: "Camera has gone offline"
         description: "Camera {{ $labels.camera_id }} has disconnected"
-    
+
     # High error rate
     - alert: HighErrorRate
       expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
@@ -695,7 +695,7 @@ spec:
       annotations:
         summary: "High error rate detected"
         description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
-    
+
     # Database connection issues
     - alert: DatabaseConnectionIssues
       expr: postgresql_up == 0
@@ -706,7 +706,7 @@ spec:
       annotations:
         summary: "Database is down"
         description: "PostgreSQL database {{ $labels.instance }} is not responding"
-    
+
     # GPU utilization too low
     - alert: LowGPUUtilization
       expr: avg_over_time(nvidia_gpu_utilization_gpu[10m]) < 20
@@ -717,7 +717,7 @@ spec:
       annotations:
         summary: "GPU utilization is low"
         description: "GPU utilization on {{ $labels.instance }} is {{ $value }}%, consider scaling down"
-    
+
     # Disk space running low
     - alert: DiskSpaceRunningLow
       expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1

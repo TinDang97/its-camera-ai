@@ -1,0 +1,461 @@
+# Storage configuration for ITS Camera AI System
+# StorageClasses, PVCs, and backup strategies
+
+# High-performance SSD StorageClass for databases and models
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  iops: "16000"
+  throughput: "1000"
+  encrypted: "true"
+  kmsKeyId: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+allowedTopologies:
+- matchLabelExpressions:
+  - key: topology.ebs.csi.aws.com/zone
+    values:
+    - us-west-2a
+    - us-west-2b
+    - us-west-2c
+
+---
+# Standard SSD StorageClass for general workloads
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard-ssd
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: storage
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  encrypted: "true"
+  kmsKeyId: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+
+---
+# Local NVMe storage for GPU nodes (high-speed caching)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gpu-local-nvme
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: false
+
+---
+# Archive storage for long-term data retention
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: archive-storage
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: storage
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: st1  # Throughput optimized HDD
+  encrypted: "true"
+  kmsKeyId: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+
+---
+# PVC for ML models storage (shared across inference pods)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-pvc
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ml-inference
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  accessModes:
+  - ReadOnlyMany  # Shared read-only access for model files
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 100Gi
+  selector:
+    matchLabels:
+      usage: ml-models
+
+---
+# PVC for ML model cache (per-node local storage)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-model-cache-pvc
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ml-inference
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: gpu-local-nvme
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+# PVC for video stream cache
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: video-stream-cache
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: stream-processor
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: standard-ssd
+  resources:
+    requests:
+      storage: 500Gi
+
+---
+# PVC for log aggregation
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs-storage
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: logging
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: standard-ssd
+  resources:
+    requests:
+      storage: 200Gi
+
+---
+# PVC for backup storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-storage
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: backup
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: archive-storage
+  resources:
+    requests:
+      storage: 2Ti
+
+---
+# Persistent Volume for ML models (backed by EFS for shared access)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ml-models-pv
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ml-inference
+    usage: ml-models
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+  - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: fs-12345678  # Replace with actual EFS filesystem ID
+    volumeAttributes:
+      path: "/ml-models"
+      uid: "1000"
+      gid: "1000"
+      dirMode: "0755"
+      fileMode: "0644"
+  mountOptions:
+  - tls
+  - accesspoint=fsap-12345678  # Replace with actual EFS access point
+
+---
+# Volume Snapshot Class for backup automation
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: csi-ebs-snapshot-class
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: backup
+driver: ebs.csi.aws.com
+deletionPolicy: Retain
+parameters:
+  encrypted: "true"
+
+---
+# Scheduled backup for PostgreSQL data
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: postgresql-backup-daily
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: backup
+  annotations:
+    backup.schedule: "0 2 * * *"  # Daily at 2 AM
+spec:
+  volumeSnapshotClassName: csi-ebs-snapshot-class
+  source:
+    persistentVolumeClaimName: postgresql-data-postgresql-primary-0
+
+---
+# Scheduled backup for Redis data
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: redis-backup-daily
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: backup
+  annotations:
+    backup.schedule: "0 3 * * *"  # Daily at 3 AM
+spec:
+  volumeSnapshotClassName: csi-ebs-snapshot-class
+  source:
+    persistentVolumeClaimName: redis-data-redis-master-0
+
+---
+# CronJob for automated database backups
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup-cronjob
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "0 1 * * *"  # Daily at 1 AM
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: postgresql
+            app.kubernetes.io/component: backup
+        spec:
+          serviceAccountName: postgresql
+          restartPolicy: OnFailure
+          containers:
+          - name: postgres-backup
+            image: postgres:15-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="postgresql_backup_${TIMESTAMP}.sql"
+
+              # Create backup
+              pg_dump -h postgresql-primary.its-camera-ai.svc.cluster.local \
+                      -p 5432 \
+                      -U postgres \
+                      -d its_camera_ai \
+                      --no-password \
+                      --verbose \
+                      --format=custom \
+                      --file=/backup/${BACKUP_FILE}
+
+              # Compress backup
+              gzip /backup/${BACKUP_FILE}
+
+              # Upload to S3 (optional)
+              aws s3 cp /backup/${BACKUP_FILE}.gz \
+                       s3://its-camera-ai-backups/postgresql/${BACKUP_FILE}.gz
+
+              # Cleanup local files older than 7 days
+              find /backup -name "postgresql_backup_*.sql.gz" -mtime +7 -delete
+
+              echo "Backup completed: ${BACKUP_FILE}.gz"
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: postgres-password
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: 1000m
+                memory: 2Gi
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+
+---
+# CronJob for Redis backups
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup-cronjob
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: redis
+            app.kubernetes.io/component: backup
+        spec:
+          serviceAccountName: redis
+          restartPolicy: OnFailure
+          containers:
+          - name: redis-backup
+            image: redis:7.0-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="redis_backup_${TIMESTAMP}.rdb"
+
+              # Create Redis backup
+              redis-cli -h redis-master.its-camera-ai.svc.cluster.local \
+                        -p 6379 \
+                        -a "$REDIS_PASSWORD" \
+                        --rdb /backup/${BACKUP_FILE}
+
+              # Compress backup
+              gzip /backup/${BACKUP_FILE}
+
+              # Upload to S3 (optional)
+              aws s3 cp /backup/${BACKUP_FILE}.gz \
+                       s3://its-camera-ai-backups/redis/${BACKUP_FILE}.gz
+
+              # Cleanup local files older than 7 days
+              find /backup -name "redis_backup_*.rdb.gz" -mtime +7 -delete
+
+              echo "Backup completed: ${BACKUP_FILE}.gz"
+            env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secrets
+                  key: redis-password
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+
+---
+# Storage monitoring and alerting
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage-monitoring
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+data:
+  storage-alerts.yaml: |
+    # Storage monitoring rules
+    groups:
+    - name: storage.rules
+      rules:
+      # PVC usage alerts
+      - alert: PVCAlmostFull
+        expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PVC {{ $labels.persistentvolumeclaim }} is almost full"
+          description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | humanizePercentage }} full."
+
+      - alert: PVCFull
+        expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PVC {{ $labels.persistentvolumeclaim }} is critically full"
+          description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | humanizePercentage }} full."
+
+      # Backup status alerts
+      - alert: BackupJobFailed
+        expr: kube_job_status_failed{job_name=~".*backup.*"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup job {{ $labels.job_name }} failed"
+          description: "Backup job {{ $labels.job_name }} in namespace {{ $labels.namespace }} has failed."
+
+      # Volume snapshot alerts
+      - alert: VolumeSnapshotFailed
+        expr: increase(volume_snapshot_controller_operation_total_errors[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Volume snapshot operation failed"
+          description: "Volume snapshot controller has reported {{ $value }} errors in the last 5 minutes."

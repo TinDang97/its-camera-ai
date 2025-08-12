@@ -1,0 +1,572 @@
+# Monitoring configuration for ITS Camera AI System
+# Prometheus ServiceMonitors, PodMonitors, and alerting rules
+
+# ServiceMonitor for API service metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api-service-monitor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: false
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'go_.*'
+      action: drop
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai
+
+---
+# ServiceMonitor for ML Inference service metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ml-inference-monitor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: ml-inference
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s  # More frequent monitoring for ML metrics
+    scrapeTimeout: 10s
+    honorLabels: false
+    metricRelabelings:
+    # Keep only ITS-specific metrics
+    - sourceLabels: [__name__]
+      regex: '(inference_.*|model_.*|gpu_.*|its_camera_ai_.*)'
+      action: keep
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai
+
+---
+# ServiceMonitor for PostgreSQL metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgresql-monitor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgresql
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: false
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai
+
+---
+# ServiceMonitor for Redis metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-monitor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: false
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai
+
+---
+# PodMonitor for application pods that don't expose services
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: its-camera-ai-pods
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: its-camera-ai
+  podMetricsEndpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai
+
+---
+# PrometheusRule for ITS Camera AI specific alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: its-camera-ai-alerts
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  groups:
+  - name: its-camera-ai.performance
+    rules:
+    # High-level performance alerts
+    - alert: HighInferenceLatency
+      expr: histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m])) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "ML inference latency is high"
+        description: "95th percentile inference latency is {{ $value }}s, above 100ms threshold."
+
+    - alert: CriticalInferenceLatency
+      expr: histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m])) > 0.15
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "ML inference latency is critically high"
+        description: "95th percentile inference latency is {{ $value }}s, above 150ms critical threshold."
+
+    - alert: HighAPILatency
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="api-service"}[5m])) > 1.0
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "API response latency is high"
+        description: "95th percentile API latency is {{ $value }}s, above 1s threshold."
+
+    - alert: HighErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High error rate detected"
+        description: "Error rate is {{ $value | humanizePercentage }}, above 5% threshold."
+
+    - alert: CriticalErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.10
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Critical error rate detected"
+        description: "Error rate is {{ $value | humanizePercentage }}, above 10% critical threshold."
+
+  - name: its-camera-ai.infrastructure
+    rules:
+    # Infrastructure health alerts
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total[15m]) * 60 * 15 > 5
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod {{ $labels.pod }} is crash looping"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last 15 minutes."
+
+    - alert: PodNotReady
+      expr: kube_pod_status_ready{condition="false"} == 1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod {{ $labels.pod }} is not ready"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been not ready for more than 5 minutes."
+
+    - alert: HighMemoryUsage
+      expr: (container_memory_working_set_bytes / container_spec_memory_limit_bytes) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage in {{ $labels.pod }}"
+        description: "Memory usage is {{ $value | humanizePercentage }} in pod {{ $labels.pod }}."
+
+    - alert: HighCPUUsage
+      expr: (rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota * container_spec_cpu_period) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage in {{ $labels.pod }}"
+        description: "CPU usage is {{ $value | humanizePercentage }} in pod {{ $labels.pod }}."
+
+  - name: its-camera-ai.gpu
+    rules:
+    # GPU-specific alerts
+    - alert: HighGPUUtilization
+      expr: nvidia_gpu_utilization > 95
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "GPU utilization is very high"
+        description: "GPU {{ $labels.gpu }} on node {{ $labels.node }} has {{ $value }}% utilization."
+
+    - alert: GPUMemoryHigh
+      expr: (nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes) > 0.90
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "GPU memory usage is high"
+        description: "GPU {{ $labels.gpu }} memory usage is {{ $value | humanizePercentage }}."
+
+    - alert: GPUTemperatureHigh
+      expr: nvidia_gpu_temperature_celsius > 85
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "GPU temperature is high"
+        description: "GPU {{ $labels.gpu }} temperature is {{ $value }}°C."
+
+  - name: its-camera-ai.business
+    rules:
+    # Business logic alerts
+    - alert: LowCameraStreamCount
+      expr: active_camera_streams < 50
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Camera stream count is low"
+        description: "Only {{ $value }} camera streams are active, below expected minimum of 50."
+
+    - alert: HighQueueDepth
+      expr: inference_queue_length > 100
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Inference queue depth is high"
+        description: "Inference queue has {{ $value }} items, above threshold of 100."
+
+    - alert: ModelLoadFailure
+      expr: increase(model_load_failures_total[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "ML model failed to load"
+        description: "{{ $value }} model load failures in the last 5 minutes."
+
+---
+# Custom metrics for business logic monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+data:
+  metrics.yaml: |
+    # Custom metrics configuration for ITS Camera AI
+    custom_metrics:
+      # Camera stream metrics
+      - name: active_camera_streams
+        description: "Number of active camera streams"
+        type: gauge
+        labels: ["location", "camera_type"]
+
+      - name: camera_stream_fps
+        description: "Frames per second per camera stream"
+        type: gauge
+        labels: ["camera_id", "location"]
+
+      - name: camera_stream_quality
+        description: "Video quality score (0-1) per camera"
+        type: gauge
+        labels: ["camera_id", "resolution"]
+
+      # Inference metrics
+      - name: inference_requests_total
+        description: "Total inference requests"
+        type: counter
+        labels: ["model_version", "status"]
+
+      - name: inference_duration_seconds
+        description: "Inference duration in seconds"
+        type: histogram
+        labels: ["model_version", "batch_size"]
+        buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+      - name: inference_queue_length
+        description: "Current inference queue length"
+        type: gauge
+        labels: ["queue_type"]
+
+      - name: model_accuracy
+        description: "Model accuracy score"
+        type: gauge
+        labels: ["model_version", "validation_set"]
+
+      # Traffic analytics metrics
+      - name: vehicles_detected_total
+        description: "Total vehicles detected"
+        type: counter
+        labels: ["vehicle_type", "location", "time_of_day"]
+
+      - name: traffic_incidents_total
+        description: "Total traffic incidents detected"
+        type: counter
+        labels: ["incident_type", "severity", "location"]
+
+      - name: traffic_flow_rate
+        description: "Vehicles per minute through location"
+        type: gauge
+        labels: ["location", "direction"]
+
+      # System health metrics
+      - name: database_connections_active
+        description: "Active database connections"
+        type: gauge
+        labels: ["database"]
+
+      - name: cache_hit_ratio
+        description: "Cache hit ratio (0-1)"
+        type: gauge
+        labels: ["cache_type"]
+
+      - name: storage_usage_bytes
+        description: "Storage usage in bytes"
+        type: gauge
+        labels: ["storage_type", "location"]
+
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: its-camera-ai-dashboard
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+    grafana_dashboard: "1"
+data:
+  dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "ITS Camera AI - System Overview",
+        "description": "Comprehensive monitoring dashboard for ITS Camera AI system",
+        "tags": ["its-camera-ai", "traffic-monitoring", "ml-inference"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Active Camera Streams",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(active_camera_streams)",
+                "legendFormat": "Total Streams"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {"mode": "palette-classic"},
+                "custom": {"displayMode": "list", "orientation": "horizontal"},
+                "mappings": [],
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": 0},
+                    {"color": "yellow", "value": 50},
+                    {"color": "green", "value": 100}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Inference Latency (P95)",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m]))",
+                "legendFormat": "P95 Latency"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": 0},
+                    {"color": "yellow", "value": 0.1},
+                    {"color": "red", "value": 0.15}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "API Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total[5m])",
+                "legendFormat": "{{method}} {{status}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "GPU Utilization",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "nvidia_gpu_utilization",
+                "legendFormat": "GPU {{gpu}} - {{node}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "min": 0,
+                "max": 100
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Traffic Detection Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(vehicles_detected_total[5m])",
+                "legendFormat": "{{vehicle_type}} - {{location}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "10s"
+      }
+    }
+
+---
+# Alertmanager configuration for notifications
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+type: Opaque
+stringData:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: 'alerts@its-camera-ai.com'
+      smtp_auth_username: 'alerts@its-camera-ai.com'
+      smtp_auth_password: '<smtp-password>'
+
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'web.hook'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'critical-alerts'
+      - match:
+          severity: warning
+        receiver: 'warning-alerts'
+
+    receivers:
+    - name: 'web.hook'
+      webhook_configs:
+      - url: 'http://alertmanager-webhook.its-camera-ai.svc.cluster.local:9093/'
+
+    - name: 'critical-alerts'
+      email_configs:
+      - to: 'ops-team@its-camera-ai.com'
+        subject: '[CRITICAL] ITS Camera AI Alert'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Labels: {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
+          {{ end }}
+      slack_configs:
+      - api_url: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX'
+        channel: '#its-alerts-critical'
+        title: 'ITS Camera AI Critical Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+    - name: 'warning-alerts'
+      email_configs:
+      - to: 'ops-team@its-camera-ai.com'
+        subject: '[WARNING] ITS Camera AI Alert'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'cluster', 'service']

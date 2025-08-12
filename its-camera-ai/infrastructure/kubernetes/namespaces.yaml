@@ -1,0 +1,74 @@
+# Kubernetes namespace configuration for ITS Camera AI platform
+# Provides multi-tenant isolation and resource organization
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/instance: production
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/component: platform
+    istio-injection: enabled
+  annotations:
+    prometheus.io/scrape: "true"
+    linkerd.io/inject: enabled
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-ai-staging
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/instance: staging
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/component: platform
+    environment: staging
+    istio-injection: enabled
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-ai-dev
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/instance: development
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/component: platform
+    environment: development
+    istio-injection: enabled
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-ai-edge
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/instance: edge
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/component: platform
+    environment: edge
+    deployment-type: edge
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-monitoring
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/component: observability
+    prometheus.io/scrape: "true"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-ingress
+  labels:
+    app.kubernetes.io/name: ingress
+    app.kubernetes.io/component: networking

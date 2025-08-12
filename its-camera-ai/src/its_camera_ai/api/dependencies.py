@@ -104,7 +104,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception as e:
             await session.rollback()
             logger.error("Database session error", error=str(e))
-            raise DatabaseError("Database operation failed", cause=e)
+            raise DatabaseError("Database operation failed", cause=e) from e
         finally:
             await session.close()
 
@@ -196,7 +196,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
     try:
         # Get user from database
@@ -211,7 +211,7 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed",
-        )
+        ) from e
 
 
 async def get_optional_user(

@@ -31,6 +31,7 @@ import numpy as np
 # Import all pipeline components
 from .data.streaming_processor import StreamProcessor, create_stream_processor
 from .ml.federated_learning import (
+    ClientInfo,
     FederatedCoordinator,
     create_federated_coordinator,
 )
@@ -256,10 +257,6 @@ class ProductionOrchestrator:
         if not self.federated_coordinator:
             return
 
-        # In production, edge nodes would register themselves
-        # This simulates some default registrations
-        from ..tca.ml.federated_learning import ClientInfo
-
         edge_nodes = [
             ClientInfo(
                 client_id=f"edge_node_{i}",
@@ -311,8 +308,28 @@ class ProductionOrchestrator:
 
     async def _collect_health_metrics(self) -> dict[str, Any]:
         """Collect health metrics from all pipeline components."""
+        health_data = self._initialize_health_data()
 
-        health_data = {
+        # Collect metrics from each component
+        if self.stream_processor:
+            health_data["stream_processor"] = self._get_stream_processor_health()
+
+        if self.ml_pipeline:
+            health_data["ml_pipeline"] = await self._get_ml_pipeline_health()
+
+        if self.monitoring_dashboard:
+            health_data["monitoring"] = self._get_monitoring_health()
+
+        if self.federated_coordinator:
+            health_data["federated_learning"] = self._get_federated_health()
+
+        # Calculate overall health score
+        health_data["overall_health"] = self._calculate_overall_health(health_data)
+        return health_data
+
+    def _initialize_health_data(self) -> dict[str, Any]:
+        """Initialize base health data structure."""
+        return {
             "timestamp": time.time(),
             "uptime_hours": (
                 (time.time() - self.start_time) / 3600 if self.start_time else 0
@@ -320,72 +337,71 @@ class ProductionOrchestrator:
             "overall_health": 100.0,
         }
 
-        # Stream processor health
-        if self.stream_processor:
-            stream_stats = self.stream_processor.get_processing_stats()
-            health_data["stream_processor"] = {
-                "active_streams": stream_stats["active_streams"],
-                "throughput_fps": stream_stats["performance_metrics"]["throughput_fps"],
-                "error_rate": stream_stats["performance_metrics"]["error_count"]
-                / max(1, stream_stats["performance_metrics"]["frames_processed"]),
-                "health_score": (
-                    90.0
-                    if stream_stats["kafka_available"]
-                    and stream_stats["redis_available"]
-                    else 50.0
-                ),
-            }
+    def _get_stream_processor_health(self) -> dict[str, Any]:
+        """Get stream processor health metrics."""
+        stream_stats = self.stream_processor.get_processing_stats()
+        error_rate = stream_stats["performance_metrics"]["error_count"] / max(
+            1, stream_stats["performance_metrics"]["frames_processed"]
+        )
+        health_score = (
+            90.0
+            if stream_stats["kafka_available"] and stream_stats["redis_available"]
+            else 50.0
+        )
 
-        # ML pipeline health
-        if self.ml_pipeline:
-            ml_status = await self.ml_pipeline.get_pipeline_status()
-            health_data["ml_pipeline"] = {
-                "status": ml_status["status"],
-                "inference_engine_fps": ml_status["components"]["inference_engine"].get(
-                    "throughput_fps", 0
-                ),
-                "training_jobs": ml_status["components"]["training_pipeline"][
-                    "active_jobs"
-                ],
-                "model_count": ml_status["components"]["model_registry"][
-                    "total_models"
-                ],
-                "health_score": 100.0 if ml_status["status"] == "running" else 50.0,
-            }
+        return {
+            "active_streams": stream_stats["active_streams"],
+            "throughput_fps": stream_stats["performance_metrics"]["throughput_fps"],
+            "error_rate": error_rate,
+            "health_score": health_score,
+        }
 
-        # Monitoring dashboard health
-        if self.monitoring_dashboard:
-            dashboard_data = self.monitoring_dashboard.get_dashboard_data()
-            health_data["monitoring"] = {
-                "system_health_score": dashboard_data["metrics"]["system_health_score"],
-                "active_alerts": dashboard_data["metrics"]["alerts_active"],
-                "critical_alerts": dashboard_data["metrics"]["alerts_critical"],
-                "health_score": max(
-                    0, 100 - dashboard_data["metrics"]["alerts_critical"] * 20
-                ),
-            }
+    async def _get_ml_pipeline_health(self) -> dict[str, Any]:
+        """Get ML pipeline health metrics."""
+        ml_status = await self.ml_pipeline.get_pipeline_status()
+        return {
+            "status": ml_status["status"],
+            "inference_engine_fps": ml_status["components"]["inference_engine"].get(
+                "throughput_fps", 0
+            ),
+            "training_jobs": ml_status["components"]["training_pipeline"][
+                "active_jobs"
+            ],
+            "model_count": ml_status["components"]["model_registry"]["total_models"],
+            "health_score": 100.0 if ml_status["status"] == "running" else 50.0,
+        }
 
-        # Federated learning health
-        if self.federated_coordinator:
-            fed_status = self.federated_coordinator.get_training_status()
-            health_data["federated_learning"] = {
-                "is_training": fed_status["is_training"],
-                "active_clients": fed_status["active_clients"],
-                "current_round": fed_status["current_round"],
-                "latest_accuracy": fed_status["latest_accuracy"],
-                "health_score": 100.0 if fed_status["active_clients"] >= 3 else 60.0,
-            }
+    def _get_monitoring_health(self) -> dict[str, Any]:
+        """Get monitoring dashboard health metrics."""
+        dashboard_data = self.monitoring_dashboard.get_dashboard_data()
+        metrics = dashboard_data["metrics"]
 
-        # Calculate overall health score
-        component_scores = []
-        for _component, data in health_data.items():
-            if isinstance(data, dict) and "health_score" in data:
-                component_scores.append(data["health_score"])
+        return {
+            "system_health_score": metrics["system_health_score"],
+            "active_alerts": metrics["alerts_active"],
+            "critical_alerts": metrics["alerts_critical"],
+            "health_score": max(0, 100 - metrics["alerts_critical"] * 20),
+        }
 
-        if component_scores:
-            health_data["overall_health"] = np.mean(component_scores)
+    def _get_federated_health(self) -> dict[str, Any]:
+        """Get federated learning health metrics."""
+        fed_status = self.federated_coordinator.get_training_status()
+        return {
+            "is_training": fed_status["is_training"],
+            "active_clients": fed_status["active_clients"],
+            "current_round": fed_status["current_round"],
+            "latest_accuracy": fed_status["latest_accuracy"],
+            "health_score": 100.0 if fed_status["active_clients"] >= 3 else 60.0,
+        }
 
-        return health_data
+    def _calculate_overall_health(self, health_data: dict[str, Any]) -> float:
+        """Calculate overall health score from component scores."""
+        component_scores = [
+            data["health_score"]
+            for data in health_data.values()
+            if isinstance(data, dict) and "health_score" in data
+        ]
+        return np.mean(component_scores) if component_scores else 100.0
 
     async def _check_system_health(self, health_data: dict[str, Any]):
         """Check system health and trigger alerts if needed."""

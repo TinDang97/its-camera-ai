@@ -5,7 +5,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: its-camera-ai-system
+  name: its-camera-ai
   labels:
     app.kubernetes.io/name: its-camera-ai
     app.kubernetes.io/version: "1.0.0"
@@ -17,7 +17,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cluster-config
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 data:
   # Cluster sizing for 1000+ cameras
   cluster.yaml: |
@@ -27,7 +27,7 @@ data:
       instanceType: "c5.2xlarge"  # 8 vCPU, 16GB RAM
       zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
       etcdStorage: "1TB-ssd"
-    
+
     # Worker Node Pools
     nodePools:
       # High-Memory Nodes for ML Inference
@@ -44,7 +44,7 @@ data:
         labels:
           workload: "ml-inference"
           gpu-type: "nvidia-t4"
-      
+
       # GPU Nodes for Training/Heavy Inference
       - name: "gpu-heavy"
         minSize: 2
@@ -59,7 +59,7 @@ data:
         labels:
           workload: "training"
           gpu-type: "nvidia-t4"
-      
+
       # General Workload Nodes
       - name: "general"
         minSize: 9
@@ -68,7 +68,7 @@ data:
         zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
         labels:
           workload: "general"
-      
+
       # Database Nodes (High I/O)
       - name: "database"
         minSize: 3
@@ -83,7 +83,7 @@ data:
             effect: "NoSchedule"
         labels:
           workload: "database"
-      
+
       # Edge Gateway Nodes
       - name: "edge-gateway"
         minSize: 3
@@ -92,7 +92,7 @@ data:
         zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
         labels:
           workload: "edge-gateway"
-    
+
     # Network Configuration
     networking:
       cni: "cilium"
@@ -101,7 +101,7 @@ data:
       loadBalancer:
         type: "nlb"  # Network Load Balancer for low latency
         crossZone: true
-      
+
     # Storage Configuration
     storage:
       classes:
@@ -113,7 +113,7 @@ data:
         - name: "gpu-local"
           provisioner: "kubernetes.io/no-provisioner"
           volumeBindingMode: "WaitForFirstConsumer"
-    
+
     # Auto-scaling Configuration
     autoscaling:
       clusterAutoscaler:
@@ -134,7 +134,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: gpu-config
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 data:
   nvidia-device-plugin.yaml: |
     apiVersion: apps/v1
@@ -185,7 +185,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: its-camera-ai-network-policy
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 spec:
   podSelector: {}
   policyTypes:
@@ -195,7 +195,7 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels:
-          name: its-camera-ai-system
+          name: its-camera-ai
     - podSelector: {}
   - from: []
     ports:
@@ -207,7 +207,7 @@ spec:
   - to:
     - namespaceSelector:
         matchLabels:
-          name: its-camera-ai-system
+          name: its-camera-ai
   - to: []
     ports:
     - protocol: TCP
@@ -223,7 +223,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: service-mesh-config
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 data:
   istio-config.yaml: |
     apiVersion: install.istio.io/v1alpha1

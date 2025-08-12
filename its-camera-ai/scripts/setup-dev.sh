@@ -36,7 +36,7 @@ command_exists() {
 # Check system requirements
 check_requirements() {
     print_info "Checking system requirements..."
-    
+
     # Check Python version
     if command_exists python3.12; then
         print_success "Python 3.12 found"
@@ -44,7 +44,7 @@ check_requirements() {
         print_error "Python 3.12 is required but not found. Please install Python 3.12+"
         exit 1
     fi
-    
+
     # Check Docker
     if command_exists docker; then
         print_success "Docker found"
@@ -52,7 +52,7 @@ check_requirements() {
         print_error "Docker is required but not found. Please install Docker"
         exit 1
     fi
-    
+
     # Check Docker Compose
     if command_exists "docker compose" || command_exists docker-compose; then
         print_success "Docker Compose found"
@@ -60,7 +60,7 @@ check_requirements() {
         print_error "Docker Compose is required but not found. Please install Docker Compose"
         exit 1
     fi
-    
+
     # Check uv
     if command_exists uv; then
         print_success "uv package manager found"
@@ -75,7 +75,7 @@ check_requirements() {
 # Setup environment file
 setup_env_file() {
     print_info "Setting up environment file..."
-    
+
     if [ ! -f .env ]; then
         cp .env.example .env
         print_success "Environment file created from template"
@@ -88,42 +88,42 @@ setup_env_file() {
 # Install dependencies
 install_dependencies() {
     print_info "Installing Python dependencies..."
-    
+
     # Install development dependencies
     uv sync --group dev --group ml
-    
+
     print_success "Dependencies installed successfully"
 }
 
 # Setup pre-commit hooks
 setup_pre_commit() {
     print_info "Setting up pre-commit hooks..."
-    
+
     uv run pre-commit install
-    
+
     print_success "Pre-commit hooks installed"
 }
 
 # Create necessary directories
 create_directories() {
     print_info "Creating necessary directories..."
-    
+
     mkdir -p data logs models temp backups
-    
+
     print_success "Directories created"
 }
 
 # Setup database
 setup_database() {
     print_info "Setting up database..."
-    
+
     # Start PostgreSQL container
     docker compose --profile dev up -d postgres
-    
+
     # Wait for PostgreSQL to be ready
     print_info "Waiting for PostgreSQL to be ready..."
     sleep 10
-    
+
     # Run database migrations (if they exist)
     if [ -f alembic.ini ]; then
         uv run alembic upgrade head
@@ -141,13 +141,13 @@ main() {
     echo "║   Development Environment Setup      ║"
     echo "╚═══════════════════════════════════════╝"
     echo -e "${NC}"
-    
+
     check_requirements
     setup_env_file
     install_dependencies
     setup_pre_commit
     create_directories
-    
+
     # Ask if user wants to setup database
     echo
     read -p "Do you want to setup the database now? (y/n): " -n 1 -r
@@ -155,7 +155,7 @@ main() {
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         setup_database
     fi
-    
+
     # Success message
     echo
     print_success "Development environment setup complete!"

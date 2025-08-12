@@ -10,20 +10,20 @@ metadata:
 spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:15.4
-  
+
   # Primary database configuration
   postgresql:
     parameters:
       # Connection and authentication
       max_connections: "1000"
       shared_preload_libraries: "pg_stat_statements,pg_buffercache,timescaledb"
-      
+
       # Memory configuration for high throughput
       shared_buffers: "8GB"
       effective_cache_size: "24GB"
       work_mem: "32MB"
       maintenance_work_mem: "2GB"
-      
+
       # Write-ahead logging for high write loads
       wal_buffers: "64MB"
       wal_level: "replica"
@@ -31,24 +31,24 @@ spec:
       max_replication_slots: "10"
       checkpoint_completion_target: "0.9"
       wal_compression: "on"
-      
+
       # Query optimization
       random_page_cost: "1.1"  # SSD storage
       effective_io_concurrency: "200"
       max_worker_processes: "16"
       max_parallel_workers: "16"
       max_parallel_workers_per_gather: "8"
-      
+
       # Logging for monitoring
       log_statement: "none"
       log_duration: "off"
       log_slow_queries: "on"
       log_min_duration_statement: "1000"  # Log queries > 1s
-      
+
       # TimescaleDB specific (for time-series data)
       timescaledb.max_background_workers: "16"
       timescaledb.telemetry_level: "off"
-  
+
   # Bootstrap configuration
   bootstrap:
     initdb:
@@ -63,12 +63,12 @@ spec:
         - CREATE EXTENSION IF NOT EXISTS pg_buffercache;
         - CREATE EXTENSION IF NOT EXISTS uuid-ossp;
         - CREATE EXTENSION IF NOT EXISTS pgcrypto;
-        
+
         # Create application schemas
         - CREATE SCHEMA IF NOT EXISTS camera_data;
         - CREATE SCHEMA IF NOT EXISTS analytics;
         - CREATE SCHEMA IF NOT EXISTS audit;
-        
+
         # Create time-series hypertables
         - |
           CREATE TABLE IF NOT EXISTS camera_data.frame_metadata (
@@ -83,7 +83,7 @@ spec:
             created_at TIMESTAMPTZ DEFAULT NOW()
           );
         - SELECT create_hypertable('camera_data.frame_metadata', 'timestamp', chunk_time_interval => INTERVAL '1 hour');
-        
+
         # Vehicle detection events table
         - |
           CREATE TABLE IF NOT EXISTS analytics.vehicle_detections (
@@ -102,7 +102,7 @@ spec:
             processed_at TIMESTAMPTZ DEFAULT NOW()
           );
         - SELECT create_hypertable('analytics.vehicle_detections', 'timestamp', chunk_time_interval => INTERVAL '1 hour');
-        
+
         # Traffic analytics aggregation table
         - |
           CREATE TABLE IF NOT EXISTS analytics.traffic_stats (
@@ -115,19 +115,19 @@ spec:
             PRIMARY KEY (camera_id, time_bucket)
           );
         - SELECT create_hypertable('analytics.traffic_stats', 'time_bucket', chunk_time_interval => INTERVAL '6 hours');
-        
+
         # Create indexes for performance
         - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_frame_metadata_camera_timestamp ON camera_data.frame_metadata (camera_id, timestamp DESC);
         - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vehicle_detections_camera_timestamp ON analytics.vehicle_detections (camera_id, timestamp DESC);
         - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vehicle_detections_type ON analytics.vehicle_detections (vehicle_type, timestamp DESC);
         - CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_traffic_stats_camera_bucket ON analytics.traffic_stats (camera_id, time_bucket DESC);
-  
+
   # Storage configuration
   storage:
     size: 2Ti
     storageClass: fast-ssd
     resizeInUseVolumes: true
-  
+
   # Resource allocation
   resources:
     requests:
@@ -136,7 +136,7 @@ spec:
     limits:
       cpu: "8"
       memory: "64Gi"
-  
+
   # Monitoring and logging
   monitoring:
     enabled: true
@@ -144,7 +144,7 @@ spec:
     customQueriesConfigMap:
     - name: postgresql-custom-queries
       key: queries.yaml
-  
+
   # Backup configuration
   backup:
     retentionPolicy: "30d"
@@ -164,7 +164,7 @@ spec:
         compression: gzip
         immediateCheckpoint: true
         jobs: 4
-  
+
   # Affinity and tolerations
   affinity:
     nodeAffinity:
@@ -184,7 +184,7 @@ spec:
               operator: In
               values: ["postgresql-cluster"]
           topologyKey: kubernetes.io/hostname
-  
+
   tolerations:
   - key: database
     operator: Equal
@@ -201,12 +201,12 @@ metadata:
 spec:
   instances: 5  # Multiple read replicas for analytics queries
   imageName: ghcr.io/cloudnative-pg/postgresql:15.4
-  
+
   # Bootstrap from primary cluster
   bootstrap:
     pg_basebackup:
       source: postgresql-cluster
-  
+
   # Optimized for read workloads
   postgresql:
     parameters:
@@ -216,17 +216,17 @@ spec:
       work_mem: "64MB"  # Higher for complex analytics queries
       random_page_cost: "1.0"
       effective_io_concurrency: "300"
-      
+
       # Read-only optimizations
       default_transaction_isolation: "read committed"
       hot_standby: "on"
       hot_standby_feedback: "on"
       max_standby_streaming_delay: "30s"
-  
+
   storage:
     size: 1Ti
     storageClass: fast-ssd
-  
+
   resources:
     requests:
       cpu: "2"
@@ -234,7 +234,7 @@ spec:
     limits:
       cpu: "4"
       memory: "32Gi"
-  
+
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -243,7 +243,7 @@ spec:
           - key: workload
             operator: In
             values: ["database"]
-  
+
   tolerations:
   - key: database
     operator: Equal
@@ -354,14 +354,14 @@ data:
         - active_connections:
             usage: "GAUGE"
             description: "Number of active connections to camera AI database"
-    
+
     camera_table_sizes:
       query: |
-        SELECT 
+        SELECT
           schemaname,
           tablename,
           pg_total_relation_size(schemaname||'.'||tablename) as size_bytes
-        FROM pg_tables 
+        FROM pg_tables
         WHERE schemaname IN ('camera_data', 'analytics')
       master: true
       metrics:
@@ -371,16 +371,16 @@ data:
             key_labels:
               - schemaname
               - tablename
-    
+
     camera_query_performance:
       query: |
-        SELECT 
+        SELECT
           query,
           calls,
           total_time,
           mean_time,
           stddev_time
-        FROM pg_stat_statements 
+        FROM pg_stat_statements
         WHERE query LIKE '%camera_%' OR query LIKE '%vehicle_%'
         ORDER BY total_time DESC
         LIMIT 10
@@ -418,27 +418,27 @@ spec:
             - |
               # Connect to database and run maintenance
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgresql-cluster-rw -U camera_ai_user -d its_camera_ai <<EOF
-              
+
               -- Vacuum and analyze tables
               VACUUM ANALYZE camera_data.frame_metadata;
               VACUUM ANALYZE analytics.vehicle_detections;
               VACUUM ANALYZE analytics.traffic_stats;
-              
+
               -- Update table statistics
               ANALYZE;
-              
+
               -- Drop old chunks (older than 30 days)
               SELECT drop_chunks('camera_data.frame_metadata', INTERVAL '30 days');
               SELECT drop_chunks('analytics.vehicle_detections', INTERVAL '30 days');
-              
+
               -- Compress old chunks (older than 7 days)
               SELECT compress_chunk(i) FROM show_chunks('camera_data.frame_metadata', older_than => INTERVAL '7 days') i;
               SELECT compress_chunk(i) FROM show_chunks('analytics.vehicle_detections', older_than => INTERVAL '7 days') i;
-              
+
               -- Reindex if needed
               REINDEX INDEX CONCURRENTLY idx_frame_metadata_camera_timestamp;
               REINDEX INDEX CONCURRENTLY idx_vehicle_detections_camera_timestamp;
-              
+
               EOF
             env:
             - name: POSTGRES_PASSWORD

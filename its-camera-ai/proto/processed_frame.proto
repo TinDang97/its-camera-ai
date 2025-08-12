@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package its_camera_ai.streaming;
+
+option py_generic_services = true;
+
+// Core data types for processed frame streaming
+
+// Enum for processing stages
+enum ProcessingStage {
+  PROCESSING_STAGE_UNSPECIFIED = 0;
+  PROCESSING_STAGE_INGESTION = 1;
+  PROCESSING_STAGE_VALIDATION = 2;
+  PROCESSING_STAGE_FEATURE_EXTRACTION = 3;
+  PROCESSING_STAGE_QUALITY_CONTROL = 4;
+  PROCESSING_STAGE_OUTPUT = 5;
+}
+
+// Enum for stream status
+enum StreamStatus {
+  STREAM_STATUS_UNSPECIFIED = 0;
+  STREAM_STATUS_ACTIVE = 1;
+  STREAM_STATUS_INACTIVE = 2;
+  STREAM_STATUS_ERROR = 3;
+  STREAM_STATUS_MAINTENANCE = 4;
+}
+
+// Quality metrics for image analysis
+message QualityMetrics {
+  float quality_score = 1;
+  float blur_score = 2;
+  float brightness_score = 3;
+  float contrast_score = 4;
+  float noise_level = 5;
+}
+
+// Traffic analysis features
+message TrafficFeatures {
+  float vehicle_density = 1;
+  string congestion_level = 2;
+  string weather_conditions = 3;
+  string lighting_conditions = 4;
+  float motion_intensity = 5;
+}
+
+// Region of Interest analysis
+message ROIAnalysis {
+  string roi_id = 1;
+  float density = 2;
+  float brightness = 3;
+  string congestion = 4;
+  int32 x = 5;
+  int32 y = 6;
+  int32 width = 7;
+  int32 height = 8;
+}
+
+// Compressed image data with metadata
+message ImageData {
+  bytes compressed_data = 1;  // JPEG compressed image data
+  int32 width = 2;
+  int32 height = 3;
+  int32 channels = 4;
+  string compression_format = 5;  // "jpeg", "png", "webp"
+  int32 quality = 6;  // Compression quality (1-100)
+}
+
+// Main ProcessedFrame message optimized for gRPC
+message ProcessedFrame {
+  // Core identifiers
+  string frame_id = 1;
+  string camera_id = 2;
+  double timestamp = 3;
+  
+  // Image data (compressed for efficiency)
+  ImageData original_image = 4;
+  ImageData processed_image = 5;
+  ImageData thumbnail = 6;
+  
+  // Quality and analysis metrics
+  QualityMetrics quality_metrics = 7;
+  TrafficFeatures traffic_features = 8;
+  repeated ROIAnalysis roi_features = 9;
+  
+  // Processing metadata
+  float processing_time_ms = 10;
+  ProcessingStage processing_stage = 11;
+  bool validation_passed = 12;
+  
+  // Data lineage and versioning
+  string source_hash = 13;
+  string version = 14;
+  
+  // Performance tracking
+  double received_timestamp = 15;
+  double processed_timestamp = 16;
+}
+
+// Camera stream configuration
+message CameraStreamConfig {
+  string camera_id = 1;
+  string location = 2;
+  double latitude = 3;
+  double longitude = 4;
+  
+  // Stream settings
+  int32 width = 5;
+  int32 height = 6;
+  int32 fps = 7;
+  string encoding = 8;
+  
+  // Processing settings
+  repeated ROIBox roi_boxes = 9;
+  float quality_threshold = 10;
+  bool processing_enabled = 11;
+  
+  // Status
+  StreamStatus status = 12;
+  double last_frame_time = 13;
+  int64 total_frames_processed = 14;
+}
+
+message ROIBox {
+  int32 x = 1;
+  int32 y = 2;
+  int32 width = 3;
+  int32 height = 4;
+  string label = 5;
+}
+
+// Queue management messages
+message QueueMetrics {
+  string queue_name = 1;
+  int64 pending_count = 2;
+  int64 processing_count = 3;
+  int64 completed_count = 4;
+  int64 failed_count = 5;
+  double avg_processing_time_ms = 6;
+  double throughput_fps = 7;
+}
+
+// Batch processing for efficiency
+message ProcessedFrameBatch {
+  repeated ProcessedFrame frames = 1;
+  string batch_id = 2;
+  double batch_timestamp = 3;
+  int32 batch_size = 4;
+}
+
+// Error handling
+message ProcessingError {
+  string error_id = 1;
+  string frame_id = 2;
+  string camera_id = 3;
+  string error_type = 4;
+  string error_message = 5;
+  double timestamp = 6;
+  ProcessingStage failed_stage = 7;
+}

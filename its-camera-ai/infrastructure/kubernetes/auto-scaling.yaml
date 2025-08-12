@@ -5,7 +5,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: ml-inference-hpa
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -68,7 +68,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: camera-stream-hpa
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -117,7 +117,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: event-processor-hpa
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -162,7 +162,7 @@ apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
   name: postgresql-vpa
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 spec:
   targetRef:
     apiVersion: apps/v1
@@ -208,7 +208,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: gpu-autoscaling-policy
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 data:
   policy.yaml: |
     # GPU node scaling rules
@@ -220,7 +220,7 @@ data:
         scaleUpThreshold: 85
         scaleDownThreshold: 40
         cooldownPeriod: 300
-      
+
       gpu-heavy:
         minNodes: 2
         maxNodes: 8
@@ -228,7 +228,7 @@ data:
         scaleUpThreshold: 80
         scaleDownThreshold: 30
         cooldownPeriod: 600
-    
+
     # Custom metrics for GPU scaling
     customMetrics:
     - name: gpu_memory_utilization
@@ -247,7 +247,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: predictive-scaling-config
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 data:
   config.yaml: |
     # Traffic pattern-based predictive scaling
@@ -257,31 +257,31 @@ data:
         days: ["mon", "tue", "wed", "thu", "fri"]
         scaleMultiplier: 2.5
         preScaleMinutes: 30
-      
+
       weekdayEvening:
         time: "16:00-20:00"
         days: ["mon", "tue", "wed", "thu", "fri"]
         scaleMultiplier: 3.0
         preScaleMinutes: 30
-      
+
       weekendAfternoon:
         time: "12:00-18:00"
         days: ["sat", "sun"]
         scaleMultiplier: 2.0
         preScaleMinutes: 45
-    
+
     # Camera activation patterns
     cameraActivationRules:
     - eventType: "school_hours"
       timeRange: "07:00-16:00"
       expectedCameras: 800
       scaleTarget: 0.8  # Scale to 80% capacity
-    
+
     - eventType: "rush_hour"
       timeRange: "07:00-09:00,17:00-19:00"
       expectedCameras: 1000
       scaleTarget: 0.9  # Scale to 90% capacity
-    
+
     - eventType: "night_mode"
       timeRange: "22:00-06:00"
       expectedCameras: 200
@@ -293,7 +293,7 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: kafka-camera-frames-scaler
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 spec:
   scaleTargetRef:
     name: ml-inference-service
@@ -323,7 +323,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: node-resource-thresholds
-  namespace: its-camera-ai-system
+  namespace: its-camera-ai
 data:
   thresholds.yaml: |
     # Node resource thresholds for scaling decisions
@@ -332,33 +332,33 @@ data:
         scaleUpThreshold: 80
         scaleDownThreshold: 30
         evaluationPeriod: 300  # 5 minutes
-      
+
       memory:
         scaleUpThreshold: 85
         scaleDownThreshold: 40
         evaluationPeriod: 300
-      
+
       gpu:
         scaleUpThreshold: 90
         scaleDownThreshold: 20
         evaluationPeriod: 180  # 3 minutes (faster for GPU)
-      
+
       storage:
         scaleUpThreshold: 80
         scaleDownThreshold: 50
         evaluationPeriod: 600  # 10 minutes
-    
+
     # Emergency scaling rules
     emergencyScaling:
       triggers:
       - condition: "inference_latency > 150ms"
         action: "scale_up_immediate"
         factor: 2.0
-      
+
       - condition: "error_rate > 5%"
         action: "scale_up_gradual"
         factor: 1.5
-      
+
       - condition: "queue_depth > 1000"
         action: "scale_up_aggressive"
         factor: 3.0

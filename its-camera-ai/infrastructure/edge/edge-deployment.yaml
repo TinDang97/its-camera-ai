@@ -31,7 +31,7 @@ data:
         maxCamerasPerNode: 25
         networkBandwidth: "10Gbps"
         locations: ["highway-interchanges", "city-centers", "major-intersections"]
-      
+
       # GPU-enabled edge nodes (ML inference)
       gpu_enabled:
         minNodes: 5
@@ -42,7 +42,7 @@ data:
         maxCamerasPerNode: 15
         networkBandwidth: "5Gbps"
         locations: ["smart-traffic-zones", "incident-detection-areas"]
-      
+
       # Micro edge nodes (low-traffic areas)
       micro:
         minNodes: 20
@@ -53,14 +53,14 @@ data:
         maxCamerasPerNode: 5
         networkBandwidth: "1Gbps"
         locations: ["residential-areas", "secondary-roads"]
-    
+
     # Network connectivity requirements
     networkRequirements:
       minimumBandwidth: "100Mbps"
       latencyToCloud: "<50ms"
       reliabilityTarget: "99.5%"
       fallbackConnections: ["4G/5G", "satellite"]
-      
+
     # Local processing capabilities
     localProcessing:
       # Real-time inference
@@ -70,21 +70,21 @@ data:
         maxLatency: "50ms"
         batchSize: 4
         gpuMemoryLimit: "8GB"
-      
+
       # Local analytics
       analytics:
         enabled: true
         functions: ["traffic-counting", "speed-detection", "congestion-analysis"]
         aggregationInterval: "5m"
         storageRetention: "24h"
-      
+
       # Event detection
       events:
         enabled: true
         types: ["accidents", "congestion", "rule-violations"]
         alertThreshold: "medium"
         cloudNotification: true
-    
+
     # Data synchronization patterns
     dataSynchronization:
       # Real-time sync (critical events)
@@ -94,7 +94,7 @@ data:
         compression: false
         encryption: true
         maxRetries: 3
-      
+
       # Batch sync (analytics data)
       batch:
         interval: "15m"
@@ -103,7 +103,7 @@ data:
         encryption: true
         maxBatchSize: "100MB"
         retentionOnFailure: "48h"
-      
+
       # Metadata sync (configurations)
       metadata:
         interval: "1h"
@@ -146,13 +146,13 @@ spec:
               - key: edge-zone
                 operator: In
                 values: ["primary", "gpu_enabled"]
-      
+
       tolerations:
       - key: edge-node
         operator: Equal
         value: "true"
         effect: NoSchedule
-      
+
       containers:
       - name: ml-inference
         image: its-camera-ai/edge-ml-inference:latest
@@ -200,7 +200,7 @@ spec:
             port: 8080
           initialDelaySeconds: 60
           periodSeconds: 30
-      
+
       volumes:
       - name: model-cache
         emptyDir:
@@ -235,13 +235,13 @@ spec:
               - key: edge-zone
                 operator: In
                 values: ["primary", "micro"]
-      
+
       tolerations:
       - key: edge-node
         operator: Equal
         value: "true"
         effect: NoSchedule
-      
+
       containers:
       - name: camera-processor
         image: its-camera-ai/edge-camera-processor:latest
@@ -273,7 +273,7 @@ spec:
           mountPath: /app/buffer
         - name: config
           mountPath: /app/config
-      
+
       volumes:
       - name: frame-buffer
         emptyDir:
@@ -323,7 +323,7 @@ spec:
         volumeMounts:
         - name: analytics-storage
           mountPath: /app/data
-      
+
       volumes:
       - name: analytics-storage
         persistentVolumeClaim:
@@ -382,7 +382,7 @@ spec:
           mountPath: /app/sync-data
         - name: tls-certs
           mountPath: /app/certs
-      
+
       volumes:
       - name: sync-storage
         persistentVolumeClaim:
@@ -429,7 +429,7 @@ spec:
           subPath: mosquitto.conf
         - name: mqtt-data
           mountPath: /mosquitto/data
-      
+
       volumes:
       - name: mqtt-config
         configMap:
@@ -451,31 +451,31 @@ data:
     listener 1883
     listener 8883
     protocol mqtt
-    
+
     # Security settings
     allow_anonymous false
     password_file /mosquitto/config/passwd
-    
+
     # Persistence
     persistence true
     persistence_location /mosquitto/data/
-    
+
     # Logging
     log_dest stdout
     log_type error
     log_type warning
     log_type notice
     log_type information
-    
+
     # Performance settings
     max_connections 1000
     max_inflight_messages 100
     max_queued_messages 1000
-    
+
     # QoS settings
     max_qos 2
     retain_available true
-    
+
     # Keep alive settings
     keepalive_interval 60
 
@@ -614,7 +614,7 @@ spec:
         operator: Equal
         value: "true"
         effect: NoSchedule
-      
+
       containers:
       - name: health-monitor
         image: its-camera-ai/edge-health-monitor:latest
@@ -643,7 +643,7 @@ spec:
         - name: sys
           mountPath: /host/sys
           readOnly: true
-      
+
       volumes:
       - name: proc
         hostPath:
@@ -651,7 +651,7 @@ spec:
       - name: sys
         hostPath:
           path: /sys
-      
+
       hostNetwork: true
       hostPID: true
 
@@ -674,7 +674,7 @@ data:
         checkInterval: "10s"
         retryAttempts: 3
         retryDelay: "5s"
-      
+
       # Resource utilization thresholds
       resources:
         cpuThreshold: 90
@@ -682,14 +682,14 @@ data:
         diskThreshold: 80
         gpuThreshold: 95
         evaluationWindow: "5m"
-      
+
       # Service degradation triggers
       degradation:
         inferenceLatency: "80ms"
         queueDepth: 100
         errorRate: "10%"
         timeWindow: "2m"
-      
+
     # Fallback actions
     fallbackActions:
       # Offload to cloud
@@ -699,14 +699,14 @@ data:
         priority: "high"
         compression: true
         encryption: true
-      
+
       # Reduce local processing
       reduceProcessing:
         enabled: true
         frameSkipping: 2  # Process every 2nd frame
         resolutionReduction: 0.5  # Reduce to 50% resolution
         qualityReduction: 0.8  # Reduce quality to 80%
-      
+
       # Emergency mode
       emergencyMode:
         enabled: true

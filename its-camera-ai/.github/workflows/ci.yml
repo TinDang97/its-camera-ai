@@ -14,7 +14,7 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15
@@ -29,7 +29,7 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-      
+
       redis:
         image: redis:7
         options: >-
@@ -43,27 +43,27 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
         version: ${{ env.UV_VERSION }}
-        
+
     - name: Set up Python
       run: uv python install ${{ env.PYTHON_VERSION }}
-      
+
     - name: Install dependencies
       run: uv sync --group dev --group ml
-      
+
     - name: Run pre-commit hooks
       run: uv run pre-commit run --all-files
-      
+
     - name: Run tests
       run: uv run pytest --cov=src/its_camera_ai --cov-report=xml --cov-report=term-missing
       env:
         DATABASE_URL: postgresql+asyncpg://its_user:its_password@localhost:5432/its_camera_ai_test
         REDIS_URL: redis://localhost:6379/0
-        
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
@@ -73,28 +73,28 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
         version: ${{ env.UV_VERSION }}
-        
+
     - name: Set up Python
       run: uv python install ${{ env.PYTHON_VERSION }}
-      
+
     - name: Install dependencies
       run: uv sync --group dev
-      
+
     - name: Run Bandit security scan
       run: uv run bandit -r src/ -f json -o bandit-report.json || true
-      
+
     - name: Run Safety check
       run: uv run safety check --json --output safety-report.json || true
-      
+
     - name: Upload security reports
       uses: actions/upload-artifact@v4
       with:
@@ -106,47 +106,47 @@ jobs:
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-      
+
     - name: Build development image
       run: docker build --target development -t its-camera-ai:dev .
-      
+
     - name: Build production image
       run: docker build --target production -t its-camera-ai:prod .
-      
+
     - name: Test Docker images
       run: |
         docker run --rm its-camera-ai:dev python -c "import its_camera_ai; print('Import successful')"
-        
+
   performance:
     name: Performance Tests
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
         version: ${{ env.UV_VERSION }}
-        
+
     - name: Set up Python
       run: uv python install ${{ env.PYTHON_VERSION }}
-      
+
     - name: Install dependencies
       run: uv sync --group dev --group ml
-      
+
     - name: Run performance benchmarks
       run: uv run pytest --benchmark-only --benchmark-json=benchmark.json
-      
+
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
       with:

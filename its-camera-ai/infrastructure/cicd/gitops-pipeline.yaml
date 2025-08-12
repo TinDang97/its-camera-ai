@@ -206,36 +206,36 @@ data:
         runs-on: ubuntu-latest
         steps:
         - uses: actions/checkout@v4
-        
+
         - name: Set up Python
           uses: actions/setup-python@v4
           with:
             python-version: '3.12'
-        
+
         - name: Install dependencies
           run: |
             python -m pip install --upgrade pip
             pip install uv
             uv sync --group dev
-        
+
         - name: Run code quality checks
           run: |
             uv run ruff check src/ tests/
             uv run black --check src/ tests/
             uv run mypy src/
-        
+
         - name: Run security scanning
           run: |
             uv run bandit -r src/
             uv run safety check
             uv run pip-audit
-        
+
         - name: SonarCloud Scan
           uses: SonarSource/sonarcloud-github-action@master
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      
+
       # Unit and Integration Tests
       test:
         runs-on: ubuntu-latest
@@ -250,7 +250,7 @@ data:
               --health-interval 10s
               --health-timeout 5s
               --health-retries 5
-          
+
           redis:
             image: redis:7
             options: >-
@@ -258,82 +258,82 @@ data:
               --health-interval 10s
               --health-timeout 5s
               --health-retries 5
-        
+
         steps:
         - uses: actions/checkout@v4
-        
+
         - name: Set up Python
           uses: actions/setup-python@v4
           with:
             python-version: '3.12'
-        
+
         - name: Install dependencies
           run: |
             python -m pip install --upgrade pip
             pip install uv
             uv sync --group dev --group ml
-        
+
         - name: Run tests
           env:
             DATABASE_URL: postgresql://postgres:testpass@localhost/test_db
             REDIS_URL: redis://localhost:6379
           run: |
             uv run pytest --cov=src/its_camera_ai --cov-report=xml --cov-report=html
-        
+
         - name: Upload coverage to Codecov
           uses: codecov/codecov-action@v3
           with:
             file: ./coverage.xml
             flags: unittests
-      
+
       # ML Model Testing
       ml-tests:
         runs-on: ubuntu-latest
         steps:
         - uses: actions/checkout@v4
-        
+
         - name: Set up Python
           uses: actions/setup-python@v4
           with:
             python-version: '3.12'
-        
+
         - name: Install dependencies
           run: |
             pip install uv
             uv sync --group ml
-        
+
         - name: Run ML model tests
           run: |
             uv run pytest -m ml tests/
-        
+
         - name: Model performance benchmarks
           run: |
             uv run pytest -m benchmark tests/
-      
+
       # Container Build and Push
       build-and-push:
         needs: [code-quality, test, ml-tests]
         runs-on: ubuntu-latest
         if: github.event_name == 'push'
-        
+
         outputs:
           image-tag: ${{ steps.meta.outputs.tags }}
           image-digest: ${{ steps.build.outputs.digest }}
-        
+
         steps:
         - name: Checkout repository
           uses: actions/checkout@v4
-        
+
         - name: Set up Docker Buildx
           uses: docker/setup-buildx-action@v3
-        
+
         - name: Log in to Container Registry
           uses: docker/login-action@v3
           with:
             registry: ${{ env.REGISTRY }}
             username: ${{ github.actor }}
             password: ${{ secrets.GITHUB_TOKEN }}
-        
+
         - name: Extract metadata
           id: meta
           uses: docker/metadata-action@v5
@@ -344,7 +344,7 @@ data:
               type=ref,event=pr
               type=sha,prefix={{branch}}-
               type=raw,value=latest,enable={{is_default_branch}}
-        
+
         - name: Build and push Docker images
           id: build
           uses: docker/build-push-action@v5
@@ -356,33 +356,33 @@ data:
             labels: ${{ steps.meta.outputs.labels }}
             cache-from: type=gha
             cache-to: type=gha,mode=max
-        
+
         - name: Generate SBOM
           uses: anchore/sbom-action@v0
           with:
             image: ${{ steps.meta.outputs.tags }}
             format: spdx-json
             output-file: sbom.spdx.json
-        
+
         - name: Scan image with Trivy
           uses: aquasecurity/trivy-action@master
           with:
             image-ref: ${{ steps.meta.outputs.tags }}
             format: sarif
             output: trivy-results.sarif
-        
+
         - name: Upload Trivy scan results to GitHub Security tab
           uses: github/codeql-action/upload-sarif@v2
           with:
             sarif_file: trivy-results.sarif
-      
+
       # Deployment
       deploy-staging:
         needs: build-and-push
         runs-on: ubuntu-latest
         if: github.ref == 'refs/heads/develop'
         environment: staging
-        
+
         steps:
         - name: Checkout config repository
           uses: actions/checkout@v4
@@ -390,7 +390,7 @@ data:
             repository: its-org/its-camera-ai-config
             token: ${{ secrets.CONFIG_REPO_TOKEN }}
             path: config
-        
+
         - name: Update staging image tag
           run: |
             cd config
@@ -400,13 +400,13 @@ data:
             git add .
             git commit -m "Update staging image to ${{ needs.build-and-push.outputs.image-tag }}"
             git push
-      
+
       deploy-production:
         needs: build-and-push
         runs-on: ubuntu-latest
         if: github.ref == 'refs/heads/main'
         environment: production
-        
+
         steps:
         - name: Checkout config repository
           uses: actions/checkout@v4
@@ -414,7 +414,7 @@ data:
             repository: its-org/its-camera-ai-config
             token: ${{ secrets.CONFIG_REPO_TOKEN }}
             path: config
-        
+
         - name: Update production image tag
           run: |
             cd config
@@ -645,7 +645,7 @@ data:
           monitoring: basic
           logging: debug
           security: minimal
-      
+
       staging:
         cluster: "staging-k8s.its-camera-ai.com"
         namespace: "its-camera-ai-staging"
@@ -662,7 +662,7 @@ data:
           monitoring: enhanced
           logging: info
           security: standard
-      
+
       production:
         cluster: "prod-k8s.its-camera-ai.com"
         namespace: "its-camera-ai-system"
@@ -679,7 +679,7 @@ data:
           monitoring: full
           logging: warn
           security: enhanced
-      
+
       edge:
         cluster: "edge-*.its-camera-ai.com"
         namespace: "its-camera-edge"

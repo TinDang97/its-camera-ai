@@ -1,0 +1,276 @@
+# Ingress configuration for ITS Camera AI System
+# TLS termination and routing for external access
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: its-camera-ai-ingress
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/version: "0.1.0"
+  annotations:
+    # NGINX Ingress Controller annotations
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+
+    # Rate limiting
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "10"
+
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';";
+
+    # Load balancing
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$binary_remote_addr"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-name: "its-camera-ai-session"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
+
+    # Certificate management
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    cert-manager.io/acme-challenge-type: "http01"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.its-camera-ai.com
+    - its-camera-ai.com
+    - *.its-camera-ai.com
+    secretName: its-camera-ai-tls
+  rules:
+  - host: api.its-camera-ai.com
+    http:
+      paths:
+      # API endpoints
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+
+      # Authentication endpoints
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+
+      # Health checks
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+
+      # ML Inference endpoints (high performance path)
+      - path: /inference
+        pathType: Prefix
+        backend:
+          service:
+            name: ml-inference-service
+            port:
+              number: 8080
+
+      # WebSocket endpoints for real-time streams
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: camera-stream-service
+            port:
+              number: 8081
+
+  # Admin interface
+  - host: admin.its-camera-ai.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+
+---
+# Ingress for ML Inference with dedicated domain
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ml-inference-ingress
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ml-ingress
+    app.kubernetes.io/version: "0.1.0"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/client-body-buffer-size: "1m"
+
+    # High performance settings for ML inference
+    nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
+    nginx.ingress.kubernetes.io/upstream-keepalive-requests: "1000"
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "60"
+
+    # Rate limiting for inference requests
+    nginx.ingress.kubernetes.io/rate-limit: "500"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+
+    # Certificate management
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - ml.its-camera-ai.com
+    secretName: ml-inference-tls
+  rules:
+  - host: ml.its-camera-ai.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ml-inference-service
+            port:
+              number: 8080
+
+---
+# Internal ingress for monitoring and metrics
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-ingress
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: monitoring-auth
+    nginx.ingress.kubernetes.io/auth-realm: "ITS Camera AI Monitoring"
+
+    # Whitelist internal networks only
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - monitoring.its-camera-ai.com
+    secretName: monitoring-tls
+  rules:
+  - host: monitoring.its-camera-ai.com
+    http:
+      paths:
+      # Prometheus metrics from API
+      - path: /api/metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 9090
+
+      # Prometheus metrics from ML inference
+      - path: /ml/metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: ml-inference-service
+            port:
+              number: 9090
+
+      # Database metrics
+      - path: /db/metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: postgresql-primary
+            port:
+              number: 9187
+
+      # Redis metrics
+      - path: /cache/metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: redis-master
+            port:
+              number: 9121
+
+---
+# ClusterIssuer for Let's Encrypt certificates
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  namespace: its-camera-ai
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@its-camera-ai.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+          podTemplate:
+            spec:
+              nodeSelector:
+                "kubernetes.io/os": linux
+    - dns01:
+        route53:
+          region: us-west-2
+          hostedZoneID: Z123456789  # Replace with actual hosted zone ID
+          accessKeyID: AKIAIOSFODNN7EXAMPLE  # Replace with actual access key
+          secretAccessKeySecretRef:
+            name: route53-credentials
+            key: secret-access-key
+
+---
+# ClusterIssuer for staging environment (testing)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  namespace: its-camera-ai
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@its-camera-ai.com
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    solvers:
+    - http01:
+        ingress:
+          class: nginx

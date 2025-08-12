@@ -37,7 +37,7 @@ data:
             backup: true
             costTier: "low"
             availability: "99.5%"
-        
+
         instanceTypes:
           # Production workloads
           production:
@@ -45,14 +45,14 @@ data:
             gpu: "g4dn.xlarge,g4dn.2xlarge"
             memory: "r5.xlarge,r5.2xlarge"
             storage: "i3.xlarge,i3.2xlarge"
-          
+
           # Development/staging workloads
           development:
             compute: "t3.large,t3.xlarge"
             gpu: "g4dn.xlarge"
             memory: "r5.large,r5.xlarge"
             storage: "gp3"
-      
+
       gcp:
         secondary: true
         regions:
@@ -60,13 +60,13 @@ data:
             backup: true
             costTier: "low"
             availability: "99.5%"
-        
+
         instanceTypes:
           production:
             compute: "n2-standard-4,n2-standard-8"
             gpu: "n1-standard-4-k80,n1-standard-8-k80"
             memory: "n2-highmem-4,n2-highmem-8"
-      
+
       azure:
         tertiary: true
         regions:
@@ -74,12 +74,12 @@ data:
             disaster_recovery: true
             costTier: "minimal"
             availability: "99.0%"
-        
+
         instanceTypes:
           production:
             compute: "Standard_D4s_v3,Standard_D8s_v3"
             gpu: "Standard_NC6,Standard_NC12"
-    
+
     # Cost optimization strategies
     costOptimization:
       reservedInstances:
@@ -88,14 +88,14 @@ data:
         paymentOption: "partial-upfront"
         utilization: 60  # Reserve 60% of steady-state capacity
         services: ["compute", "database", "cache"]
-      
+
       spotInstances:
         enabled: true
         maxPercentage: 40  # Up to 40% spot instances
         services: ["ml-training", "batch-processing", "development"]
         interruptionHandling: "graceful-shutdown"
         diversification: "multiple-az"
-      
+
       scheduledScaling:
         enabled: true
         patterns:
@@ -111,7 +111,7 @@ data:
             scale_down: "01:00"
             scale_up: "05:00"
             factor: 0.3
-      
+
       rightSizing:
         enabled: true
         analysisWindow: "7d"
@@ -150,7 +150,7 @@ data:
           term: "1yr"
           paymentOption: "partial-upfront"
           utilization: "high"
-      
+
       spotInstances:
         # Development and batch workloads
         - instanceTypes: ["c5.large", "c5.xlarge", "c5.2xlarge"]
@@ -160,13 +160,13 @@ data:
         - instanceTypes: ["g4dn.xlarge", "g4dn.2xlarge"]
           maxPrice: "0.30"  # 60% of on-demand
           workload: "ml-training"
-      
+
       savingsPlans:
         enabled: true
         commitment: "$50000/year"  # $50k annual commitment
         paymentOption: "all-upfront"
         scope: "compute"
-    
+
     rds:
       reservedInstances:
         - instanceClass: "db.r5.xlarge"
@@ -177,20 +177,20 @@ data:
           count: 2
           term: "1yr"
           multiAZ: true
-      
+
       optimization:
         performanceInsights: true
         automated_backups_retention: 7
         deletion_protection: true
         storage_type: "gp3"
-    
+
     elasticache:
       reservedNodes:
         - nodeType: "cache.r6g.xlarge"
           count: 6
           term: "1yr"
           paymentOption: "partial-upfront"
-    
+
     storage:
       s3:
         intelligentTiering: true
@@ -203,7 +203,7 @@ data:
                 storageClass: "GLACIER"
               - days: 365
                 storageClass: "DEEP_ARCHIVE"
-      
+
       ebs:
         defaultType: "gp3"
         optimization:
@@ -234,7 +234,7 @@ data:
           window: "24h"
           action: "upsize"
           performanceImpact: "high"
-      
+
       # Memory-based recommendations
       memory:
         underutilized:
@@ -247,7 +247,7 @@ data:
           window: "1h"
           action: "upsize"
           priority: "critical"
-      
+
       # GPU-based recommendations
       gpu:
         underutilized:
@@ -260,7 +260,7 @@ data:
           window: "30m"
           action: "upsize-gpu"
           priority: "high"
-      
+
       # Storage-based recommendations
       storage:
         underutilized:
@@ -272,7 +272,7 @@ data:
           threshold: 30  # <30% IOPS usage
           window: "7d"
           action: "standard-storage"
-    
+
     # Application-specific rules
     applicationRules:
       ml-inference:
@@ -282,7 +282,7 @@ data:
         gpuTarget: 85
         minReplicas: 2
         maxReplicas: 20
-      
+
       camera-processor:
         preferredInstanceTypes: ["c5.xlarge", "c5.2xlarge"]
         cpuTarget: 75
@@ -290,14 +290,14 @@ data:
         networkOptimized: true
         minReplicas: 5
         maxReplicas: 50
-      
+
       database:
         preferredInstanceTypes: ["r5.xlarge", "r5.2xlarge"]
         cpuTarget: 60
         memoryTarget: 85
         storageOptimized: true
         multiAZ: true
-      
+
       cache:
         preferredInstanceTypes: ["cache.r6g.xlarge"]
         memoryTarget: 90
@@ -325,7 +325,7 @@ data:
           threshold: 7500  # $7500/day
           severity: "critical"
           recipients: ["cto@its-camera-ai.com", "finance@its-camera-ai.com"]
-      
+
       # Monthly cost alerts
       monthly:
         - name: "monthly-budget-warning"
@@ -336,7 +336,7 @@ data:
           threshold: 150000  # $150k/month
           severity: "critical"
           forecast: true
-      
+
       # Service-specific alerts
       services:
         compute:
@@ -351,7 +351,7 @@ data:
         network:
           threshold: 10000  # $10k/month for network
           severity: "info"
-    
+
     # Cost anomaly detection
     anomalyDetection:
       enabled: true
@@ -364,7 +364,7 @@ data:
         - name: "cost-spike"
           threshold: 50  # 50% increase over baseline
           severity: "critical"
-    
+
     # Budget controls
     budgets:
       total:
@@ -376,13 +376,13 @@ data:
             action: "restrict-scaling"
           - threshold: 100  # 100% of budget
             action: "emergency-scale-down"
-      
+
       development:
         monthly: 20000  # $20k/month for dev environment
         actions:
           - threshold: 90
             action: "auto-shutdown"
-      
+
       production:
         monthly: 120000  # $120k/month for production
         actions:
@@ -411,29 +411,29 @@ spec:
             - |
               # Daily cost analysis and recommendations
               echo "Starting daily cost analysis..."
-              
+
               # Analyze resource utilization
               python /app/analyze_utilization.py \
                 --window 24h \
                 --output /tmp/utilization_report.json
-              
+
               # Generate right-sizing recommendations
               python /app/rightsizing_recommendations.py \
                 --input /tmp/utilization_report.json \
                 --min-savings 15 \
                 --output /tmp/recommendations.json
-              
+
               # Check for unused resources
               python /app/unused_resources.py \
                 --age 7d \
                 --output /tmp/unused_resources.json
-              
+
               # Generate cost report
               python /app/generate_cost_report.py \
                 --period yesterday \
                 --format json \
                 --output /tmp/daily_cost_report.json
-              
+
               # Send notifications if significant savings found
               SAVINGS=$(jq '.total_potential_savings' /tmp/recommendations.json)
               if (( $(echo "$SAVINGS > 1000" | bc -l) )); then
@@ -441,10 +441,10 @@ spec:
                   --type cost-optimization \
                   --data /tmp/recommendations.json
               fi
-              
+
               # Store reports in S3 for historical analysis
               aws s3 cp /tmp/ s3://its-camera-ai-cost-reports/$(date +%Y/%m/%d)/ --recursive
-              
+
               echo "Cost analysis completed"
             env:
             - name: AWS_DEFAULT_REGION
@@ -482,25 +482,25 @@ spec:
             - |
               # Optimize spot instance usage
               echo "Starting spot instance optimization..."
-              
+
               # Check current spot prices
               python /app/check_spot_prices.py \
                 --regions us-west-2,us-east-1 \
                 --instance-types c5.xlarge,c5.2xlarge,g4dn.xlarge \
                 --output /tmp/spot_prices.json
-              
+
               # Analyze workload suitability for spot
               python /app/analyze_spot_suitability.py \
                 --namespace its-camera-ai-system \
                 --output /tmp/spot_candidates.json
-              
+
               # Generate spot recommendations
               python /app/generate_spot_recommendations.py \
                 --prices /tmp/spot_prices.json \
                 --candidates /tmp/spot_candidates.json \
                 --max-interruption-rate 10 \
                 --output /tmp/spot_recommendations.json
-              
+
               # Apply recommendations if savings > threshold
               SAVINGS=$(jq '.total_savings' /tmp/spot_recommendations.json)
               if (( $(echo "$SAVINGS > 500" | bc -l) )); then
@@ -508,7 +508,7 @@ spec:
                   --input /tmp/spot_recommendations.json \
                   --dry-run false
               fi
-              
+
               echo "Spot instance optimization completed"
             resources:
               requests:
@@ -541,32 +541,32 @@ spec:
             - |
               # Clean up unused resources
               echo "Starting resource cleanup..."
-              
+
               # Find and delete unused volumes
               python /app/cleanup_volumes.py \
                 --age 7d \
                 --dry-run false
-              
+
               # Clean up old snapshots
               python /app/cleanup_snapshots.py \
                 --retention 30d \
                 --dry-run false
-              
+
               # Remove unused load balancers
               python /app/cleanup_load_balancers.py \
                 --unused-duration 24h \
                 --dry-run false
-              
+
               # Clean up terminated instances
               python /app/cleanup_instances.py \
                 --state terminated \
                 --age 24h
-              
+
               # Remove old log groups
               python /app/cleanup_log_groups.py \
                 --retention 90d \
                 --dry-run false
-              
+
               echo "Resource cleanup completed"
             resources:
               requests:

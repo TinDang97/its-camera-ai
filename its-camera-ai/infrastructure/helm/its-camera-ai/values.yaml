@@ -20,7 +20,7 @@ app:
     repository: its-camera-ai
     tag: latest
     pullPolicy: IfNotPresent
-  
+
   # Platform-specific configurations
   platformConfig:
     linux:
@@ -45,11 +45,11 @@ app:
         limits:
           cpu: "2000m"
           memory: "4Gi"
-  
+
   env:
     - name: PLATFORM
       value: "linux"
-    - name: ARCHITECTURE 
+    - name: ARCHITECTURE
       value: "amd64"
     - name: INFERENCE_ENGINE
       value: "pytorch"
@@ -116,7 +116,7 @@ inference:
         memory: "8Gi"
     service:
       port: 3000
-    
+
     # Platform-specific optimizations
     platformOptimizations:
       linux:
@@ -150,7 +150,7 @@ models:
     storageClass: "standard"
     size: "100Gi"
     accessMode: ReadWriteMany
-  
+
   # Model optimization per platform
   optimization:
     linux:
@@ -172,13 +172,13 @@ monitoring:
       enabled: true
       interval: 30s
       scrapeTimeout: 10s
-  
+
   grafana:
     enabled: true
     dashboards:
       inference: true
       platform: true
-  
+
   # Platform-specific metrics
   platformMetrics:
     linux:
@@ -236,7 +236,7 @@ security:
     runAsUser: 1000
     runAsGroup: 1000
     fsGroup: 1000
-  
+
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
@@ -248,7 +248,7 @@ security:
 
   networkPolicy:
     enabled: true
-    
+
 # Platform-specific node selection
 nodeSelector:
   enabled: true

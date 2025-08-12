@@ -1,0 +1,547 @@
+# Resource Quotas and Limits for ITS Camera AI System
+# Production-grade resource management and governance
+
+# Namespace-level ResourceQuota for production environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: its-camera-ai-quota
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: resource-management
+    environment: production
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "100"      # 100 CPU cores total
+    requests.memory: 400Gi   # 400GB RAM total
+    limits.cpu: "200"        # 200 CPU cores limit
+    limits.memory: 800Gi     # 800GB RAM limit
+
+    # GPU resources
+    requests.nvidia.com/gpu: "30"  # 30 GPUs total
+    limits.nvidia.com/gpu: "30"
+
+    # Storage resources
+    requests.storage: 10Ti    # 10TB storage total
+    persistentvolumeclaims: "50"  # Max 50 PVCs
+
+    # Network resources
+    services: "20"            # Max 20 services
+    services.loadbalancers: "5"  # Max 5 load balancers
+    services.nodeports: "10"  # Max 10 NodePorts
+
+    # Object counts
+    pods: "200"               # Max 200 pods
+    replicationcontrollers: "0"  # Disable RCs
+    secrets: "30"             # Max 30 secrets
+    configmaps: "30"          # Max 30 configmaps
+
+    # Quality of Service
+    count/pods.guaranteed: "50"    # Max 50 guaranteed pods
+    count/pods.burstable: "100"    # Max 100 burstable pods
+    count/pods.besteffort: "50"    # Max 50 best-effort pods
+
+---
+# LimitRange for default resource constraints
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: its-camera-ai-limits
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: resource-management
+spec:
+  limits:
+  # Container-level limits
+  - type: Container
+    default:
+      cpu: 1000m
+      memory: 2Gi
+      ephemeral-storage: 10Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 1Gi
+    max:
+      cpu: 8000m
+      memory: 16Gi
+      ephemeral-storage: 100Gi
+      nvidia.com/gpu: 2
+    min:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 100Mi
+    maxLimitRequestRatio:
+      cpu: 8
+      memory: 4
+      ephemeral-storage: 10
+
+  # Pod-level limits
+  - type: Pod
+    max:
+      cpu: 16000m
+      memory: 32Gi
+      ephemeral-storage: 200Gi
+      nvidia.com/gpu: 2
+    min:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 500Mi
+
+  # PVC limits
+  - type: PersistentVolumeClaim
+    max:
+      storage: 2Ti
+    min:
+      storage: 1Gi
+
+---
+# NetworkPolicy for resource-based traffic shaping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: qos-based-traffic-policy
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: qos
+spec:
+  podSelector:
+    matchLabels:
+      qos-class: guaranteed
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # High priority traffic for guaranteed QoS pods
+  - from:
+    - podSelector:
+        matchLabels:
+          priority-class: high
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: ml-inference
+    ports:
+    - protocol: TCP
+      port: 8080
+
+---
+# PriorityClass for critical workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: its-camera-ai-critical
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: scheduling
+value: 1000000
+globalDefault: false
+description: "Critical priority for ITS Camera AI core services"
+
+---
+# PriorityClass for high priority workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: its-camera-ai-high
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: scheduling
+value: 100000
+globalDefault: false
+description: "High priority for ITS Camera AI ML inference"
+
+---
+# PriorityClass for normal workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: its-camera-ai-normal
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: scheduling
+value: 1000
+globalDefault: true
+description: "Normal priority for ITS Camera AI general workloads"
+
+---
+# Resource quotas for staging environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: its-camera-ai-staging-quota
+  namespace: its-camera-ai-staging
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: resource-management
+    environment: staging
+spec:
+  hard:
+    # Reduced resources for staging
+    requests.cpu: "20"
+    requests.memory: 80Gi
+    limits.cpu: "40"
+    limits.memory: 160Gi
+
+    # Limited GPU resources
+    requests.nvidia.com/gpu: "4"
+    limits.nvidia.com/gpu: "4"
+
+    # Storage limits
+    requests.storage: 2Ti
+    persistentvolumeclaims: "20"
+
+    # Object limits
+    pods: "50"
+    services: "10"
+    secrets: "15"
+    configmaps: "15"
+
+---
+# Resource quotas for development environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: its-camera-ai-dev-quota
+  namespace: its-camera-ai-dev
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: resource-management
+    environment: development
+spec:
+  hard:
+    # Minimal resources for development
+    requests.cpu: "10"
+    requests.memory: 40Gi
+    limits.cpu: "20"
+    limits.memory: 80Gi
+
+    # No GPU allocation for dev
+    requests.nvidia.com/gpu: "0"
+    limits.nvidia.com/gpu: "0"
+
+    # Limited storage
+    requests.storage: 500Gi
+    persistentvolumeclaims: "10"
+
+    # Object limits
+    pods: "20"
+    services: "5"
+    secrets: "10"
+    configmaps: "10"
+
+---
+# ResourceQuota for edge deployments
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: its-camera-ai-edge-quota
+  namespace: its-camera-ai-edge
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: resource-management
+    environment: edge
+spec:
+  hard:
+    # Edge-optimized resources
+    requests.cpu: "8"
+    requests.memory: 32Gi
+    limits.cpu: "16"
+    limits.memory: 64Gi
+
+    # Edge GPU support
+    requests.nvidia.com/gpu: "2"
+    limits.nvidia.com/gpu: "2"
+
+    # Limited storage for edge
+    requests.storage: 200Gi
+    persistentvolumeclaims: "5"
+
+    # Minimal object counts
+    pods: "15"
+    services: "3"
+    secrets: "5"
+    configmaps: "5"
+
+---
+# Custom Resource Definition for GPU allocation tracking
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gpuallocations.its-camera-ai.com
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: resource-management
+spec:
+  group: its-camera-ai.com
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              nodeSelector:
+                type: object
+              gpuType:
+                type: string
+                enum: ["nvidia-t4", "nvidia-v100", "nvidia-a100"]
+              replicas:
+                type: integer
+                minimum: 1
+                maximum: 10
+              priority:
+                type: string
+                enum: ["critical", "high", "normal"]
+          status:
+            type: object
+            properties:
+              allocatedGPUs:
+                type: integer
+              availableGPUs:
+                type: integer
+              utilizationPercent:
+                type: number
+              lastUpdated:
+                type: string
+                format: date-time
+  scope: Namespaced
+  names:
+    plural: gpuallocations
+    singular: gpuallocation
+    kind: GPUAllocation
+    shortNames:
+    - gpu
+    - gpualloc
+
+---
+# Quality of Service policy configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qos-policies
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: qos
+data:
+  qos-config.yaml: |
+    # QoS class definitions and policies
+    qosClasses:
+      guaranteed:
+        description: "Pods with guaranteed resources and highest priority"
+        requirements:
+          - requests.cpu == limits.cpu
+          - requests.memory == limits.memory
+        priorityClass: its-camera-ai-critical
+        nodeSelector:
+          node-type: high-performance
+        tolerations:
+        - key: high-performance
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+      burstable:
+        description: "Pods with some guaranteed resources"
+        requirements:
+          - requests.cpu < limits.cpu OR requests.memory < limits.memory
+          - requests.cpu > 0 OR requests.memory > 0
+        priorityClass: its-camera-ai-high
+        nodeSelector:
+          node-type: standard
+
+      besteffort:
+        description: "Pods with no resource guarantees"
+        requirements:
+          - requests.cpu == 0 AND requests.memory == 0
+        priorityClass: its-camera-ai-normal
+        nodeSelector:
+          node-type: burstable
+
+    # Service-specific QoS mappings
+    serviceQoSMapping:
+      ml-inference:
+        qosClass: guaranteed
+        reason: "Critical ML inference requires consistent performance"
+
+      api:
+        qosClass: burstable
+        reason: "API needs some guarantees but can handle bursts"
+
+      stream-processor:
+        qosClass: burstable
+        reason: "Stream processing needs consistent but flexible resources"
+
+      event-processor:
+        qosClass: besteffort
+        reason: "Event processing can tolerate resource variations"
+
+      postgresql:
+        qosClass: guaranteed
+        reason: "Database requires consistent performance"
+
+      redis:
+        qosClass: burstable
+        reason: "Cache can handle some resource variation"
+
+---
+# Node affinity rules for resource optimization
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-affinity-rules
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: scheduling
+data:
+  affinity-rules.yaml: |
+    # Node affinity rules for optimal resource utilization
+    nodeAffinityRules:
+      ml-inference:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: workload
+              operator: In
+              values: ["ml-inference"]
+            - key: gpu-type
+              operator: In
+              values: ["nvidia-t4", "nvidia-v100"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: instance-type
+              operator: In
+              values: ["g4dn.2xlarge", "g4dn.4xlarge"]
+
+      database:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: workload
+              operator: In
+              values: ["database"]
+            - key: storage-type
+              operator: In
+              values: ["nvme-ssd"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: instance-type
+              operator: In
+              values: ["r5.2xlarge", "r5.4xlarge"]
+
+      api:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          preference:
+            matchExpressions:
+            - key: workload
+              operator: In
+              values: ["general"]
+        - weight: 60
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b", "us-west-2c"]
+
+    # Pod anti-affinity for high availability
+    podAntiAffinityRules:
+      ml-inference:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: ["ml-inference"]
+            topologyKey: kubernetes.io/hostname
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: ["ml-inference"]
+            topologyKey: topology.kubernetes.io/zone
+
+      database:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["postgresql"]
+          topologyKey: kubernetes.io/hostname
+
+---
+# Resource monitoring and alerts configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: resource-monitoring
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: monitoring
+data:
+  resource-alerts.yaml: |
+    # Resource monitoring and alerting rules
+    groups:
+    - name: resource-usage
+      rules:
+      # Namespace resource quota alerts
+      - alert: NamespaceQuotaExceeded
+        expr: kube_resourcequota{resource="requests.cpu", type="used"} / kube_resourcequota{resource="requests.cpu", type="hard"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Namespace {{ $labels.namespace }} is approaching CPU quota limit"
+          description: "Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of its CPU quota."
+
+      - alert: GPUQuotaExceeded
+        expr: kube_resourcequota{resource="requests.nvidia.com/gpu", type="used"} / kube_resourcequota{resource="requests.nvidia.com/gpu", type="hard"} > 0.8
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GPU quota almost exhausted in {{ $labels.namespace }}"
+          description: "Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of its GPU quota."
+
+      # Node resource alerts
+      - alert: NodeResourcePressure
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on node {{ $labels.node }}"
+          description: "Node {{ $labels.node }} memory usage is {{ $value | humanizePercentage }}."
+
+      - alert: GPUMemoryHigh
+        expr: nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes > 0.9
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GPU memory usage"
+          description: "GPU {{ $labels.gpu }} on node {{ $labels.node }} memory usage is {{ $value | humanizePercentage }}."

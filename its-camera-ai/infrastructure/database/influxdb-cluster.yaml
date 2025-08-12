@@ -10,7 +10,7 @@ metadata:
 spec:
   version: "2.7.4"
   replicas: 3
-  
+
   # Storage configuration for time-series data
   storage:
     size: 5Ti
@@ -34,7 +34,7 @@ spec:
           duration: "5y"
           replication: 1
           default: true
-  
+
   # InfluxDB configuration
   config:
     # HTTP settings
@@ -45,25 +45,25 @@ spec:
       maxBodySize: "25MB"
       maxConcurrentWriteLimit: 100
       maxEnqueuedWriteLimit: 1000
-    
+
     # Data node configuration
     data:
       engine: "tsm1"
       maxSeriesPerDatabase: 1000000
       maxValuesPerTag: 100000
-      
+
       # Cache settings for high throughput
       cacheMaxMemorySize: "2GB"
       cacheSnapshotMemorySize: "25MB"
       cacheSnapshotWriteColdDuration: "10m"
-      
+
       # Compaction settings
       compactFullWriteColdDuration: "4h"
       maxPointsPerBlock: 1000
-      
+
       # WAL settings
       walFsyncDelay: "0s"
-      
+
     # Coordinator settings
     coordinator:
       writeTimeout: "30s"
@@ -71,19 +71,19 @@ spec:
       queryTimeout: "60s"
       logQueriesAfter: "10s"
       maxSelectPointN: 100000
-    
+
     # Retention service
     retention:
       enabled: true
       checkInterval: "30m"
-    
+
     # Continuous queries
     continuousQueries:
       enabled: true
       logEnabled: true
       queryStatsEnabled: true
       runInterval: "1s"
-  
+
   # Resource allocation
   resources:
     requests:
@@ -92,7 +92,7 @@ spec:
     limits:
       cpu: "4"
       memory: "16Gi"
-  
+
   # Node affinity for performance
   affinity:
     nodeAffinity:
@@ -112,7 +112,7 @@ spec:
               operator: In
               values: ["influxdb-cluster"]
           topologyKey: kubernetes.io/hostname
-  
+
   # Monitoring
   monitoring:
     enabled: true
@@ -120,7 +120,7 @@ spec:
       enabled: true
       interval: 30s
       scrapeTimeout: 10s
-  
+
   # Security
   auth:
     enabled: true
@@ -147,7 +147,7 @@ spec:
             echo "Waiting for InfluxDB to be ready..."
             sleep 5
           done
-          
+
           # Create organization and buckets
           influx setup \
             --host http://influxdb-cluster:8086 \
@@ -157,7 +157,7 @@ spec:
             --password $INFLUX_PASSWORD \
             --token $INFLUX_TOKEN \
             --force
-          
+
           # Create additional buckets
           influx bucket create \
             --host http://influxdb-cluster:8086 \
@@ -165,55 +165,55 @@ spec:
             --name camera-telemetry \
             --org its-camera-ai \
             --retention 720h  # 30 days
-          
+
           influx bucket create \
             --host http://influxdb-cluster:8086 \
             --token $INFLUX_TOKEN \
             --name ml-metrics \
             --org its-camera-ai \
             --retention 2160h  # 90 days
-          
+
           influx bucket create \
             --host http://influxdb-cluster:8086 \
             --token $INFLUX_TOKEN \
             --name system-metrics \
             --org its-camera-ai \
             --retention 4320h  # 180 days
-          
+
           influx bucket create \
             --host http://influxdb-cluster:8086 \
             --token $INFLUX_TOKEN \
             --name performance-metrics \
             --org its-camera-ai \
             --retention 168h  # 7 days
-          
+
           # Create tasks for data aggregation
           cat <<EOF | influx task create --host http://influxdb-cluster:8086 --token $INFLUX_TOKEN
           option task = {
             name: "camera-hourly-aggregation",
             every: 1h,
           }
-          
+
           from(bucket: "camera-telemetry")
             |> range(start: -1h)
             |> filter(fn: (r) => r._measurement == "camera_stats")
             |> aggregateWindow(every: 1h, fn: mean)
             |> to(bucket: "camera-metrics", org: "its-camera-ai")
           EOF
-          
+
           cat <<EOF | influx task create --host http://influxdb-cluster:8086 --token $INFLUX_TOKEN
           option task = {
             name: "ml-performance-aggregation",
             every: 5m,
           }
-          
+
           from(bucket: "ml-metrics")
             |> range(start: -5m)
             |> filter(fn: (r) => r._measurement == "inference_latency")
             |> aggregateWindow(every: 5m, fn: mean)
             |> to(bucket: "performance-metrics", org: "its-camera-ai")
           EOF
-          
+
           echo "InfluxDB initialization completed successfully"
         env:
         - name: INFLUX_PASSWORD
@@ -259,7 +259,7 @@ data:
     [global_tags]
       environment = "production"
       system = "its-camera-ai"
-    
+
     [agent]
       interval = "10s"
       round_interval = true
@@ -271,7 +271,7 @@ data:
       precision = ""
       hostname = ""
       omit_hostname = false
-    
+
     # InfluxDB output
     [[outputs.influxdb_v2]]
       urls = ["http://influxdb-service:8086"]
@@ -279,35 +279,35 @@ data:
       organization = "its-camera-ai"
       bucket = "system-metrics"
       timeout = "5s"
-    
+
     # Kubernetes metrics
     [[inputs.kubernetes]]
       url = "https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT"
       bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
       insecure_skip_verify = true
-      
+
     # System metrics
     [[inputs.cpu]]
       percpu = true
       totalcpu = true
       collect_cpu_time = false
       report_active = false
-    
+
     [[inputs.disk]]
       ignore_fs = ["tmpfs", "devtmpfs", "devfs", "iso9660", "overlay", "aufs", "squashfs"]
-    
+
     [[inputs.diskio]]
-    
+
     [[inputs.mem]]
-    
+
     [[inputs.net]]
-    
+
     [[inputs.processes]]
-    
+
     [[inputs.swap]]
-    
+
     [[inputs.system]]
-    
+
     # Docker metrics
     [[inputs.docker]]
       endpoint = "unix:///var/run/docker.sock"
@@ -319,29 +319,29 @@ data:
       timeout = "5s"
       docker_label_include = []
       docker_label_exclude = []
-    
+
     # Redis metrics
     [[inputs.redis]]
       servers = ["tcp://redis-cluster-service:6379"]
       password = ""
-    
+
     # PostgreSQL metrics
     [[inputs.postgresql_extensible]]
       address = "postgres://camera_ai_user:$POSTGRES_PASSWORD@pgbouncer-service:5432/its_camera_ai?sslmode=disable"
       databases = ["its_camera_ai"]
-      
+
       [[inputs.postgresql_extensible.query]]
         sqlquery = "SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active'"
         version = 901
         withdbname = false
         tagvalue = ""
-      
+
       [[inputs.postgresql_extensible.query]]
         sqlquery = "SELECT schemaname, tablename, n_tup_ins as inserts, n_tup_upd as updates, n_tup_del as deletes FROM pg_stat_user_tables"
         version = 901
         withdbname = false
         tagvalue = "schemaname,tablename"
-    
+
     # Custom camera metrics
     [[inputs.http]]
       urls = [
@@ -485,23 +485,23 @@ spec:
             - |
               DATE=$(date +"%Y%m%d_%H%M%S")
               BACKUP_PATH="/tmp/influx_backup_${DATE}"
-              
+
               # Create backup
               influx backup \
                 --host http://influxdb-service:8086 \
                 --token $INFLUX_TOKEN \
                 --org its-camera-ai \
                 $BACKUP_PATH
-              
+
               # Compress backup
               tar -czf "${BACKUP_PATH}.tar.gz" -C /tmp "influx_backup_${DATE}"
-              
+
               # Upload to S3 (requires AWS credentials)
               # aws s3 cp "${BACKUP_PATH}.tar.gz" s3://its-camera-ai-backups/influxdb/
-              
+
               # Cleanup old backups (keep last 7 days)
               find /tmp -name "influx_backup_*.tar.gz" -mtime +7 -delete
-              
+
               echo "Backup completed: ${BACKUP_PATH}.tar.gz"
             env:
             - name: INFLUX_TOKEN

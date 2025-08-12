@@ -21,18 +21,29 @@ Architecture Components:
 import asyncio
 import hashlib
 import secrets
+import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import jwt
 import structlog
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.x509 import (
+    CertificateBuilder,
+    DNSName,
+    NameOID,
+    SubjectAlternativeName,
+    load_pem_x509_certificate,
+    random_serial_number,
+)
+from cryptography.x509.oid import NameOID
 
 logger = structlog.get_logger(__name__)
 
@@ -79,6 +90,166 @@ class SecurityContext:
         )
 
 
+class MutualTLSManager:
+    """Mutual TLS manager for service-to-service communication."""
+
+    def __init__(self, cert_dir: Path = Path("certs")):
+        self.cert_dir = cert_dir
+        self.cert_dir.mkdir(parents=True, exist_ok=True)
+        self.ca_private_key = None
+        self.ca_certificate = None
+        self.service_certificates: dict[str, dict[str, Any]] = {}
+        self._initialize_ca()
+        logger.info("Mutual TLS manager initialized")
+
+    def _initialize_ca(self) -> None:
+        """Initialize Certificate Authority for internal services."""
+        # Generate CA private key
+        self.ca_private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=4096
+        )
+
+        # Create CA certificate
+        ca_subject = NameOID.COMMON_NAME.dotted_string + "=ITS-Camera-AI-CA"
+        self.ca_certificate = (
+            CertificateBuilder()
+            .subject_name(ca_subject)
+            .issuer_name(ca_subject)
+            .public_key(self.ca_private_key.public_key())
+            .serial_number(random_serial_number())
+            .not_valid_before(datetime.utcnow())
+            .not_valid_after(datetime.utcnow() + timedelta(days=3650))  # 10 years
+            .sign(self.ca_private_key, hashes.SHA256())
+        )
+
+        # Save CA certificate and key
+        self._save_ca_files()
+        logger.info("Certificate Authority initialized")
+
+    def _save_ca_files(self) -> None:
+        """Save CA certificate and private key to files."""
+        # Save CA private key
+        ca_key_path = self.cert_dir / "ca-key.pem"
+        with open(ca_key_path, "wb") as f:
+            f.write(
+                self.ca_private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+            )
+
+        # Save CA certificate
+        ca_cert_path = self.cert_dir / "ca-cert.pem"
+        with open(ca_cert_path, "wb") as f:
+            f.write(self.ca_certificate.public_bytes(serialization.Encoding.PEM))
+
+        # Set restrictive permissions
+        ca_key_path.chmod(0o600)
+        ca_cert_path.chmod(0o644)
+
+    def generate_service_certificate(
+        self, service_name: str, dns_names: list[str] = None, ip_addresses: list[str] = None
+    ) -> dict[str, str]:
+        """Generate certificate for service with mutual TLS."""
+        # Generate service private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048
+        )
+
+        # Create subject alternative names
+        san_list = []
+        if dns_names:
+            san_list.extend([DNSName(name) for name in dns_names])
+        if ip_addresses:
+            from ipaddress import ip_address
+            san_list.extend([ip_address(ip) for ip in ip_addresses])
+
+        # Create service certificate
+        subject = f"CN={service_name}"
+        certificate = (
+            CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(self.ca_certificate.subject)
+            .public_key(private_key.public_key())
+            .serial_number(random_serial_number())
+            .not_valid_before(datetime.utcnow())
+            .not_valid_after(datetime.utcnow() + timedelta(days=365))
+            .add_extension(
+                SubjectAlternativeName(san_list),
+                critical=False,
+            )
+            .sign(self.ca_private_key, hashes.SHA256())
+        )
+
+        # Save certificate and key files
+        cert_path = self.cert_dir / f"{service_name}-cert.pem"
+        key_path = self.cert_dir / f"{service_name}-key.pem"
+
+        with open(cert_path, "wb") as f:
+            f.write(certificate.public_bytes(serialization.Encoding.PEM))
+
+        with open(key_path, "wb") as f:
+            f.write(
+                private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+            )
+
+        # Set permissions
+        cert_path.chmod(0o644)
+        key_path.chmod(0o600)
+
+        cert_info = {
+            "certificate_path": str(cert_path),
+            "private_key_path": str(key_path),
+            "ca_certificate_path": str(self.cert_dir / "ca-cert.pem"),
+            "service_name": service_name,
+            "valid_until": (datetime.utcnow() + timedelta(days=365)).isoformat(),
+        }
+
+        self.service_certificates[service_name] = cert_info
+        logger.info("Service certificate generated", service=service_name)
+        return cert_info
+
+    def create_tls_context(self, service_name: str) -> ssl.SSLContext:
+        """Create SSL context for mutual TLS authentication."""
+        if service_name not in self.service_certificates:
+            raise SecurityError(f"Certificate not found for service: {service_name}")
+
+        cert_info = self.service_certificates[service_name]
+
+        # Create SSL context
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+
+        # Load CA certificate
+        context.load_verify_locations(cert_info["ca_certificate_path"])
+
+        # Load client certificate and key
+        context.load_cert_chain(
+            cert_info["certificate_path"], cert_info["private_key_path"]
+        )
+
+        logger.info("TLS context created", service=service_name)
+        return context
+
+    def verify_peer_certificate(self, peer_cert_data: bytes) -> bool:
+        """Verify peer certificate against CA."""
+        try:
+            peer_cert = load_pem_x509_certificate(peer_cert_data)
+            # In production: implement proper certificate chain validation
+            return peer_cert.issuer == self.ca_certificate.subject
+        except Exception as e:
+            logger.error("Certificate verification failed", error=str(e))
+            return False
+
+
 class EncryptionManager:
     """Advanced encryption manager for data protection."""
 
@@ -91,6 +262,7 @@ class EncryptionManager:
         )
         self.rsa_public_key = self.rsa_private_key.public_key()
         self.last_key_rotation = time.time()
+        self.data_encryption_keys: dict[str, bytes] = {}
         logger.info("Encryption manager initialized with 4096-bit RSA and AES-256")
 
     def encrypt_data(
@@ -161,6 +333,11 @@ class EncryptionManager:
     def rotate_keys(self) -> bool:
         """Rotate encryption keys periodically."""
         if time.time() - self.last_key_rotation > self.key_rotation_interval:
+            # Archive old keys for data recovery
+            old_key_id = f"archived_{int(self.last_key_rotation)}"
+            self.data_encryption_keys[old_key_id] = self.symmetric_key
+
+            # Generate new keys
             self.symmetric_key = Fernet.generate_key()
             self.cipher_suite = Fernet(self.symmetric_key)
             self.rsa_private_key = rsa.generate_private_key(
@@ -168,9 +345,58 @@ class EncryptionManager:
             )
             self.rsa_public_key = self.rsa_private_key.public_key()
             self.last_key_rotation = time.time()
+
+            # Clean up old keys (keep last 10 rotations)
+            if len(self.data_encryption_keys) > 10:
+                oldest_key = min(self.data_encryption_keys.keys())
+                del self.data_encryption_keys[oldest_key]
+
             logger.info("Encryption keys rotated successfully")
             return True
         return False
+
+    def encrypt_at_rest(self, data: bytes, classification: SecurityLevel) -> dict[str, Any]:
+        """Encrypt data for storage with metadata."""
+        key_id = f"key_{int(time.time())}"
+        encrypted_data = self.encrypt_data(data.decode() if isinstance(data, bytes) else data, classification)
+
+        return {
+            **encrypted_data,
+            "key_id": key_id,
+            "encryption_type": "at_rest",
+            "storage_classification": classification.value,
+        }
+
+    def encrypt_in_transit(self, data: bytes, peer_public_key: Any) -> dict[str, Any]:
+        """Encrypt data for transmission with peer's public key."""
+        # Generate ephemeral AES key
+        aes_key = secrets.token_bytes(32)
+        iv = secrets.token_bytes(16)
+
+        # Encrypt data with AES
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(iv))
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(data) + encryptor.finalize()
+
+        # Encrypt AES key with peer's public key
+        encrypted_key = peer_public_key.encrypt(
+            aes_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
+
+        return {
+            "ciphertext": ciphertext.hex(),
+            "encrypted_key": encrypted_key.hex(),
+            "iv": iv.hex(),
+            "tag": encryptor.tag.hex(),
+            "encryption_type": "in_transit",
+            "algorithm": "AES-256-GCM",
+            "timestamp": int(time.time()),
+        }
 
 
 class PrivacyEngine:

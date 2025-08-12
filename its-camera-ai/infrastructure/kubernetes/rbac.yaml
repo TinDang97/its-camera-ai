@@ -1,0 +1,544 @@
+# RBAC (Role-Based Access Control) for ITS Camera AI System
+# Service accounts, roles, and bindings for secure operation
+
+# Service Account for API pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: its-camera-ai-api
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: api
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/ITS-CameraAI-API-Role
+automountServiceAccountToken: true
+
+---
+# Service Account for ML Inference pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: its-camera-ai-ml
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: ml-inference
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/ITS-CameraAI-ML-Role
+automountServiceAccountToken: true
+
+---
+# Service Account for Stream Processing pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: its-camera-ai-stream
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: stream-processor
+automountServiceAccountToken: true
+
+---
+# Service Account for Event Processing pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: its-camera-ai-events
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: event-processor
+automountServiceAccountToken: true
+
+---
+# Service Account for PostgreSQL
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgresql
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: database
+automountServiceAccountToken: true
+
+---
+# Service Account for Redis
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+automountServiceAccountToken: true
+
+---
+# Service Account for External Secrets Operator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets-sa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: external-secrets
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/ITS-CameraAI-ExternalSecrets-Role
+automountServiceAccountToken: true
+
+---
+# Role for API pods - basic operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: api-role
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+rules:
+# Allow reading ConfigMaps and Secrets
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+# Allow reading Services for service discovery
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+# Allow reading own pod information
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: []
+# Allow updating pod status (for health checks)
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["update"]
+# Allow creating events for logging
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# Allow reading metrics
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+# Role for ML Inference pods - enhanced permissions for model management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: ml-inference-role
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+rules:
+# Basic permissions
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# PVC management for model storage
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+# Node information for GPU resources
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+# Metrics access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+# Custom resource access for GPU monitoring
+- apiGroups: ["nvidia.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Role for Stream Processing pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: stream-processor-role
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+rules:
+# Basic permissions
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# Metrics access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+# Role for Event Processing pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: event-processor-role
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+rules:
+# Basic permissions
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# Allow creating/updating events for traffic incidents
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "update", "patch"]
+
+---
+# Role for PostgreSQL pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: postgresql-role
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: rbac
+rules:
+# Basic permissions
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# PVC management
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+# Service discovery for replication
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Role for Redis pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: redis-role
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: rbac
+rules:
+# Basic permissions
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# PVC management
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+# Service discovery for Redis Sentinel
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Role for External Secrets Operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: its-camera-ai
+  name: external-secrets-role
+  labels:
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/component: rbac
+rules:
+# Secret management
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# ConfigMap access
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+# Events
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+# External Secrets resources
+- apiGroups: ["external-secrets.io"]
+  resources: ["externalsecrets", "secretstores", "clustersecretstores"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding for API pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: its-camera-ai-api
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: api-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for ML Inference pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ml-inference-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: its-camera-ai-ml
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: ml-inference-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Stream Processing pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: stream-processor-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: its-camera-ai-stream
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: stream-processor-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Event Processing pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: event-processor-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: its-camera-ai-events
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: event-processor-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for PostgreSQL pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: postgresql-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: postgresql
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: postgresql-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Redis pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: redis-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: redis
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: redis-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for External Secrets Operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: external-secrets-role-binding
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: external-secrets-sa
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: external-secrets-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole for cross-namespace monitoring access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: its-camera-ai-monitoring
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+rules:
+# Allow reading metrics from all namespaces
+- apiGroups: [""]
+  resources: ["nodes", "nodes/metrics", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+# Metrics API access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+# Custom metrics access
+- apiGroups: ["custom.metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding for monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: its-camera-ai-monitoring
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: its-camera-ai-api
+  namespace: its-camera-ai
+- kind: ServiceAccount
+  name: its-camera-ai-ml
+  namespace: its-camera-ai
+roleRef:
+  kind: ClusterRole
+  name: its-camera-ai-monitoring
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Pod Security Policy (if PSP is enabled)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: its-camera-ai-psp
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: security
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  readOnlyRootFilesystem: true
