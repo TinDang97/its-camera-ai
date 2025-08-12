@@ -24,9 +24,11 @@ import contextlib
 import logging
 import os
 import time
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import cv2
@@ -36,19 +38,34 @@ from torch.cuda.amp import autocast
 from ultralytics import YOLO
 
 try:
-    import tensorrt as trt  # noqa: F401
-    import torch_tensorrt  # noqa: F401
-
+    import pycuda.driver as cuda
+    import tensorrt as trt
     TRT_AVAILABLE = True
 except ImportError:
+    trt = None
+    cuda = None
     TRT_AVAILABLE = False
 
 try:
-    import onnxruntime as ort  # noqa: F401
-
+    import onnxruntime as ort
     ONNX_AVAILABLE = True
 except ImportError:
+    ort = None
     ONNX_AVAILABLE = False
+
+try:
+    import openvino as ov
+    OPENVINO_AVAILABLE = True
+except ImportError:
+    ov = None
+    OPENVINO_AVAILABLE = False
+
+try:
+    import pynvml
+    PYNVML_AVAILABLE = True
+except ImportError:
+    pynvml = None
+    PYNVML_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
@@ -83,8 +100,11 @@ class TensorRTModel:
                 np_dtype = np.float32
 
             # Allocate GPU memory
-            size = np.prod(shape) * np_dtype().itemsize
-            mem_gpu = torch.cuda.mem_alloc(size)
+            size = int(np.prod(shape) * np_dtype().itemsize)
+            if torch.cuda.is_available():
+                mem_gpu = torch.cuda.empty(size, dtype=torch.uint8).data_ptr()
+            else:
+                mem_gpu = None
 
             self.bindings.append(int(mem_gpu))
 
@@ -204,6 +224,8 @@ class InferenceConfig:
     def __post_init__(self) -> None:
         if self.device_ids is None:
             self.device_ids = [0] if torch.cuda.is_available() else []
+        if not self.device_ids:
+            logger.warning("No GPU devices available, falling back to CPU")
 
 
 @dataclass
@@ -233,14 +255,63 @@ class DetectionResult:
     gpu_memory_used_mb: float
 
 
+class CUDAStreamManager:
+    """Advanced CUDA stream management for parallel inference processing."""
+
+    def __init__(self, device_ids: list[int], streams_per_device: int = 4) -> None:
+        self.device_ids = device_ids
+        self.streams_per_device = streams_per_device
+        self.streams: dict[int, list[torch.cuda.Stream]] = {}
+        self.stream_idx: dict[int, int] = {}
+        self.stream_locks: dict[int, list[Lock]] = {}
+
+        self._initialize_streams()
+
+    def _initialize_streams(self) -> None:
+        """Initialize CUDA streams for each device."""
+        for device_id in self.device_ids:
+            with torch.cuda.device(device_id):
+                device_streams = []
+                device_locks = []
+
+                for _ in range(self.streams_per_device):
+                    stream = torch.cuda.Stream(device=device_id)
+                    device_streams.append(stream)
+                    device_locks.append(Lock())
+
+                self.streams[device_id] = device_streams
+                self.stream_locks[device_id] = device_locks
+                self.stream_idx[device_id] = 0
+
+                logger.info(f"Initialized {self.streams_per_device} CUDA streams for GPU {device_id}")
+
+    def get_next_stream(self, device_id: int) -> tuple[torch.cuda.Stream, Lock]:
+        """Get next available stream with round-robin scheduling."""
+        idx = self.stream_idx[device_id]
+        self.stream_idx[device_id] = (idx + 1) % self.streams_per_device
+
+        return self.streams[device_id][idx], self.stream_locks[device_id][idx]
+
+    def synchronize_all(self) -> None:
+        """Synchronize all streams across all devices."""
+        for device_id in self.device_ids:
+            for stream in self.streams[device_id]:
+                stream.synchronize()
+
+    def cleanup(self) -> None:
+        """Clean up streams."""
+        self.synchronize_all()
+
+
 class GPUMemoryManager:
     """Advanced GPU memory management for high-throughput inference."""
 
     def __init__(self, device_ids: list[int], memory_fraction: float = 0.8) -> None:
         self.device_ids = device_ids
         self.memory_fraction = memory_fraction
-        self.memory_pools: dict[int, dict[tuple[int, ...], torch.Tensor]] = {}
+        self.memory_pools: dict[int, dict[tuple[int, ...], deque[torch.Tensor]]] = {}
         self.allocated_tensors: dict[int, list[torch.Tensor]] = {}
+        self.pool_locks: dict[int, Lock] = {}
 
         self._initialize_memory_pools()
 
@@ -252,39 +323,75 @@ class GPUMemoryManager:
             # Set memory fraction to prevent OOM
             torch.cuda.set_per_process_memory_fraction(self.memory_fraction, device_id)
 
-            # Pre-allocate common tensor shapes
+            # Pre-allocate common tensor shapes with multiple instances
             self.memory_pools[device_id] = {}
+            self.pool_locks[device_id] = Lock()
+
             common_shapes = [
                 (1, 3, 640, 640),  # Single frame
+                (2, 3, 640, 640),  # Pair batch
                 (4, 3, 640, 640),  # Small batch
                 (8, 3, 640, 640),  # Standard batch
                 (16, 3, 640, 640),  # Large batch
                 (32, 3, 640, 640),  # Max batch
+                (1, 3, 1280, 1280),  # High-res single
+                (4, 3, 1280, 1280),  # High-res batch
             ]
 
             for shape in common_shapes:
-                tensor = torch.zeros(
-                    shape, dtype=torch.float16, device=f"cuda:{device_id}"
-                )
-                self.memory_pools[device_id][shape] = tensor
+                # Pre-allocate multiple tensors per shape for concurrent use
+                tensor_pool = deque()
+                for _ in range(4):  # 4 tensors per shape
+                    tensor = torch.zeros(
+                        shape, dtype=torch.float16, device=f"cuda:{device_id}"
+                    ).to(memory_format=torch.channels_last)
+                    tensor_pool.append(tensor)
 
-            logger.info(f"Initialized memory pool for GPU {device_id}")
+                self.memory_pools[device_id][shape] = tensor_pool
+
+            logger.info(f"Initialized memory pool for GPU {device_id} with {len(common_shapes)} shapes")
 
     def get_tensor(self, shape: tuple[int, ...], device_id: int) -> torch.Tensor:
-        """Get pre-allocated tensor or create new one."""
-        if shape in self.memory_pools[device_id]:
-            return self.memory_pools[device_id][shape].clone()
+        """Get pre-allocated tensor or create new one with memory pooling."""
+        with self.pool_locks[device_id]:
+            if shape in self.memory_pools[device_id] and self.memory_pools[device_id][shape]:
+                # Reuse existing tensor from pool
+                tensor = self.memory_pools[device_id][shape].popleft()
+                tensor.zero_()  # Clear previous data
+                return tensor
 
-        return torch.zeros(shape, dtype=torch.float16, device=f"cuda:{device_id}")
+        # Create new tensor if pool is empty
+        return torch.zeros(
+            shape,
+            dtype=torch.float16,
+            device=f"cuda:{device_id}"
+        ).to(memory_format=torch.channels_last)
+
+    def return_tensor(self, tensor: torch.Tensor, device_id: int) -> None:
+        """Return tensor to memory pool for reuse."""
+        shape = tuple(tensor.shape)
+
+        with self.pool_locks[device_id]:
+            if shape in self.memory_pools[device_id] and len(self.memory_pools[device_id][shape]) < 8:
+                # Return to pool if not full (max 8 tensors per shape)
+                self.memory_pools[device_id][shape].append(tensor)
+            # Otherwise let it be garbage collected
 
     def cleanup(self) -> None:
-        """Clean up GPU memory."""
+        """Clean up GPU memory and pools."""
         for device_id in self.device_ids:
             torch.cuda.set_device(device_id)
+
+            # Clear memory pools
+            with self.pool_locks[device_id]:
+                for shape_pool in self.memory_pools[device_id].values():
+                    shape_pool.clear()
+
             torch.cuda.empty_cache()
+            torch.cuda.synchronize(device_id)
 
 
-class TensorRTOptimizer:
+class AdvancedTensorRTOptimizer:
     """TensorRT model optimization for maximum inference performance."""
 
     def __init__(self, config: InferenceConfig):
@@ -563,92 +670,1106 @@ class TensorRTOptimizer:
             return None
 
 
-class DynamicBatcher:
-    """Dynamic batching system for optimal GPU utilization."""
+class EdgeOptimizer:
+    """Edge deployment optimizations for NVIDIA Jetson and Intel NUC."""
+
+    def __init__(self, device_type: str = "jetson"):
+        self.device_type = device_type.lower()
+        self.optimization_config = self._get_edge_optimization_config()
+
+    def _get_edge_optimization_config(self) -> dict[str, Any]:
+        """Get device-specific optimization configuration."""
+        configs = {
+            "jetson": {
+                "use_dla": True,  # Deep Learning Accelerator
+                "dla_core": 0,
+                "max_batch_size": 4,
+                "precision": "int8",
+                "workspace_size_gb": 1,
+                "enable_gpu_fallback": True,
+                "cpu_threads": 2,
+                "memory_optimization": "aggressive",
+            },
+            "nuc": {
+                "use_dla": False,
+                "max_batch_size": 2,
+                "precision": "fp16",
+                "workspace_size_gb": 2,
+                "enable_gpu_fallback": False,
+                "cpu_threads": 4,
+                "memory_optimization": "balanced",
+            },
+            "xavier": {
+                "use_dla": True,
+                "dla_core": 0,
+                "max_batch_size": 8,
+                "precision": "fp16",
+                "workspace_size_gb": 2,
+                "enable_gpu_fallback": True,
+                "cpu_threads": 4,
+                "memory_optimization": "performance",
+            },
+            "orin": {
+                "use_dla": True,
+                "dla_core": 0,
+                "max_batch_size": 16,
+                "precision": "fp16",
+                "workspace_size_gb": 4,
+                "enable_gpu_fallback": True,
+                "cpu_threads": 8,
+                "memory_optimization": "performance",
+            },
+        }
+
+        return configs.get(self.device_type, configs["jetson"])
+
+    def optimize_for_edge(self, config: InferenceConfig) -> InferenceConfig:
+        """Apply edge-specific optimizations to inference config."""
+        edge_config = self.optimization_config
+
+        # Update config for edge deployment
+        config.batch_size = min(config.batch_size, edge_config["max_batch_size"])
+        config.max_batch_size = edge_config["max_batch_size"]
+        config.precision = edge_config["precision"]
+        config.batch_timeout_ms = 5  # Aggressive batching for edge
+
+        # Memory optimization
+        if edge_config["memory_optimization"] == "aggressive":
+            config.memory_fraction = 0.6
+        elif edge_config["memory_optimization"] == "balanced":
+            config.memory_fraction = 0.7
+        else:
+            config.memory_fraction = 0.8
+
+        # Edge-specific settings
+        config.enable_edge_optimization = True
+        config.target_fps = 15 if self.device_type in ["jetson", "nuc"] else 30
+        config.max_latency_ms = 150 if self.device_type == "jetson" else 100
+
+        logger.info(f"Applied {self.device_type} edge optimizations")
+        return config
+
+    def compile_edge_model(self, model_path: Path, output_path: Path, config: InferenceConfig) -> Path:
+        """Compile model specifically for edge deployment."""
+        edge_config = self.optimization_config
+
+        if self.device_type.startswith("jetson") and TRT_AVAILABLE:
+            return self._compile_jetson_model(model_path, output_path, config)
+        elif self.device_type == "nuc":
+            return self._compile_nuc_model(model_path, output_path, config)
+        else:
+            logger.warning(f"No specific optimization for {self.device_type}")
+            return model_path
+
+    def _compile_jetson_model(self, model_path: Path, output_path: Path, config: InferenceConfig) -> Path:
+        """Compile model optimized for NVIDIA Jetson devices."""
+        try:
+
+            logger.info(f"Compiling model for Jetson {self.device_type}...")
+
+            # Load and export model to ONNX first
+            model = YOLO(str(model_path))
+            onnx_path = output_path.with_suffix(".onnx")
+
+            model.export(
+                format="onnx",
+                imgsz=config.input_size,
+                dynamic=False,  # Static shapes for DLA
+                batch_size=1,
+                opset=16,
+                half=config.precision == "fp16",
+                simplify=True,
+            )
+
+            # Build TensorRT engine with DLA support
+            engine_path = output_path.with_suffix(".trt")
+            self._build_jetson_tensorrt_engine(onnx_path, engine_path, config)
+
+            return engine_path
+
+        except Exception as e:
+            logger.error(f"Jetson model compilation failed: {e}")
+            return model_path
+
+    def _build_jetson_tensorrt_engine(self, onnx_path: Path, engine_path: Path, config: InferenceConfig) -> None:
+        """Build TensorRT engine optimized for Jetson with DLA support."""
+        import tensorrt as trt
+
+        # Initialize TensorRT with DLA support
+        trt_logger = trt.Logger(trt.Logger.INFO)
+        builder = trt.Builder(trt_logger)
+        network = builder.create_network(
+            1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+        )
+        parser = trt.OnnxParser(network, trt_logger)
+
+        # Parse ONNX model
+        with open(onnx_path, "rb") as model:
+            if not parser.parse(model.read()):
+                raise RuntimeError("Failed to parse ONNX model for Jetson")
+
+        # Configure for Jetson with DLA
+        config_trt = builder.create_builder_config()
+        edge_config = self.optimization_config
+
+        # Set workspace size (smaller for edge devices)
+        workspace_size = edge_config["workspace_size_gb"] << 30
+        config_trt.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_size)
+
+        # Enable DLA if supported
+        if edge_config["use_dla"] and builder.num_DLA_cores > 0:
+            config_trt.set_flag(trt.BuilderFlag.GPU_FALLBACK)
+            config_trt.DLA_core = edge_config["dla_core"]
+            logger.info(f"Enabled DLA core {edge_config['dla_core']}")
+
+        # Set precision
+        if config.precision == "fp16":
+            config_trt.set_flag(trt.BuilderFlag.FP16)
+        elif config.precision == "int8":
+            config_trt.set_flag(trt.BuilderFlag.INT8)
+            config_trt.set_flag(trt.BuilderFlag.FP16)  # Fallback
+
+        # Static shapes for DLA compatibility
+        profile = builder.create_optimization_profile()
+        input_name = network.get_input(0).name
+        static_shape = (1, 3, *config.input_size)
+        profile.set_shape(input_name, static_shape, static_shape, static_shape)
+        config_trt.add_optimization_profile(profile)
+
+        # Build engine
+        serialized_engine = builder.build_serialized_network(network, config_trt)
+        if serialized_engine is None:
+            raise RuntimeError("Failed to build Jetson TensorRT engine")
+
+        # Save engine
+        with open(engine_path, "wb") as f:
+            f.write(serialized_engine)
+
+        logger.info(f"Jetson-optimized TensorRT engine saved: {engine_path}")
+
+    def _compile_nuc_model(self, model_path: Path, output_path: Path, config: InferenceConfig) -> Path:
+        """Compile model optimized for Intel NUC with OpenVINO."""
+        try:
+            # Try OpenVINO optimization
+            return self._compile_openvino_model(model_path, output_path, config)
+        except ImportError:
+            logger.warning("OpenVINO not available, using ONNX Runtime")
+            return self._compile_onnx_optimized(model_path, output_path, config)
+
+    def _compile_openvino_model(self, model_path: Path, output_path: Path, config: InferenceConfig) -> Path:
+        """Compile model with OpenVINO for Intel hardware."""
+        try:
+            import openvino as ov
+
+            logger.info("Compiling model with OpenVINO...")
+
+            # Export to ONNX first
+            model = YOLO(str(model_path))
+            onnx_path = output_path.with_suffix(".onnx")
+
+            model.export(
+                format="onnx",
+                imgsz=config.input_size,
+                dynamic=False,
+                batch_size=config.batch_size,
+                opset=16,
+                half=False,  # OpenVINO handles precision optimization
+            )
+
+            # Convert to OpenVINO IR
+            core = ov.Core()
+            ov_model = core.read_model(onnx_path)
+
+            # Apply optimizations
+            if config.precision == "fp16":
+                from openvino.tools import mo
+                ov_model = mo.compress_to_fp16(ov_model)
+
+            # Save optimized model
+            ir_path = output_path.with_suffix(".xml")
+            ov.save_model(ov_model, ir_path)
+
+            logger.info(f"OpenVINO model saved: {ir_path}")
+            return ir_path
+
+        except ImportError:
+            raise ImportError("OpenVINO not available")
+        except Exception as e:
+            logger.error(f"OpenVINO compilation failed: {e}")
+            raise
+
+    def _compile_onnx_optimized(self, model_path: Path, output_path: Path, config: InferenceConfig) -> Path:
+        """Compile optimized ONNX model for CPU inference."""
+        logger.info("Creating CPU-optimized ONNX model...")
+
+        model = YOLO(str(model_path))
+        onnx_path = output_path.with_suffix(".onnx")
+
+        # Export with CPU optimizations
+        model.export(
+            format="onnx",
+            imgsz=config.input_size,
+            dynamic=True,
+            batch_size=config.batch_size,
+            opset=17,
+            half=False,  # CPU doesn't benefit from FP16
+            simplify=True,
+        )
+
+        return onnx_path
+
+    def get_edge_inference_config(self) -> dict[str, Any]:
+        """Get optimal inference configuration for edge device."""
+        edge_config = self.optimization_config
+
+        return {
+            "device_type": self.device_type,
+            "max_batch_size": edge_config["max_batch_size"],
+            "precision": edge_config["precision"],
+            "use_dla": edge_config.get("use_dla", False),
+            "memory_optimization": edge_config["memory_optimization"],
+            "recommended_input_size": (640, 640) if self.device_type == "jetson" else (416, 416),
+            "target_fps": 15 if self.device_type in ["jetson", "nuc"] else 30,
+        }
+
+
+class CPUFallbackEngine:
+    """CPU fallback inference engine using ONNX Runtime for high availability."""
 
     def __init__(self, config: InferenceConfig):
         self.config = config
-        self.batch_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
-            maxsize=config.max_batch_size * 2
+        self.onnx_session = None
+        self.model_input_name = None
+        self.model_output_names = None
+        self.inference_times: deque[float] = deque(maxlen=100)
+
+    def initialize(self, model_path: Path) -> None:
+        """Initialize CPU fallback engine with ONNX Runtime."""
+        if not ONNX_AVAILABLE:
+            raise RuntimeError("ONNX Runtime not available for CPU fallback")
+
+        try:
+            import onnxruntime as ort
+
+            # Export YOLO11 to ONNX if needed
+            onnx_path = self._ensure_onnx_model(model_path)
+
+            # Configure ONNX Runtime for CPU optimization
+            session_options = ort.SessionOptions()
+            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            session_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+            session_options.inter_op_num_threads = 4
+            session_options.intra_op_num_threads = 8
+
+            # Enable CPU-specific optimizations
+            providers = [
+                ('CPUExecutionProvider', {
+                    'use_arena': True,
+                    'arena_extend_strategy': 'kSameAsRequested',
+                })
+            ]
+
+            # Create inference session
+            self.onnx_session = ort.InferenceSession(
+                str(onnx_path),
+                session_options,
+                providers=providers
+            )
+
+            # Get input/output metadata
+            self.model_input_name = self.onnx_session.get_inputs()[0].name
+            self.model_output_names = [output.name for output in self.onnx_session.get_outputs()]
+
+            logger.info("CPU fallback engine initialized with ONNX Runtime")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize CPU fallback engine: {e}")
+            raise
+
+    def _ensure_onnx_model(self, model_path: Path) -> Path:
+        """Ensure ONNX model exists, export if needed."""
+        onnx_path = model_path.with_suffix('.onnx')
+
+        if not onnx_path.exists():
+            logger.info("Exporting YOLO11 model to ONNX for CPU fallback...")
+
+            model = YOLO(str(model_path))
+            model.export(
+                format='onnx',
+                imgsz=self.config.input_size,
+                dynamic=True,
+                batch_size=1,
+                opset=17,
+                half=False,  # Use FP32 for CPU
+                simplify=True,
+            )
+
+        return onnx_path
+
+    def predict(self, frame: np.ndarray, frame_id: str, camera_id: str = "unknown") -> DetectionResult:
+        """Run CPU inference using ONNX Runtime."""
+        if not self.onnx_session:
+            raise RuntimeError("CPU fallback engine not initialized")
+
+        start_time = time.time()
+
+        # Preprocess frame
+        preprocess_start = time.time()
+        input_tensor = self._preprocess_frame_cpu(frame)
+        preprocess_time = (time.time() - preprocess_start) * 1000
+
+        # Run inference
+        inference_start = time.time()
+        try:
+            outputs = self.onnx_session.run(
+                self.model_output_names,
+                {self.model_input_name: input_tensor}
+            )
+
+            inference_time = (time.time() - inference_start) * 1000
+
+            # Post-process results
+            postprocess_start = time.time()
+            result = self._postprocess_cpu_predictions(
+                outputs[0], frame_id, camera_id, inference_time, preprocess_time, start_time
+            )
+            postprocess_time = (time.time() - postprocess_start) * 1000
+
+            result.postprocessing_time_ms = postprocess_time
+            result.total_time_ms = (time.time() - start_time) * 1000
+
+            # Track performance
+            self.inference_times.append(result.total_time_ms)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"CPU fallback inference failed: {e}")
+            raise
+
+    def _preprocess_frame_cpu(self, frame: np.ndarray) -> np.ndarray:
+        """Preprocess frame for CPU inference."""
+        h, w = frame.shape[:2]
+        target_h, target_w = self.config.input_size
+
+        # Resize with letterboxing
+        scale = min(target_h / h, target_w / w)
+        new_h, new_w = int(h * scale), int(w * scale)
+
+        if scale != 1:
+            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        # Create padded canvas
+        pad_h = (target_h - new_h) // 2
+        pad_w = (target_w - new_w) // 2
+
+        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = frame
+
+        # Convert to NCHW format and normalize
+        input_tensor = padded.transpose(2, 0, 1).astype(np.float32)
+        input_tensor = input_tensor / 255.0
+        input_tensor = np.expand_dims(input_tensor, axis=0)
+
+        return input_tensor
+
+    def _postprocess_cpu_predictions(
+        self,
+        predictions: np.ndarray,
+        frame_id: str,
+        camera_id: str,
+        inference_time: float,
+        preprocess_time: float,
+        start_time: float
+    ) -> DetectionResult:
+        """Post-process CPU inference results."""
+        # Apply NMS and confidence filtering
+        filtered_predictions = self._apply_cpu_nms(predictions)
+
+        # Extract detections
+        boxes, scores, classes = self._extract_cpu_detections(filtered_predictions)
+
+        # Vehicle class mapping
+        coco_to_vehicle = {1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+        class_names = [coco_to_vehicle.get(int(cls), f"class_{cls}") for cls in classes]
+
+        # Calculate metrics
+        detection_count = len(boxes)
+        avg_confidence = float(np.mean(scores)) if len(scores) > 0 else 0.0
+
+        return DetectionResult(
+            boxes=boxes,
+            scores=scores,
+            classes=classes,
+            class_names=class_names,
+            frame_id=frame_id,
+            camera_id=camera_id,
+            timestamp=time.time(),
+            inference_time_ms=inference_time,
+            preprocessing_time_ms=preprocess_time,
+            postprocessing_time_ms=0.0,  # Updated later
+            total_time_ms=0.0,  # Updated later
+            detection_count=detection_count,
+            avg_confidence=avg_confidence,
+            gpu_memory_used_mb=0.0,  # CPU fallback
         )
+
+    def _apply_cpu_nms(self, predictions: np.ndarray) -> np.ndarray:
+        """Apply NMS using CPU operations."""
+        if len(predictions.shape) == 3:
+            predictions = predictions[0]  # Remove batch dimension
+
+        # Filter by confidence
+        conf_mask = predictions[:, 4] >= self.config.conf_threshold
+        filtered_preds = predictions[conf_mask]
+
+        if len(filtered_preds) == 0:
+            return np.array([]).reshape(0, predictions.shape[1])
+
+        # Extract components
+        boxes = filtered_preds[:, :4]
+        scores = filtered_preds[:, 4]
+        class_probs = filtered_preds[:, 5:]
+
+        # Get class predictions
+        class_scores = np.max(class_probs, axis=1)
+        class_indices = np.argmax(class_probs, axis=1)
+        final_scores = scores * class_scores
+
+        # Convert to corner format for NMS
+        x_center, y_center, width, height = boxes.T
+        x1 = x_center - width / 2
+        y1 = y_center - height / 2
+        x2 = x_center + width / 2
+        y2 = y_center + height / 2
+        boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+        # Simple CPU NMS implementation
+        keep_indices = self._cpu_nms(boxes_xyxy, final_scores, self.config.iou_threshold)
+
+        if len(keep_indices) > self.config.max_detections:
+            keep_indices = keep_indices[:self.config.max_detections]
+
+        return filtered_preds[keep_indices]
+
+    def _cpu_nms(self, boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
+        """CPU-based Non-Maximum Suppression."""
+        if len(boxes) == 0:
+            return np.array([], dtype=np.int32)
+
+        # Sort by scores (highest first)
+        indices = np.argsort(scores)[::-1]
+
+        keep = []
+        while len(indices) > 0:
+            current = indices[0]
+            keep.append(current)
+
+            if len(indices) == 1:
+                break
+
+            # Calculate IoU with remaining boxes
+            current_box = boxes[current]
+            remaining_boxes = boxes[indices[1:]]
+
+            # Calculate intersection
+            x1 = np.maximum(current_box[0], remaining_boxes[:, 0])
+            y1 = np.maximum(current_box[1], remaining_boxes[:, 1])
+            x2 = np.minimum(current_box[2], remaining_boxes[:, 2])
+            y2 = np.minimum(current_box[3], remaining_boxes[:, 3])
+
+            intersection = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+
+            # Calculate areas
+            current_area = (current_box[2] - current_box[0]) * (current_box[3] - current_box[1])
+            remaining_areas = ((remaining_boxes[:, 2] - remaining_boxes[:, 0]) *
+                             (remaining_boxes[:, 3] - remaining_boxes[:, 1]))
+
+            # Calculate IoU
+            union = current_area + remaining_areas - intersection
+            iou = intersection / (union + 1e-8)
+
+            # Keep boxes with IoU below threshold
+            indices = indices[1:][iou <= iou_threshold]
+
+        return np.array(keep, dtype=np.int32)
+
+    def _extract_cpu_detections(self, predictions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Extract detections from CPU predictions."""
+        if len(predictions) == 0:
+            return np.array([]).reshape(0, 4), np.array([]), np.array([])
+
+        # Extract components
+        boxes_xywh = predictions[:, :4]
+        confidences = predictions[:, 4]
+        class_probs = predictions[:, 5:]
+
+        # Get class predictions
+        class_scores = np.max(class_probs, axis=1)
+        class_indices = np.argmax(class_probs, axis=1)
+        final_scores = confidences * class_scores
+
+        # Convert to corner format
+        x_center, y_center, width, height = boxes_xywh.T
+        x1 = x_center - width / 2
+        y1 = y_center - height / 2
+        x2 = x_center + width / 2
+        y2 = y_center + height / 2
+        boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+        # Filter for vehicle classes
+        vehicle_classes = [1, 2, 3, 5, 7]
+        vehicle_mask = np.isin(class_indices, vehicle_classes)
+
+        if not np.any(vehicle_mask):
+            return np.array([]).reshape(0, 4), np.array([]), np.array([])
+
+        # Apply vehicle filter and sort by confidence
+        filtered_boxes = boxes_xyxy[vehicle_mask]
+        filtered_scores = final_scores[vehicle_mask]
+        filtered_classes = class_indices[vehicle_mask]
+
+        sort_indices = np.argsort(filtered_scores)[::-1]
+
+        return (
+            filtered_boxes[sort_indices],
+            filtered_scores[sort_indices],
+            filtered_classes[sort_indices]
+        )
+
+    def get_performance_stats(self) -> dict[str, float]:
+        """Get CPU fallback performance statistics."""
+        if not self.inference_times:
+            return {}
+
+        times = list(self.inference_times)
+        return {
+            "avg_latency_ms": float(np.mean(times)),
+            "p95_latency_ms": float(np.percentile(times, 95)),
+            "throughput_fps": 1000.0 / float(np.mean(times)) if times else 0.0,
+        }
+
+
+class PerformanceBenchmarkSuite:
+    """Comprehensive performance benchmarking and monitoring system."""
+
+    def __init__(self, inference_engine: "OptimizedInferenceEngine"):
+        self.inference_engine = inference_engine
+        self.benchmark_results: dict[str, Any] = {}
+        self.benchmark_history: list[dict[str, Any]] = []
+
+    async def run_comprehensive_benchmark(
+        self,
+        test_images: list[np.ndarray] | None = None,
+        duration_seconds: int = 60
+    ) -> dict[str, Any]:
+        """Run comprehensive performance benchmark."""
+        logger.info(f"Starting comprehensive benchmark for {duration_seconds}s...")
+
+        if test_images is None:
+            test_images = self._generate_test_images()
+
+        results = {
+            "timestamp": time.time(),
+            "duration_seconds": duration_seconds,
+            "test_config": {
+                "batch_sizes": [1, 4, 8, 16],
+                "input_size": self.inference_engine.config.input_size,
+                "precision": self.inference_engine.config.precision,
+                "backend": self.inference_engine.config.backend.value,
+            },
+            "benchmarks": {}
+        }
+
+        # Single frame latency test
+        results["benchmarks"]["single_frame"] = await self._benchmark_single_frame(test_images[0])
+
+        # Batch throughput test
+        results["benchmarks"]["batch_throughput"] = await self._benchmark_batch_throughput(test_images)
+
+        # Sustained load test
+        results["benchmarks"]["sustained_load"] = await self._benchmark_sustained_load(
+            test_images, duration_seconds
+        )
+
+        # Memory usage test
+        results["benchmarks"]["memory_usage"] = self._benchmark_memory_usage()
+
+        # GPU utilization test
+        results["benchmarks"]["gpu_utilization"] = self._benchmark_gpu_utilization()
+
+        # Store results
+        self.benchmark_results = results
+        self.benchmark_history.append(results)
+
+        # Keep only last 10 benchmark runs
+        if len(self.benchmark_history) > 10:
+            self.benchmark_history = self.benchmark_history[-10:]
+
+        logger.info("Comprehensive benchmark completed")
+        return results
+
+    def _generate_test_images(self, count: int = 32) -> list[np.ndarray]:
+        """Generate synthetic test images for benchmarking."""
+        images = []
+        h, w = self.inference_engine.config.input_size
+
+        for i in range(count):
+            # Create realistic traffic scene patterns
+            base_color = np.random.randint(80, 200, 3)
+            img = np.full((h, w, 3), base_color, dtype=np.uint8)
+
+            # Add some noise and patterns
+            noise = np.random.randint(-30, 30, (h, w, 3), dtype=np.int16)
+            img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+
+            # Add some geometric shapes (simulating vehicles)
+            for _ in range(np.random.randint(1, 6)):
+                x1, y1 = np.random.randint(0, w-100), np.random.randint(0, h-60)
+                x2, y2 = x1 + np.random.randint(60, 120), y1 + np.random.randint(40, 80)
+                color = np.random.randint(50, 255, 3)
+                cv2.rectangle(img, (x1, y1), (x2, y2), color.tolist(), -1)
+
+            images.append(img)
+
+        return images
+
+    async def _benchmark_single_frame(self, test_image: np.ndarray) -> dict[str, float]:
+        """Benchmark single frame inference latency."""
+        latencies = []
+
+        # Warmup
+        for _ in range(10):
+            await self.inference_engine.predict_single(test_image, "warmup", "benchmark")
+
+        # Measure latency
+        for i in range(100):
+            start_time = time.time()
+            result = await self.inference_engine.predict_single(test_image, f"bench_{i}", "benchmark")
+            latency = (time.time() - start_time) * 1000
+            latencies.append(latency)
+
+        return {
+            "avg_latency_ms": float(np.mean(latencies)),
+            "p50_latency_ms": float(np.percentile(latencies, 50)),
+            "p95_latency_ms": float(np.percentile(latencies, 95)),
+            "p99_latency_ms": float(np.percentile(latencies, 99)),
+            "min_latency_ms": float(np.min(latencies)),
+            "max_latency_ms": float(np.max(latencies)),
+        }
+
+    async def _benchmark_batch_throughput(self, test_images: list[np.ndarray]) -> dict[str, Any]:
+        """Benchmark batch inference throughput."""
+        results = {}
+
+        for batch_size in [1, 4, 8, 16]:
+            if batch_size > len(test_images):
+                continue
+
+            batch_images = test_images[:batch_size]
+            batch_ids = [f"batch_{i}" for i in range(batch_size)]
+
+            throughputs = []
+            latencies = []
+
+            # Warmup
+            for _ in range(5):
+                await self.inference_engine.predict_batch(batch_images, batch_ids)
+
+            # Measure throughput
+            for i in range(20):
+                start_time = time.time()
+                batch_results = await self.inference_engine.predict_batch(batch_images, batch_ids)
+                total_time = time.time() - start_time
+
+                throughput = len(batch_results) / total_time
+                avg_latency = (total_time / len(batch_results)) * 1000
+
+                throughputs.append(throughput)
+                latencies.append(avg_latency)
+
+            results[f"batch_size_{batch_size}"] = {
+                "avg_throughput_fps": float(np.mean(throughputs)),
+                "p95_throughput_fps": float(np.percentile(throughputs, 95)),
+                "avg_latency_per_frame_ms": float(np.mean(latencies)),
+                "efficiency_ratio": float(np.mean(throughputs)) / batch_size,
+            }
+
+        return results
+
+    async def _benchmark_sustained_load(self, test_images: list[np.ndarray], duration_seconds: int) -> dict[str, Any]:
+        """Benchmark sustained load performance."""
+        start_time = time.time()
+        end_time = start_time + duration_seconds
+
+        total_frames = 0
+        total_batches = 0
+        latencies = []
+        errors = 0
+
+        image_idx = 0
+        batch_size = min(8, len(test_images))
+
+        while time.time() < end_time:
+            try:
+                # Select batch
+                batch_images = []
+                batch_ids = []
+
+                for i in range(batch_size):
+                    batch_images.append(test_images[image_idx])
+                    batch_ids.append(f"sustained_{total_frames + i}")
+                    image_idx = (image_idx + 1) % len(test_images)
+
+                # Process batch
+                batch_start = time.time()
+                results = await self.inference_engine.predict_batch(batch_images, batch_ids)
+                batch_time = (time.time() - batch_start) * 1000
+
+                total_frames += len(results)
+                total_batches += 1
+                latencies.append(batch_time / len(results))
+
+                # Small delay to prevent overwhelming
+                await asyncio.sleep(0.001)
+
+            except Exception as e:
+                errors += 1
+                logger.warning(f"Sustained load error: {e}")
+                await asyncio.sleep(0.01)
+
+        actual_duration = time.time() - start_time
+
+        return {
+            "total_frames_processed": total_frames,
+            "total_batches_processed": total_batches,
+            "actual_duration_seconds": actual_duration,
+            "avg_throughput_fps": total_frames / actual_duration,
+            "avg_latency_per_frame_ms": float(np.mean(latencies)) if latencies else 0,
+            "p95_latency_per_frame_ms": float(np.percentile(latencies, 95)) if latencies else 0,
+            "error_count": errors,
+            "error_rate": errors / total_batches if total_batches > 0 else 0,
+        }
+
+    def _benchmark_memory_usage(self) -> dict[str, float]:
+        """Benchmark memory usage patterns."""
+        if not self.inference_engine.config.device_ids:
+            return {"cpu_only": True}
+
+        memory_stats = {}
+
+        for device_id in self.inference_engine.config.device_ids:
+            try:
+                allocated = torch.cuda.memory_allocated(device_id) / 1024 / 1024
+                cached = torch.cuda.memory_reserved(device_id) / 1024 / 1024
+                total = torch.cuda.get_device_properties(device_id).total_memory / 1024 / 1024
+
+                memory_stats[f"gpu_{device_id}"] = {
+                    "allocated_mb": float(allocated),
+                    "cached_mb": float(cached),
+                    "total_mb": float(total),
+                    "utilization_percent": float(allocated / total * 100),
+                }
+            except Exception as e:
+                memory_stats[f"gpu_{device_id}_error"] = str(e)
+
+        return memory_stats
+
+    def _benchmark_gpu_utilization(self) -> dict[str, float]:
+        """Benchmark GPU utilization."""
+        return self.inference_engine._get_gpu_memory_usage()
+
+    def get_performance_summary(self) -> dict[str, Any]:
+        """Get summary of recent performance benchmarks."""
+        if not self.benchmark_history:
+            return {"no_benchmarks": True}
+
+        recent = self.benchmark_history[-1]
+
+        return {
+            "last_benchmark_time": recent["timestamp"],
+            "single_frame_p95_ms": recent["benchmarks"]["single_frame"].get("p95_latency_ms", 0),
+            "sustained_throughput_fps": recent["benchmarks"]["sustained_load"].get("avg_throughput_fps", 0),
+            "memory_utilization_percent": self._calculate_avg_memory_utilization(recent),
+            "meets_requirements": self._check_performance_requirements(recent),
+        }
+
+    def _calculate_avg_memory_utilization(self, benchmark_result: dict) -> float:
+        """Calculate average memory utilization across GPUs."""
+        memory_data = benchmark_result["benchmarks"].get("memory_usage", {})
+
+        utilizations = []
+        for key, value in memory_data.items():
+            if isinstance(value, dict) and "utilization_percent" in value:
+                utilizations.append(value["utilization_percent"])
+
+        return float(np.mean(utilizations)) if utilizations else 0.0
+
+    def _check_performance_requirements(self, benchmark_result: dict) -> dict[str, bool]:
+        """Check if performance meets requirements."""
+        single_frame = benchmark_result["benchmarks"].get("single_frame", {})
+        sustained = benchmark_result["benchmarks"].get("sustained_load", {})
+
+        return {
+            "sub_100ms_latency": single_frame.get("p95_latency_ms", 999) < 100,
+            "30fps_sustained": sustained.get("avg_throughput_fps", 0) >= 30,
+            "low_error_rate": sustained.get("error_rate", 1.0) < 0.01,
+            "memory_efficient": self._calculate_avg_memory_utilization(benchmark_result) < 80,
+        }
+
+
+# Legacy alias for backward compatibility
+TensorRTOptimizer = AdvancedTensorRTOptimizer
+
+
+class AdvancedDynamicBatcher:
+    """Advanced dynamic batching system with adaptive timeout and priority queues."""
+
+    def __init__(self, config: InferenceConfig):
+        self.config = config
+
+        # Multi-priority queues for different latency requirements
+        self.urgent_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=config.max_batch_size)
+        self.normal_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=config.max_batch_size * 4)
+        self.batch_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=config.max_batch_size * 8)
+
         self.result_futures: dict[str, asyncio.Future[Any]] = {}
         self.batch_processor: asyncio.Task[None] | None = None
+        self.running = False
 
-        # Batching metrics
+        # Advanced batching metrics
         self.total_requests: int = 0
         self.batched_requests: int = 0
+        self.urgent_requests: int = 0
         self.avg_batch_size: float = 0
+        self.adaptive_timeout: float = config.batch_timeout_ms / 1000.0
+        self.timeout_history: deque[float] = deque(maxlen=100)
+        self.latency_history: deque[float] = deque(maxlen=1000)
+
+        # Performance tracking
+        self.last_batch_time: float = time.time()
+        self.batch_intervals: deque[float] = deque(maxlen=50)
 
     async def start(self) -> None:
-        """Start the dynamic batching processor."""
-        self.batch_processor = asyncio.create_task(self._process_batches())
+        """Start the advanced dynamic batching processor."""
+        self.running = True
+        self.batch_processor = asyncio.create_task(self._process_batches_advanced())
+
+        # Start adaptive timeout adjustment task
+        asyncio.create_task(self._adjust_adaptive_timeout())
 
     async def stop(self) -> None:
-        """Stop the dynamic batching processor."""
+        """Stop the advanced dynamic batching processor."""
+        self.running = False
         if self.batch_processor:
             self.batch_processor.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self.batch_processor
 
-    async def predict(self, frame: np.ndarray, frame_id: str) -> DetectionResult:
-        """Add frame to batch queue and return prediction."""
+    async def predict(self, frame: np.ndarray, frame_id: str, camera_id: str = "unknown", priority: str = "normal") -> DetectionResult:
+        """Add frame to appropriate priority queue and return prediction."""
         future = asyncio.Future()
+        timestamp = time.time()
 
         request = {
             "frame": frame,
             "frame_id": frame_id,
+            "camera_id": camera_id,
+            "priority": priority,
             "future": future,
-            "timestamp": time.time(),
+            "timestamp": timestamp,
+            "queue_time": timestamp,
         }
 
-        await self.batch_queue.put(request)
-        self.total_requests += 1
+        # Route to appropriate queue based on priority
+        try:
+            if priority == "urgent":
+                await self.urgent_queue.put(request)
+                self.urgent_requests += 1
+            elif priority == "normal":
+                await self.normal_queue.put(request)
+            else:
+                await self.batch_queue.put(request)
 
-        # Wait for result
-        return await future
+            self.total_requests += 1
+        except asyncio.QueueFull:
+            # Graceful degradation - use normal queue if preferred queue is full
+            await self.normal_queue.put(request)
+            self.total_requests += 1
 
-    async def _process_batches(self) -> None:
-        """Process batches continuously."""
-        while True:
+        # Wait for result with timeout
+        try:
+            result = await asyncio.wait_for(future, timeout=5.0)  # 5 second timeout
+
+            # Track latency
+            latency = time.time() - timestamp
+            self.latency_history.append(latency)
+
+            return result
+        except TimeoutError:
+            logger.error(f"Prediction timeout for frame {frame_id}")
+            raise RuntimeError(f"Prediction timeout for frame {frame_id}")
+
+    async def _process_batches_advanced(self) -> None:
+        """Process batches with advanced scheduling and priority handling."""
+        while self.running:
             try:
-                batch = await self._collect_batch()
+                batch = await self._collect_priority_batch()
                 if batch:
+                    batch_start = time.time()
                     await self._process_batch(batch)
+
+                    # Track batch processing intervals
+                    batch_time = time.time() - batch_start
+                    interval = batch_start - self.last_batch_time
+                    self.batch_intervals.append(interval)
+                    self.last_batch_time = batch_start
+
+                    # Update adaptive timeout based on performance
+                    self.timeout_history.append(batch_time)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Batch processing error: {e}")
+                logger.error(f"Advanced batch processing error: {e}")
+                # Small delay to prevent tight error loops
+                await asyncio.sleep(0.001)
 
-    async def _collect_batch(self) -> list[dict[str, Any]]:
-        """Collect a batch of requests with timeout."""
+    async def _collect_priority_batch(self) -> list[dict[str, Any]]:
+        """Collect batch with priority-aware scheduling and adaptive timeout."""
         batch = []
-        deadline = time.time() + (self.config.batch_timeout_ms / 1000.0)
+        deadline = time.time() + self.adaptive_timeout
 
-        # Get first request (blocking)
-        try:
-            first_request = await asyncio.wait_for(
-                self.batch_queue.get(), timeout=self.config.batch_timeout_ms / 1000.0
-            )
-            batch.append(first_request)
-        except TimeoutError:
-            return []
-
-        # Collect additional requests until timeout or batch full
-        while len(batch) < self.config.max_batch_size and time.time() < deadline:
+        # First, try to get urgent requests (non-blocking)
+        while len(batch) < self.config.max_batch_size // 4:  # Reserve 25% for urgent
             try:
-                request = await asyncio.wait_for(
-                    self.batch_queue.get(), timeout=max(0.001, deadline - time.time())
-                )
-                batch.append(request)
-            except TimeoutError:
+                urgent_request = self.urgent_queue.get_nowait()
+                batch.append(urgent_request)
+            except asyncio.QueueEmpty:
                 break
+
+        # Then fill with normal and batch requests
+        for queue in [self.normal_queue, self.batch_queue]:
+            while len(batch) < self.config.max_batch_size and time.time() < deadline:
+                try:
+                    remaining_time = max(0.001, deadline - time.time())
+                    request = await asyncio.wait_for(queue.get(), timeout=remaining_time)
+                    batch.append(request)
+
+                    # If we got a request, try to get more immediately
+                    if len(batch) == 1:
+                        deadline = time.time() + self.adaptive_timeout
+
+                except TimeoutError:
+                    break
+
+            if batch:  # If we have requests, don't wait for other queues
+                break
+
+        # Sort batch by priority and timestamp
+        if batch:
+            batch.sort(key=lambda x: (x.get('priority', 'normal') != 'urgent', x['timestamp']))
 
         return batch
 
     async def _process_batch(self, batch: list[dict[str, Any]]) -> None:
-        """Process a batch of requests."""
-        # TODO: This will be implemented by the InferenceEngine
-        pass
+        """Process a batch of requests with performance tracking."""
+        if not batch:
+            return
+
+        batch_size = len(batch)
+        self.batched_requests += batch_size
+
+        # Update running average batch size
+        alpha = 0.1  # Exponential moving average factor
+        self.avg_batch_size = (1 - alpha) * self.avg_batch_size + alpha * batch_size
+
+        # Extract frames and metadata
+        frames = [req['frame'] for req in batch]
+        frame_ids = [req['frame_id'] for req in batch]
+        camera_ids = [req.get('camera_id', 'unknown') for req in batch]
+
+        try:
+            # This will be called by the InferenceEngine
+            logger.debug(f"Processing batch of {batch_size} frames")
+
+            # For now, create mock results - this will be replaced by actual inference
+            for i, req in enumerate(batch):
+                if not req['future'].done():
+                    # Mock result - replace with actual inference results
+                    mock_result = DetectionResult(
+                        boxes=np.array([]).reshape(0, 4),
+                        scores=np.array([]),
+                        classes=np.array([], dtype=np.int32),
+                        class_names=[],
+                        frame_id=req['frame_id'],
+                        camera_id=req.get('camera_id', 'unknown'),
+                        timestamp=time.time(),
+                        inference_time_ms=10.0,
+                        preprocessing_time_ms=2.0,
+                        postprocessing_time_ms=1.0,
+                        total_time_ms=13.0,
+                        detection_count=0,
+                        avg_confidence=0.0,
+                        gpu_memory_used_mb=100.0,
+                    )
+                    req['future'].set_result(mock_result)
+
+        except Exception as e:
+            logger.error(f"Batch processing failed: {e}")
+            # Set exceptions for all futures in the batch
+            for req in batch:
+                if not req['future'].done():
+                    req['future'].set_exception(e)
+
+    async def _adjust_adaptive_timeout(self) -> None:
+        """Continuously adjust timeout based on system performance."""
+        while self.running:
+            await asyncio.sleep(1.0)  # Adjust every second
+
+            if len(self.timeout_history) < 10:
+                continue
+
+            # Calculate recent performance metrics
+            recent_times = list(self.timeout_history)[-10:]
+            avg_batch_time = sum(recent_times) / len(recent_times)
+
+            # Adjust timeout based on system load and performance
+            if len(self.latency_history) > 50:
+                recent_latencies = list(self.latency_history)[-50:]
+                p95_latency = np.percentile(recent_latencies, 95)
+
+                # If P95 latency is high, reduce timeout to create smaller batches
+                if p95_latency > 0.08:  # 80ms
+                    self.adaptive_timeout = max(0.002, self.adaptive_timeout * 0.9)
+                elif p95_latency < 0.03:  # 30ms
+                    self.adaptive_timeout = min(0.02, self.adaptive_timeout * 1.1)
+
+            # Ensure timeout stays within reasonable bounds
+            min_timeout = 0.001  # 1ms
+            max_timeout = self.config.batch_timeout_ms / 1000.0
+            self.adaptive_timeout = max(min_timeout, min(max_timeout, self.adaptive_timeout))
+
+    def get_performance_stats(self) -> dict[str, Any]:
+        """Get detailed batching performance statistics."""
+        return {
+            "total_requests": self.total_requests,
+            "batched_requests": self.batched_requests,
+            "urgent_requests": self.urgent_requests,
+            "avg_batch_size": self.avg_batch_size,
+            "adaptive_timeout_ms": self.adaptive_timeout * 1000,
+            "queue_sizes": {
+                "urgent": self.urgent_queue.qsize(),
+                "normal": self.normal_queue.qsize(),
+                "batch": self.batch_queue.qsize(),
+            },
+            "recent_latency_p95_ms": np.percentile(list(self.latency_history)[-100:], 95) * 1000 if self.latency_history else 0,
+            "batch_intervals_avg_ms": np.mean(list(self.batch_intervals)) * 1000 if self.batch_intervals else 0,
+        }
+
+
+# Legacy alias
+DynamicBatcher = AdvancedDynamicBatcher
 
 
 class OptimizedInferenceEngine:
@@ -660,13 +1781,19 @@ class OptimizedInferenceEngine:
         self.current_device: int = 0
 
         # Performance components
-        self.memory_manager = GPUMemoryManager(
-            config.device_ids, config.memory_fraction
-        )
-        self.batcher = DynamicBatcher(config)
+        if config.device_ids:
+            self.memory_manager = GPUMemoryManager(
+                config.device_ids, config.memory_fraction
+            )
+            self.stream_manager = CUDAStreamManager(config.device_ids)
+        else:
+            self.memory_manager = None
+            self.stream_manager = None
+
+        self.batcher = AdvancedDynamicBatcher(config)
 
         if config.backend == OptimizationBackend.TENSORRT:
-            self.optimizer = TensorRTOptimizer(config)
+            self.optimizer = AdvancedTensorRTOptimizer(config)
 
         # Performance tracking
         self.inference_times: list[float] = []
@@ -758,6 +1885,8 @@ class OptimizedInferenceEngine:
 
         # Select optimal device based on load
         device_id = self._select_optimal_device()
+        if device_id is None:
+            raise RuntimeError("No GPU devices available for inference")
         model = self.models[device_id]
 
         # Preprocessing
@@ -819,6 +1948,8 @@ class OptimizedInferenceEngine:
 
         # Select optimal device
         device_id = self._select_optimal_device()
+        if device_id is None:
+            raise RuntimeError("No GPU devices available for inference")
         model = self.models[device_id]
 
         # Batch preprocessing
@@ -865,17 +1996,35 @@ class OptimizedInferenceEngine:
 
         return results
 
-    def _select_optimal_device(self) -> int:
+    def _select_optimal_device(self) -> int | None:
         """Select the optimal GPU device based on current load."""
+        if not self.config.device_ids:
+            return None
+
         if len(self.config.device_ids) == 1:
             return self.config.device_ids[0]
 
-        # Simple round-robin for now
-        # TODO: Implement intelligent load balancing based on GPU utilization
-        device_id = self.config.device_ids[self.current_device]
-        self.current_device = (self.current_device + 1) % len(self.config.device_ids)
+        # Intelligent load balancing based on GPU utilization
+        if len(self.config.device_ids) > 1:
+            try:
+                device_loads = []
+                for device_id in self.config.device_ids:
+                    memory_used = torch.cuda.memory_allocated(device_id)
+                    memory_total = torch.cuda.get_device_properties(device_id).total_memory
+                    load = memory_used / memory_total
+                    device_loads.append((load, device_id))
 
-        return device_id
+                # Select device with lowest load
+                device_loads.sort(key=lambda x: x[0])
+                return device_loads[0][1]
+
+            except Exception:
+                # Fallback to round-robin
+                device_id = self.config.device_ids[self.current_device]
+                self.current_device = (self.current_device + 1) % len(self.config.device_ids)
+                return device_id
+
+        return self.config.device_ids[0]
 
     def _preprocess_frame(
         self, frame: np.ndarray[Any, np.dtype[Any]], device_id: int
@@ -981,12 +2130,16 @@ class OptimizedInferenceEngine:
 
         class_names = []
         if len(classes) > 0:
-            class_names = [coco_to_vehicle.get(cls, f"class_{cls}") for cls in classes]
+            class_names = [coco_to_vehicle.get(int(cls), f"class_{cls}") for cls in classes]
 
         # Calculate metrics
         detection_count = len(boxes)
-        avg_confidence = np.mean(scores) if len(scores) > 0 else 0.0
-        gpu_memory = torch.cuda.memory_allocated(self.current_device) / 1024 / 1024
+        avg_confidence = float(np.mean(scores)) if len(scores) > 0 else 0.0
+        gpu_memory = (
+            torch.cuda.memory_allocated(self.current_device) / 1024 / 1024
+            if torch.cuda.is_available() and self.current_device >= 0
+            else 0.0
+        )
 
         return DetectionResult(
             boxes=boxes,
@@ -1144,10 +2297,10 @@ class OptimizedInferenceEngine:
         )
 
         return {
-            "avg_latency_ms": np.mean(self.inference_times),
-            "p50_latency_ms": np.percentile(self.inference_times, 50),
-            "p95_latency_ms": np.percentile(self.inference_times, 95),
-            "p99_latency_ms": np.percentile(self.inference_times, 99),
+            "avg_latency_ms": float(np.mean(self.inference_times)),
+            "p50_latency_ms": float(np.percentile(self.inference_times, 50)),
+            "p95_latency_ms": float(np.percentile(self.inference_times, 95)),
+            "p99_latency_ms": float(np.percentile(self.inference_times, 99)),
             "throughput_fps": throughput,
             "gpu_utilization": self._get_gpu_utilization(),
             "gpu_memory_used": self._get_gpu_memory_usage(),
@@ -1155,6 +2308,9 @@ class OptimizedInferenceEngine:
 
     def _get_gpu_utilization(self) -> float:
         """Get average GPU utilization across all devices."""
+        if not self.config.device_ids:
+            return 0.0
+
         try:
             import pynvml
 
@@ -1174,19 +2330,29 @@ class OptimizedInferenceEngine:
         """Get GPU memory usage for all devices."""
         memory_stats = {}
 
-        for device_id in self.config.device_ids:
-            allocated = torch.cuda.memory_allocated(device_id) / 1024 / 1024
-            cached = torch.cuda.memory_reserved(device_id) / 1024 / 1024
+        if not self.config.device_ids:
+            return memory_stats
 
-            memory_stats[f"gpu_{device_id}_allocated_mb"] = allocated
-            memory_stats[f"gpu_{device_id}_cached_mb"] = cached
+        for device_id in self.config.device_ids:
+            try:
+                allocated = torch.cuda.memory_allocated(device_id) / 1024 / 1024
+                cached = torch.cuda.memory_reserved(device_id) / 1024 / 1024
+
+                memory_stats[f"gpu_{device_id}_allocated_mb"] = float(allocated)
+                memory_stats[f"gpu_{device_id}_cached_mb"] = float(cached)
+            except Exception:
+                memory_stats[f"gpu_{device_id}_allocated_mb"] = 0.0
+                memory_stats[f"gpu_{device_id}_cached_mb"] = 0.0
 
         return memory_stats
 
     async def cleanup(self) -> None:
         """Clean up resources."""
         await self.batcher.stop()
-        self.memory_manager.cleanup()
+        if self.memory_manager:
+            self.memory_manager.cleanup()
+        if self.stream_manager:
+            self.stream_manager.cleanup()
 
 
 # Model Selection Utility Functions

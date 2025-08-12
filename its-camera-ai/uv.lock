@@ -1839,6 +1839,7 @@ dependencies = [
     { name = "structlog" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "typer" },
     { name = "ultralytics" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1955,6 +1956,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=25.4.0" },
     { name = "torch", specifier = ">=2.8.0" },
     { name = "torchvision", specifier = ">=0.23.0" },
+    { name = "typer", specifier = ">=0.15.1" },
     { name = "ultralytics", specifier = ">=8.3.177" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },
 ]
