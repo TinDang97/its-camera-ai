@@ -342,3 +342,91 @@ class NotFoundError(ITSCameraAIError):
         super().__init__(message, code, resource_details)
         self.resource_type = resource_type
         self.resource_id = resource_id
+
+
+# Streaming-specific exceptions
+class CameraConnectionError(StreamingError):
+    """Raised when camera connection fails."""
+
+    def __init__(
+        self,
+        message: str,
+        camera_id: str | None = None,
+        stream_url: str | None = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        connection_details = details or {}
+        if camera_id:
+            connection_details["camera_id"] = camera_id
+        if stream_url:
+            connection_details["stream_url"] = stream_url
+
+        super().__init__(message, camera_id, "connection", connection_details, cause)
+        self.camera_id = camera_id
+        self.stream_url = stream_url
+
+
+class CameraConfigurationError(StreamingError):
+    """Raised when camera configuration is invalid."""
+
+    def __init__(
+        self,
+        message: str,
+        camera_id: str | None = None,
+        config_field: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        config_details = details or {}
+        if camera_id:
+            config_details["camera_id"] = camera_id
+        if config_field:
+            config_details["config_field"] = config_field
+
+        super().__init__(message, camera_id, "configuration", config_details)
+        self.camera_id = camera_id
+        self.config_field = config_field
+
+
+class StreamProcessingError(StreamingError):
+    """Raised when stream processing fails."""
+
+    def __init__(
+        self,
+        message: str,
+        stream_id: str | None = None,
+        processing_stage: str | None = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        processing_details = details or {}
+        if processing_stage:
+            processing_details["processing_stage"] = processing_stage
+
+        super().__init__(message, stream_id, "processing", processing_details, cause)
+        self.processing_stage = processing_stage
+
+
+class QualityValidationError(StreamingError):
+    """Raised when frame quality validation fails."""
+
+    def __init__(
+        self,
+        message: str,
+        frame_id: str | None = None,
+        quality_score: float | None = None,
+        issues: list[str] | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        quality_details = details or {}
+        if frame_id:
+            quality_details["frame_id"] = frame_id
+        if quality_score is not None:
+            quality_details["quality_score"] = quality_score
+        if issues:
+            quality_details["issues"] = issues
+
+        super().__init__(message, frame_id, "quality_validation", quality_details)
+        self.frame_id = frame_id
+        self.quality_score = quality_score
+        self.issues = issues or []
