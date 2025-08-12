@@ -1,0 +1,399 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: its-camera-ai-rules
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/part-of: its-camera-ai
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  groups:
+  - name: its-camera-ai.inference.rules
+    interval: 30s
+    rules:
+    - alert: InferenceLatencyHigh
+      expr: histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m])) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+        service: vision-engine
+        component: inference
+      annotations:
+        summary: "High inference latency detected"
+        description: "95th percentile inference latency is {{ $value }}s, above the 100ms threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-latency"
+
+    - alert: InferenceLatencyCritical
+      expr: histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m])) > 0.2
+      for: 1m
+      labels:
+        severity: critical
+        service: vision-engine
+        component: inference
+      annotations:
+        summary: "Critical inference latency detected"
+        description: "95th percentile inference latency is {{ $value }}s, above the 200ms critical threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-latency"
+
+    - alert: InferenceErrorRateHigh
+      expr: rate(inference_requests_total{status="error"}[5m]) / rate(inference_requests_total[5m]) > 0.05
+      for: 3m
+      labels:
+        severity: warning
+        service: vision-engine
+        component: inference
+      annotations:
+        summary: "High inference error rate detected"
+        description: "Inference error rate is {{ $value | humanizePercentage }}, above the 5% threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-error-rate"
+
+    - alert: InferenceQueueLength
+      expr: inference_queue_length > 100
+      for: 2m
+      labels:
+        severity: warning
+        service: vision-engine
+        component: inference
+      annotations:
+        summary: "Inference queue length is high"
+        description: "Inference queue has {{ $value }} pending requests, above the 100 threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/queue-backlog"
+
+  - name: its-camera-ai.gpu.rules
+    interval: 15s
+    rules:
+    - alert: GPUUtilizationHigh
+      expr: DCGM_FI_DEV_GPU_UTIL > 95
+      for: 5m
+      labels:
+        severity: warning
+        component: gpu
+      annotations:
+        summary: "GPU utilization is very high"
+        description: "GPU {{ $labels.gpu }} utilization is {{ $value }}%, above 95% for 5 minutes"
+        runbook_url: "https://runbooks.its-camera-ai.com/gpu-utilization"
+
+    - alert: GPUMemoryHigh
+      expr: DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL > 0.9
+      for: 3m
+      labels:
+        severity: warning
+        component: gpu
+      annotations:
+        summary: "GPU memory usage is high"
+        description: "GPU {{ $labels.gpu }} memory usage is {{ $value | humanizePercentage }}, above 90%"
+        runbook_url: "https://runbooks.its-camera-ai.com/gpu-memory"
+
+    - alert: GPUTemperatureHigh
+      expr: DCGM_FI_DEV_GPU_TEMP > 80
+      for: 2m
+      labels:
+        severity: critical
+        component: gpu
+      annotations:
+        summary: "GPU temperature is high"
+        description: "GPU {{ $labels.gpu }} temperature is {{ $value }}°C, above 80°C threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/gpu-temperature"
+
+    - alert: GPUDown
+      expr: up{job="dcgm-exporter"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: gpu
+      annotations:
+        summary: "GPU monitoring is down"
+        description: "DCGM exporter for GPU monitoring is not responding"
+        runbook_url: "https://runbooks.its-camera-ai.com/gpu-monitoring-down"
+
+  - name: its-camera-ai.database.rules
+    interval: 60s
+    rules:
+    - alert: PostgreSQLDown
+      expr: postgresql_up == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: postgresql
+        component: database
+      annotations:
+        summary: "PostgreSQL is down"
+        description: "PostgreSQL database is not responding"
+        runbook_url: "https://runbooks.its-camera-ai.com/database-down"
+
+    - alert: PostgreSQLConnectionsHigh
+      expr: postgresql_active_connections / postgresql_max_connections > 0.8
+      for: 3m
+      labels:
+        severity: warning
+        service: postgresql
+        component: database
+      annotations:
+        summary: "PostgreSQL connections are high"
+        description: "PostgreSQL has {{ $value | humanizePercentage }} connections in use, above 80% threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/database-connections"
+
+    - alert: PostgreSQLSlowQueries
+      expr: rate(postgresql_slow_queries_total[5m]) > 10
+      for: 2m
+      labels:
+        severity: warning
+        service: postgresql
+        component: database
+      annotations:
+        summary: "PostgreSQL slow queries detected"
+        description: "PostgreSQL has {{ $value }} slow queries per second, above 10/sec threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/slow-queries"
+
+    - alert: PostgreSQLReplicationLag
+      expr: postgresql_replication_lag_seconds > 30
+      for: 2m
+      labels:
+        severity: warning
+        service: postgresql
+        component: replication
+      annotations:
+        summary: "PostgreSQL replication lag is high"
+        description: "PostgreSQL replication lag is {{ $value }}s, above 30s threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/replication-lag"
+
+  - name: its-camera-ai.cache.rules
+    interval: 60s
+    rules:
+    - alert: RedisDown
+      expr: redis_up == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: redis
+        component: cache
+      annotations:
+        summary: "Redis is down"
+        description: "Redis cache server is not responding"
+        runbook_url: "https://runbooks.its-camera-ai.com/redis-down"
+
+    - alert: RedisMemoryHigh
+      expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+      for: 3m
+      labels:
+        severity: warning
+        service: redis
+        component: cache
+      annotations:
+        summary: "Redis memory usage is high"
+        description: "Redis memory usage is {{ $value | humanizePercentage }}, above 90% threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/redis-memory"
+
+    - alert: RedisCacheHitRateLow
+      expr: rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) < 0.8
+      for: 5m
+      labels:
+        severity: warning
+        service: redis
+        component: cache
+      annotations:
+        summary: "Redis cache hit rate is low"
+        description: "Redis cache hit rate is {{ $value | humanizePercentage }}, below 80% threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/cache-hit-rate"
+
+  - name: its-camera-ai.messaging.rules
+    interval: 60s
+    rules:
+    - alert: KafkaDown
+      expr: kafka_server_brokertopicmetrics_messagesin_total == 0
+      for: 2m
+      labels:
+        severity: critical
+        service: kafka
+        component: messaging
+      annotations:
+        summary: "Kafka broker appears to be down"
+        description: "Kafka broker has not received messages for 2 minutes"
+        runbook_url: "https://runbooks.its-camera-ai.com/kafka-down"
+
+    - alert: KafkaConsumerLag
+      expr: kafka_consumer_lag_sum > 1000
+      for: 3m
+      labels:
+        severity: warning
+        service: kafka
+        component: messaging
+      annotations:
+        summary: "Kafka consumer lag is high"
+        description: "Kafka consumer lag is {{ $value }} messages, above 1000 threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/consumer-lag"
+
+    - alert: KafkaPartitionOffline
+      expr: kafka_server_replicamanager_partitioncount < kafka_server_replicamanager_leadercount
+      for: 1m
+      labels:
+        severity: critical
+        service: kafka
+        component: messaging
+      annotations:
+        summary: "Kafka partition is offline"
+        description: "One or more Kafka partitions are offline"
+        runbook_url: "https://runbooks.its-camera-ai.com/partition-offline"
+
+  - name: its-camera-ai.application.rules
+    interval: 30s
+    rules:
+    - alert: ApplicationDown
+      expr: up{job=~"camera-service|analytics-service|streaming-service|vision-engine"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: application
+      annotations:
+        summary: "Application service is down"
+        description: "Service {{ $labels.job }} is not responding to health checks"
+        runbook_url: "https://runbooks.its-camera-ai.com/service-down"
+
+    - alert: ApplicationErrorRateHigh
+      expr: rate(http_requests_total{code=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+      for: 2m
+      labels:
+        severity: warning
+        component: application
+      annotations:
+        summary: "High error rate detected"
+        description: "Service {{ $labels.service }} has {{ $value | humanizePercentage }} error rate, above 5% threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-error-rate"
+
+    - alert: ApplicationResponseTimeHigh
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1.0
+      for: 3m
+      labels:
+        severity: warning
+        component: application
+      annotations:
+        summary: "High response time detected"
+        description: "Service {{ $labels.service }} has 95th percentile response time of {{ $value }}s, above 1s threshold"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-latency"
+
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        component: kubernetes
+      annotations:
+        summary: "Pod is crash looping"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+        runbook_url: "https://runbooks.its-camera-ai.com/pod-crash-loop"
+
+    - alert: PodPending
+      expr: kube_pod_status_phase{phase="Pending"} == 1
+      for: 5m
+      labels:
+        severity: warning
+        component: kubernetes
+      annotations:
+        summary: "Pod is pending"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been pending for 5 minutes"
+        runbook_url: "https://runbooks.its-camera-ai.com/pod-pending"
+
+  - name: its-camera-ai.resource.rules
+    interval: 60s
+    rules:
+    - alert: NodeCPUHigh
+      expr: (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Node CPU usage is high"
+        description: "Node {{ $labels.instance }} CPU usage is {{ $value | humanizePercentage }}, above 90% for 5 minutes"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-cpu"
+
+    - alert: NodeMemoryHigh
+      expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+      for: 3m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Node memory usage is high"
+        description: "Node {{ $labels.instance }} memory usage is {{ $value | humanizePercentage }}, above 90%"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-memory"
+
+    - alert: NodeDiskSpaceHigh
+      expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) > 0.9
+      for: 2m
+      labels:
+        severity: critical
+        component: infrastructure
+      annotations:
+        summary: "Node disk space usage is high"
+        description: "Node {{ $labels.instance }} disk {{ $labels.mountpoint }} usage is {{ $value | humanizePercentage }}, above 90%"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-disk-usage"
+
+    - alert: NodeLoadHigh
+      expr: node_load15 / count by (instance) (node_cpu_seconds_total{mode="idle"}) > 2
+      for: 5m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Node load average is high"
+        description: "Node {{ $labels.instance }} load average is {{ $value }}, above 2x CPU count"
+        runbook_url: "https://runbooks.its-camera-ai.com/high-load"
+
+  - name: its-camera-ai.slo.rules
+    interval: 30s
+    rules:
+    # SLI calculations for SLO monitoring
+    - record: its_camera_ai:inference_success_rate
+      expr: |
+        (
+          rate(inference_requests_total{status="success"}[5m]) /
+          rate(inference_requests_total[5m])
+        )
+
+    - record: its_camera_ai:inference_latency_p95
+      expr: histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m]))
+
+    - record: its_camera_ai:api_success_rate
+      expr: |
+        (
+          rate(http_requests_total{code!~"5.."}[5m]) /
+          rate(http_requests_total[5m])
+        )
+
+    - record: its_camera_ai:api_latency_p95
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+    # SLO burn rate alerts
+    - alert: InferenceSLOBurnRateHigh
+      expr: |
+        (
+          its_camera_ai:inference_success_rate < 0.999
+          and
+          rate(inference_requests_total[1m]) > 0.01
+        )
+      for: 2m
+      labels:
+        severity: critical
+        slo: inference-availability
+      annotations:
+        summary: "Inference SLO burn rate is high"
+        description: "Inference availability SLO (99.9%) is being burned at a high rate"
+
+    - alert: ApiSLOBurnRateHigh
+      expr: |
+        (
+          its_camera_ai:api_success_rate < 0.99
+          and
+          rate(http_requests_total[1m]) > 0.01
+        )
+      for: 2m
+      labels:
+        severity: warning
+        slo: api-availability
+      annotations:
+        summary: "API SLO burn rate is high"
+        description: "API availability SLO (99%) is being burned at a high rate"

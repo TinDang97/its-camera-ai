@@ -2,14 +2,15 @@
 # AI-powered camera traffic monitoring system
 
 .PHONY: help install install-dev install-ml install-gpu install-edge install-all
-.PHONY: test test-unit test-integration test-ml test-gpu test-slow test-coverage
+.PHONY: test test-unit test-integration test-ml test-gpu test-slow test-coverage test-infra
 .PHONY: lint format type-check security-check code-quality pre-commit
 .PHONY: docker-build docker-build-gpu docker-build-prod docker-build-edge
 .PHONY: docker-up docker-down docker-logs docker-shell docker-clean
-.PHONY: db-migrate db-seed db-reset db-backup db-restore
+.PHONY: infra-up infra-down infra-status infra-test infra-logs infra-reset
+.PHONY: db-migrate db-seed db-reset db-backup db-restore db-init
 .PHONY: deploy-dev deploy-prod monitoring jupyter
 .PHONY: clean clean-cache clean-logs clean-models clean-all
-.PHONY: docs docs-serve benchmark profile
+.PHONY: docs docs-serve benchmark profile status
 
 # Platform Detection
 OS := $(shell uname -s)
@@ -80,12 +81,21 @@ help:
 	@echo "  test-gpu        Run GPU tests (requires CUDA)"
 	@echo "  test-slow       Run slow tests"
 	@echo "  test-coverage   Generate coverage report"
+	@echo "  test-infra      Test infrastructure components"
 	@echo "  lint            Run all linters"
 	@echo "  format          Format code with black and isort"
 	@echo "  type-check      Run mypy type checking"
 	@echo "  security-check  Run security scans"
 	@echo "  code-quality    Run all code quality checks"
 	@echo "  pre-commit      Run pre-commit hooks"
+	@echo ""
+	@echo "$(YELLOW)Infrastructure Commands:$(NC)"
+	@echo "  infra-up        Start all infrastructure services"
+	@echo "  infra-down      Stop all infrastructure services"
+	@echo "  infra-status    Show infrastructure status"
+	@echo "  infra-test      Test infrastructure connectivity"
+	@echo "  infra-logs      View infrastructure logs"
+	@echo "  infra-reset     Reset all infrastructure data"
 	@echo ""
 	@echo "$(YELLOW)Platform Commands:$(NC)"
 	@echo "  platform-info   Show platform information"
@@ -124,6 +134,7 @@ help:
 	@echo "  db-reset        Reset database"
 	@echo "  db-backup       Backup database"
 	@echo "  db-restore      Restore database from backup"
+	@echo "  db-init         Initialize all databases with schemas"
 	@echo ""
 	@echo "$(YELLOW)Deployment & Services:$(NC)"
 	@echo "  deploy-dev      Deploy to development environment"
@@ -141,6 +152,7 @@ help:
 	@echo "  docs-serve      Serve documentation locally"
 	@echo "  benchmark       Run performance benchmarks"
 	@echo "  profile         Profile application performance"
+	@echo "  status          Show project implementation status"
 
 # Environment Setup
 install:
@@ -208,6 +220,11 @@ test-coverage:
 	@echo "$(BLUE)Generating coverage report...$(NC)"
 	$(UV) run pytest --cov=src/its_camera_ai --cov-report=html --cov-report=xml --cov-report=term-missing
 	@echo "$(GREEN)Coverage report generated in htmlcov/$(NC)"
+
+test-infra:
+	@echo "$(BLUE)Testing infrastructure components...$(NC)"
+	$(UV) run python test_infrastructure.py
+	@echo "$(GREEN)Infrastructure tests completed!$(NC)"
 
 lint:
 	@echo "$(BLUE)Running linters...$(NC)"
@@ -330,6 +347,65 @@ docker-clean:
 	$(DOCKER_COMPOSE) down -v --remove-orphans
 	$(DOCKER) system prune -af
 
+# Infrastructure Commands
+infra-up:
+	@echo "$(BLUE)Starting infrastructure services...$(NC)"
+	@if [ -f docker-compose.complete.yml ]; then \
+		$(DOCKER_COMPOSE) -f docker-compose.complete.yml up -d postgres timescaledb redis zookeeper kafka minio prometheus grafana; \
+	elif [ -f start-infrastructure.sh ]; then \
+		./start-infrastructure.sh; \
+	else \
+		@echo "$(RED)No infrastructure configuration found!$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Infrastructure services started!$(NC)"
+	@echo "Run 'make infra-status' to check service status"
+
+infra-down:
+	@echo "$(BLUE)Stopping infrastructure services...$(NC)"
+	@if [ -f docker-compose.complete.yml ]; then \
+		$(DOCKER_COMPOSE) -f docker-compose.complete.yml down; \
+	else \
+		$(DOCKER) stop $$($(DOCKER) ps -q --filter name=its-) 2>/dev/null || true; \
+	fi
+	@echo "$(GREEN)Infrastructure services stopped!$(NC)"
+
+infra-status:
+	@echo "$(CYAN)Infrastructure Services Status$(NC)"
+	@echo "========================================"
+	@$(DOCKER) ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "its-|NAME" || echo "No infrastructure services running"
+	@echo ""
+	@echo "$(CYAN)Service Access Points:$(NC)"
+	@echo "PostgreSQL:    localhost:5432"
+	@echo "TimescaleDB:   localhost:5433"
+	@echo "Redis:         localhost:6379"
+	@echo "Kafka:         localhost:9092"
+	@echo "MinIO Console: http://localhost:9001"
+	@echo "Prometheus:    http://localhost:9090"
+	@echo "Grafana:       http://localhost:3000"
+
+infra-test: test-infra
+
+infra-logs:
+	@echo "$(BLUE)Viewing infrastructure logs...$(NC)"
+	@if [ -f docker-compose.complete.yml ]; then \
+		$(DOCKER_COMPOSE) -f docker-compose.complete.yml logs -f --tail=100; \
+	else \
+		$(DOCKER) logs -f --tail=100 $$($(DOCKER) ps -q --filter name=its- | head -1); \
+	fi
+
+infra-reset:
+	@echo "$(YELLOW)WARNING: This will delete all infrastructure data!$(NC)"
+	@read -p "Are you sure? (y/N): " confirm; \
+	if [ "$$confirm" = "y" ]; then \
+		$(MAKE) infra-down; \
+		$(DOCKER) rm -f $$($(DOCKER) ps -aq --filter name=its-) 2>/dev/null || true; \
+		$(DOCKER) volume rm $$($(DOCKER) volume ls -q | grep its) 2>/dev/null || true; \
+		@echo "$(GREEN)Infrastructure reset completed!$(NC)"; \
+	else \
+		@echo "$(YELLOW)Reset cancelled$(NC)"; \
+	fi
+
 # Database Commands
 db-migrate:
 	@echo "$(BLUE)Running database migrations...$(NC)"
@@ -355,6 +431,18 @@ db-restore:
 	@echo "$(BLUE)Restoring database...$(NC)"
 	@read -p "Enter backup file path: " backup_file; \
 	$(DOCKER_COMPOSE) exec -T postgres psql -U its_user its_camera_ai < $$backup_file
+
+db-init:
+	@echo "$(BLUE)Initializing all databases with schemas...$(NC)"
+	@if [ -f infrastructure/database/postgresql-init.sql ]; then \
+		$(DOCKER) exec -i its-postgres psql -U postgres its_camera_ai < infrastructure/database/postgresql-init.sql 2>/dev/null || \
+		echo "$(YELLOW)PostgreSQL schema already initialized or file not found$(NC)"; \
+	fi
+	@if [ -f infrastructure/database/timescale-init.sql ]; then \
+		$(DOCKER) exec -i its-timescaledb psql -U postgres its_metrics < infrastructure/database/timescale-init.sql 2>/dev/null || \
+		echo "$(YELLOW)TimescaleDB schema already initialized or file not found$(NC)"; \
+	fi
+	@echo "$(GREEN)Database initialization completed!$(NC)"
 
 # Deployment & Services
 deploy-dev: docker-build docker-up
@@ -518,6 +606,33 @@ check-tools:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "$(RED)uv is required but not installed. Please install it first.$(NC)" >&2; exit 1; }
 	@command -v $(DOCKER) >/dev/null 2>&1 || { echo "$(RED)Docker is required but not installed. Please install it first.$(NC)" >&2; exit 1; }
 	@command -v $(DOCKER_COMPOSE) >/dev/null 2>&1 || { echo "$(RED)Docker Compose is required but not installed. Please install it first.$(NC)" >&2; exit 1; }
+
+# Project status command
+status:
+	@echo "$(CYAN)ITS Camera AI - Implementation Status$(NC)"
+	@echo "========================================"
+	@echo ""
+	@echo "$(YELLOW)Infrastructure Status:$(NC)"
+	@$(DOCKER) ps --format "table {{.Names}}\t{{.Status}}" | grep -E "its-|NAME" | head -10 || echo "No services running"
+	@echo ""
+	@echo "$(YELLOW)Completed Components:$(NC)"
+	@echo "✅ PostgreSQL Database Service"
+	@echo "✅ TimescaleDB Time-Series Service"
+	@echo "✅ Redis Cache/Queue Service"
+	@echo "✅ Kafka Message Broker"
+	@echo "✅ MinIO Object Storage"
+	@echo "✅ Prometheus Monitoring"
+	@echo "✅ Grafana Dashboards"
+	@echo "✅ Infrastructure Testing Suite"
+	@echo "✅ Docker Compose Configurations"
+	@echo ""
+	@echo "$(YELLOW)Quick Start:$(NC)"
+	@echo "1. Start infrastructure: $(GREEN)make infra-up$(NC)"
+	@echo "2. Check status: $(GREEN)make infra-status$(NC)"
+	@echo "3. Run tests: $(GREEN)make test-infra$(NC)"
+	@echo "4. View logs: $(GREEN)make infra-logs$(NC)"
+	@echo ""
+	@echo "For detailed status, see: docs/INFRASTRUCTURE_STATUS.md"
 
 # Auto-run check-tools before main targets
 test lint format type-check security-check docker-build docker-up: check-tools

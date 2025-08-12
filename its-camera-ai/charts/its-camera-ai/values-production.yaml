@@ -1,0 +1,546 @@
+# Production values for ITS Camera AI Helm Chart
+
+# Global configuration
+global:
+  environment: production
+  imageRegistry: ghcr.io
+  imageRepository: its-team
+  imageTag: "1.0.0"
+  imagePullPolicy: IfNotPresent
+
+  # Security settings
+  podSecurityPolicy:
+    enabled: true
+  networkPolicy:
+    enabled: true
+
+  # Service mesh
+  serviceMesh:
+    enabled: true
+    type: istio
+    mtls: STRICT
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    serviceMonitor: true
+    prometheusRule: true
+
+  # Tracing
+  tracing:
+    enabled: true
+    jaeger:
+      agent: jaeger-agent.monitoring.svc.cluster.local
+      port: 6831
+
+# Application configuration
+app:
+  name: its-camera-ai
+  version: "1.0.0"
+
+  # Resource limits for production
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+
+# Service-specific configurations
+cameraService:
+  enabled: true
+  replicaCount: 5
+  image:
+    repository: its-camera-ai-camera-service
+    tag: "1.0.0"
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 60
+        policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+  config:
+    logLevel: INFO
+    maxConcurrentStreams: 100
+    connectionPoolSize: 20
+    timeoutSeconds: 30
+
+analyticsService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: its-camera-ai-analytics-service
+    tag: "1.0.0"
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 80
+
+  config:
+    logLevel: INFO
+    batchSize: 1000
+    processingInterval: "5s"
+
+streamingService:
+  enabled: true
+  replicaCount: 4
+  image:
+    repository: its-camera-ai-streaming-service
+    tag: "1.0.0"
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+
+  config:
+    logLevel: INFO
+    bufferSize: "100Mi"
+    compressionEnabled: true
+
+visionEngine:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: its-camera-ai-vision-engine
+    tag: "1.0.0"
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+  resources:
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+      nvidia.com/gpu: "1"
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+      nvidia.com/gpu: "1"
+
+  nodeSelector:
+    node-type: gpu
+
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 80
+    customMetrics:
+    - type: Pods
+      pods:
+        metric:
+          name: inference_queue_length
+        target:
+          type: AverageValue
+          averageValue: "10"
+
+  config:
+    logLevel: INFO
+    modelPath: "/models/yolo11n.pt"
+    batchSize: 32
+    gpuMemoryFraction: 0.9
+    inferenceTimeout: "100ms"
+
+# Database configuration
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: postgresql-credentials
+  architecture: replication
+  primary:
+    persistence:
+      enabled: true
+      size: 500Gi
+      storageClass: fast-ssd
+    resources:
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+  readReplicas:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 500Gi
+      storageClass: fast-ssd
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+redis:
+  enabled: true
+  auth:
+    existingSecret: redis-credentials
+  architecture: replication
+  master:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: fast-ssd
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: fast-ssd
+    resources:
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+      requests:
+        cpu: "200m"
+        memory: "1Gi"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+# TimescaleDB configuration
+timescaledb:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: timescale/timescaledb-ha
+    tag: "pg16"
+
+  persistence:
+    enabled: true
+    size: 1Ti
+    storageClass: fast-ssd
+
+  resources:
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+
+  config:
+    max_connections: 400
+    shared_buffers: "2GB"
+    effective_cache_size: "6GB"
+    work_mem: "8MB"
+    maintenance_work_mem: "256MB"
+
+# Kafka configuration
+kafka:
+  enabled: true
+  replicaCount: 3
+
+  persistence:
+    enabled: true
+    size: 500Gi
+    storageClass: fast-ssd
+
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+
+  zookeeper:
+    replicaCount: 3
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: fast-ssd
+    resources:
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+
+  config:
+    defaultReplicationFactor: 3
+    offsetsTopicReplicationFactor: 3
+    transactionStateLogReplicationFactor: 3
+
+# MinIO configuration
+minio:
+  enabled: true
+  mode: distributed
+  replicas: 4
+
+  persistence:
+    enabled: true
+    size: 1Ti
+    storageClass: fast-ssd
+
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+
+  auth:
+    existingSecret: minio-credentials
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: kong
+  annotations:
+    kubernetes.io/ingress.class: kong
+    konghq.com/protocols: https
+    konghq.com/https-redirect-status-code: "308"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    konghq.com/rate-limit: "1000"
+    konghq.com/rate-limit-per: "minute"
+
+  hosts:
+  - host: its-camera-ai.example.com
+    paths:
+    - path: /api/v1/camera
+      pathType: Prefix
+      service: camera-service
+      port: 8080
+    - path: /api/v1/analytics
+      pathType: Prefix
+      service: analytics-service
+      port: 8080
+    - path: /api/v1/streaming
+      pathType: Prefix
+      service: streaming-service
+      port: 8080
+    - path: /api/v1/inference
+      pathType: Prefix
+      service: vision-engine
+      port: 8080
+
+  tls:
+  - secretName: its-camera-ai-tls
+    hosts:
+    - its-camera-ai.example.com
+
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    app: its-camera-ai
+
+# Pod Disruption Budgets
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: its-camera-ai
+
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: its-camera-ai
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 9092
+
+# Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+podSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+    - ALL
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/its-camera-ai-role
+  name: its-camera-ai-serviceaccount
+
+# Persistent Volumes
+persistence:
+  enabled: true
+  storageClass: fast-ssd
+  accessMode: ReadWriteOnce
+  size: 50Gi
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 3 * * *"
+  retention: "30d"
+  destination: s3://its-camera-ai-backups/
+
+# Health checks
+healthCheck:
+  enabled: true
+  path: /health
+  port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+# Readiness checks
+readinessCheck:
+  enabled: true
+  path: /ready
+  port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+
+# Startup probes
+startupProbe:
+  enabled: true
+  path: /health
+  port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  failureThreshold: 12
+
+# Environment-specific settings
+environment:
+  name: production
+  domain: its-camera-ai.example.com
+  debug: false
+  logLevel: INFO
+
+  # Performance settings
+  performance:
+    maxConcurrency: 1000
+    connectionPoolSize: 50
+    requestTimeout: 30s
+    keepAliveTimeout: 75s
+
+  # Cache settings
+  cache:
+    ttl: 300s
+    maxSize: 1000
+    evictionPolicy: LRU
+
+  # Security settings
+  security:
+    encryptionEnabled: true
+    auditLogging: true
+    accessLogging: true

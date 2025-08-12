@@ -1,0 +1,212 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-services
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/part-of: its-camera-ai
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai-production
+    - its-camera-ai-staging
+    - its-camera-ai-development
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: its-camera-ai
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'go_.*'
+      action: drop
+    - sourceLabels: [__name__]
+      regex: 'promhttp_.*'
+      action: drop
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-gpu-metrics
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: gpu-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai-production
+    - its-camera-ai-staging
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+    scrapeTimeout: 10s
+    honorLabels: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-inference-metrics
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: inference-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai-production
+    - its-camera-ai-staging
+  selector:
+    matchLabels:
+      app: vision-engine
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 10s
+    scrapeTimeout: 5s
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      targetLabel: service_type
+      replacement: inference
+    - sourceLabels: [__name__]
+      regex: 'inference_.*'
+      action: keep
+    - sourceLabels: [__name__]
+      regex: 'gpu_.*'
+      action: keep
+    - sourceLabels: [__name__]
+      regex: 'model_.*'
+      action: keep
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-database-metrics
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: database-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai-production
+    - its-camera-ai-staging
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgresql
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      targetLabel: database_type
+      replacement: postgresql
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-redis-metrics
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: cache-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai-production
+    - its-camera-ai-staging
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      targetLabel: cache_type
+      replacement: redis
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-kafka-metrics
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: messaging-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - its-camera-ai-production
+    - its-camera-ai-staging
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      targetLabel: messaging_type
+      replacement: kafka
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: its-camera-ai-istio-metrics
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: service-mesh-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - istio-system
+  selector:
+    matchLabels:
+      app: istiod
+  endpoints:
+  - port: http-monitoring
+    path: /stats/prometheus
+    interval: 15s
+    scrapeTimeout: 10s
+    honorLabels: true
