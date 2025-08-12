@@ -1,0 +1,355 @@
+# gRPC Services Configuration for ITS Camera AI
+# Optimized for high-performance frame processing with Redis Streams
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-stream-processor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: grpc-service
+    app.kubernetes.io/version: "0.1.0"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+    # gRPC-specific annotations
+    service.alpha.kubernetes.io/grpc: "true"
+    nginx.ingress.kubernetes.io/grpc-backend: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+spec:
+  type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 300
+  selector:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: stream-processor
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: 50051
+    protocol: TCP
+  - name: http
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+
+---
+# Load Balancer for gRPC Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc-stream-processor-lb
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: grpc-loadbalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "300"
+    # gRPC-specific load balancer settings
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: tcp
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "6"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "3"
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+  - 10.0.0.0/8   # Internal network only for gRPC
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+  selector:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: stream-processor
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: 50051
+    protocol: TCP
+
+---
+# Ingress for gRPC Services (using nginx-ingress with gRPC support)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grpc-stream-processor-ingress
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: grpc-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/grpc-backend: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Performance optimizations
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+    # gRPC specific timeouts
+    nginx.ingress.kubernetes.io/grpc-read-timeout: "300"
+    nginx.ingress.kubernetes.io/grpc-send-timeout: "300"
+    # Rate limiting for protection
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-burst: "2000"
+    # SSL/TLS configuration
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - grpc.its-camera-ai.local
+    secretName: grpc-tls-secret
+  rules:
+  - host: grpc.its-camera-ai.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grpc-stream-processor
+            port:
+              number: 50051
+
+---
+# Service Monitor for gRPC metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: grpc-stream-processor-monitor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: grpc-monitoring
+    team: its-camera-ai
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: its-camera-ai
+      app.kubernetes.io/component: grpc-service
+  endpoints:
+  - port: metrics
+    interval: 15s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+
+---
+# Network Policy for gRPC Services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grpc-stream-processor-netpol
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: its-camera-ai
+      app.kubernetes.io/component: stream-processor
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  # Allow gRPC traffic
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: its-camera-ai
+    - namespaceSelector:
+        matchLabels:
+          name: its-camera-edge
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 50051
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 9090
+  
+  egress:
+  # Allow Redis Streams connection
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis-streams
+    ports:
+    - protocol: TCP
+      port: 6379
+  
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Allow external API calls (for ML inference, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# ConfigMap for gRPC client configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grpc-client-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: grpc-config
+data:
+  grpc-config.yaml: |
+    # gRPC Client Configuration for ITS Camera AI
+    
+    # Server connection settings
+    server:
+      address: "grpc-stream-processor:50051"
+      tls:
+        enabled: false  # Set to true in production with proper certs
+        ca_cert_file: ""
+        client_cert_file: ""
+        client_key_file: ""
+        server_name_override: ""
+    
+    # Connection pool settings
+    connection_pool:
+      max_connections: 100
+      max_idle_connections: 20
+      idle_timeout: "300s"
+      connection_timeout: "30s"
+      keepalive_time: "60s"
+      keepalive_timeout: "10s"
+      keepalive_without_calls: true
+    
+    # Request settings
+    requests:
+      timeout: "30s"
+      max_retries: 3
+      retry_delay: "1s"
+      max_retry_delay: "10s"
+      compression: "gzip"
+    
+    # Streaming settings
+    streaming:
+      buffer_size: 1024
+      max_message_size: "100MB"
+      window_size: 65536
+      enable_compression: true
+      compression_level: 6
+    
+    # Load balancing
+    load_balancer:
+      policy: "round_robin"  # round_robin, least_request, random
+      health_check_interval: "30s"
+    
+    # Metrics and monitoring
+    metrics:
+      enabled: true
+      endpoint: "/metrics"
+      port: 9090
+      histogram_buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+    
+    # Circuit breaker
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5
+      recovery_timeout: "30s"
+      half_open_max_calls: 10
+
+---
+# Horizontal Pod Autoscaler for gRPC Services
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: grpc-stream-processor-hpa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/component: grpc-autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: camera-stream-processor
+  minReplicas: 10
+  maxReplicas: 100
+  metrics:
+  # CPU utilization
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  
+  # Memory utilization
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+  
+  # gRPC request rate
+  - type: Pods
+    pods:
+      metric:
+        name: grpc_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "50"
+  
+  # Queue depth from Redis Streams
+  - type: External
+    external:
+      metric:
+        name: redis_stream_length
+        selector:
+          matchLabels:
+            stream_name: camera_frames
+      target:
+        type: AverageValue
+        averageValue: "100"
+  
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 200
+        periodSeconds: 15
+      - type: Pods
+        value: 10
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 180
+      policies:
+      - type: Percent
+        value: 20
+        periodSeconds: 60
+      selectPolicy: Min

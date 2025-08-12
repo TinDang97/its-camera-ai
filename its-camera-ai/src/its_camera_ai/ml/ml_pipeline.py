@@ -76,16 +76,16 @@ except ImportError:
     MLFLOW_AVAILABLE = False
 
 try:
-    import ray
-    from ray import tune
-    from ray.air import session
+    import ray  # noqa: F401
+    from ray import tune  # noqa: F401
+    from ray.air import session  # noqa: F401
 
     RAY_AVAILABLE = True
 except ImportError:
     RAY_AVAILABLE = False
 
 try:
-    import kafka
+    import kafka  # noqa: F401
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
     KAFKA_AVAILABLE = True
@@ -637,8 +637,8 @@ class DataQualityValidator:
                 score += 0.4
 
         # Optional fields (bonus)
-        for field in optional_fields:
-            if field in metadata and metadata[field]:
+        for optional_field in optional_fields:
+            if optional_field in metadata and metadata[optional_field]:
                 score += 0.1
 
         return min(1.0, score)

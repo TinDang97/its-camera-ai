@@ -209,8 +209,112 @@ class ABTestResult(BaseModel):
     details: dict[str, Any] = Field(description="Detailed test results")
 
 
+class ModelUploadRequest(BaseModel):
+    """Enhanced model upload request schema with comprehensive metadata."""
+
+    # Core model metadata
+    name: str = Field(description="Model name", max_length=100, min_length=1)
+    version: str = Field(description="Model version (semantic versioning)")
+    model_type: ModelType = Field(description="Type of model")
+    framework: ModelFramework = Field(description="ML framework used")
+    description: str | None = Field(
+        None, description="Model description", max_length=1000
+    )
+
+    # Model configuration
+    classes: list[str] = Field(description="Supported object classes", min_length=1)
+    input_shape: list[int] = Field(description="Expected input shape", min_length=1)
+    output_shape: list[int] | None = Field(None, description="Expected output shape")
+    config: dict[str, Any] = Field(description="Model configuration parameters")
+
+    # Deployment preferences
+    deployment_config: dict[str, Any] | None = Field(
+        None, description="Deployment configuration preferences"
+    )
+    auto_deploy: bool = Field(
+        False, description="Automatically deploy to development stage after upload"
+    )
+    target_stage: DeploymentStage = Field(
+        DeploymentStage.DEVELOPMENT, description="Initial deployment stage"
+    )
+
+    # Metadata and classification
+    tags: list[str] = Field(
+        default_factory=list, description="Model tags for categorization"
+    )
+    license: str | None = Field(
+        None, description="Model license (e.g., MIT, Apache-2.0)"
+    )
+    author: str | None = Field(None, description="Model author or organization")
+    benchmark_dataset: str | None = Field(
+        None, description="Dataset used for training/evaluation"
+    )
+    training_config: dict[str, Any] | None = Field(
+        None, description="Training configuration and hyperparameters"
+    )
+
+    # System requirements
+    min_python_version: str = Field(
+        "3.8", description="Minimum Python version required"
+    )
+    required_packages: dict[str, str] | None = Field(
+        None, description="Required packages with version constraints"
+    )
+    hardware_requirements: dict[str, Any] | None = Field(
+        None, description="Hardware requirements (GPU, memory, etc.)"
+    )
+
+    # Validation and quality metadata
+    expected_accuracy: float | None = Field(
+        None, description="Expected model accuracy", ge=0, le=1
+    )
+    expected_latency_ms: float | None = Field(
+        None, description="Expected inference latency in milliseconds", gt=0
+    )
+    quality_gates: dict[str, Any] | None = Field(
+        None, description="Quality gate requirements for deployment"
+    )
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        """Validate semantic version format."""
+        import re
+
+        pattern = r"^\d+\.\d+\.\d+(-[a-zA-Z0-9\-\.]+)?$"
+        if not re.match(pattern, v):
+            raise ValueError(
+                "Version must follow semantic versioning (e.g., 1.2.3 or 1.2.3-alpha.1)"
+            )
+        return v
+
+    @field_validator("min_python_version")
+    @classmethod
+    def validate_python_version(cls, v: str) -> str:
+        """Validate Python version format."""
+        import re
+
+        pattern = r"^\d+\.\d+(?:\.\d+)?$"
+        if not re.match(pattern, v):
+            raise ValueError("Python version must be in format X.Y or X.Y.Z")
+        return v
+
+    @field_validator("classes")
+    @classmethod
+    def validate_classes(cls, v: list[str]) -> list[str]:
+        """Validate that class names are non-empty and unique."""
+        if not v:
+            raise ValueError("At least one class must be specified")
+        if len(v) != len(set(v)):
+            raise ValueError("Class names must be unique")
+        for class_name in v:
+            if not class_name.strip():
+                raise ValueError("Class names cannot be empty or whitespace")
+        return v
+
+
 class ModelUpload(BaseModel):
-    """Model upload request schema."""
+    """Legacy model upload schema for backward compatibility."""
 
     name: str = Field(description="Model name", max_length=100)
     version: str = Field(description="Model version")
@@ -317,6 +421,195 @@ class OptimizationResult(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FileValidationResult(BaseModel):
+    """File validation result schema."""
+
+    is_valid: bool = Field(description="Whether the file passed validation")
+    file_type: str = Field(description="Detected file type")
+    file_size: int = Field(description="File size in bytes", ge=0)
+    checksum: str = Field(description="SHA256 checksum of the file")
+    mime_type: str | None = Field(None, description="MIME type of the file")
+    encoding: str | None = Field(None, description="File encoding if applicable")
+
+    # Validation details
+    validation_errors: list[str] = Field(
+        default_factory=list, description="List of validation errors"
+    )
+    validation_warnings: list[str] = Field(
+        default_factory=list, description="List of validation warnings"
+    )
+    security_scan_passed: bool = Field(
+        description="Whether the file passed security scanning"
+    )
+    malicious_patterns: list[str] = Field(
+        default_factory=list, description="Detected malicious patterns if any"
+    )
+
+    # Framework-specific validation
+    framework_metadata: dict[str, Any] | None = Field(
+        None, description="Framework-specific metadata extracted from file"
+    )
+    model_architecture: str | None = Field(
+        None, description="Detected model architecture"
+    )
+    model_size_mb: float | None = Field(
+        None, description="Model size in megabytes", ge=0
+    )
+    estimated_parameters: int | None = Field(
+        None, description="Estimated number of model parameters", ge=0
+    )
+
+
+class FileUploadInfo(BaseModel):
+    """File upload information schema."""
+
+    original_filename: str = Field(description="Original filename")
+    stored_filename: str = Field(description="Filename used for storage")
+    file_path: str = Field(description="Full file path in storage")
+    file_size: int = Field(description="File size in bytes", ge=0)
+    checksum: str = Field(description="SHA256 checksum")
+    content_type: str | None = Field(None, description="Content type of uploaded file")
+    upload_timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(), description="Upload timestamp"
+    )
+    validation_result: FileValidationResult = Field(
+        description="File validation results"
+    )
+
+
+class ModelUploadProgress(BaseModel):
+    """Model upload progress tracking schema."""
+
+    upload_id: str = Field(description="Unique upload identifier")
+    status: str = Field(description="Current upload status")
+    progress_percentage: float = Field(
+        description="Upload progress percentage", ge=0, le=100
+    )
+    current_stage: str = Field(description="Current processing stage")
+    stages_completed: list[str] = Field(
+        default_factory=list, description="List of completed stages"
+    )
+    estimated_time_remaining: float | None = Field(
+        None, description="Estimated time remaining in seconds"
+    )
+    error_message: str | None = Field(None, description="Error message if failed")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(), description="Upload start time"
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(), description="Last update time"
+    )
+
+
+class ModelUploadResponse(BaseModel):
+    """Comprehensive model upload response schema."""
+
+    # Upload identification
+    upload_id: str = Field(description="Unique upload identifier")
+    model_id: str = Field(description="Generated model identifier")
+    model_name: str = Field(description="Model name")
+    version: str = Field(description="Model version")
+
+    # Upload status
+    status: str = Field(
+        description="Upload status (pending, processing, completed, failed)"
+    )
+    progress: ModelUploadProgress = Field(description="Upload progress information")
+
+    # File information
+    files_uploaded: dict[str, FileUploadInfo] = Field(
+        description="Information about uploaded files (model, config, requirements, etc.)"
+    )
+    total_file_size: int = Field(description="Total size of all uploaded files", ge=0)
+
+    # Validation results
+    validation_summary: dict[str, Any] = Field(
+        description="Summary of all validation results"
+    )
+    validation_passed: bool = Field(description="Whether all validations passed")
+    quality_checks: dict[str, Any] | None = Field(
+        None, description="Results of quality gate checks"
+    )
+
+    # Model metadata
+    model_metadata: dict[str, Any] = Field(
+        description="Extracted model metadata and configuration"
+    )
+    storage_location: str = Field(description="Storage path of model files")
+    artifact_urls: dict[str, str] | None = Field(
+        None, description="URLs to access uploaded artifacts"
+    )
+
+    # Processing information
+    processing_logs: list[str] = Field(
+        default_factory=list, description="Processing log messages"
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Non-critical warnings"
+    )
+    next_steps: list[str] = Field(
+        default_factory=list, description="Suggested next steps"
+    )
+
+    # Deployment information
+    deployment_ready: bool = Field(
+        False, description="Whether model is ready for deployment"
+    )
+    auto_deployment_triggered: bool = Field(
+        False, description="Whether auto-deployment was triggered"
+    )
+    deployment_stage: DeploymentStage | None = Field(
+        None, description="Current or target deployment stage"
+    )
+
+    # Timestamps
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(), description="Upload initiation time"
+    )
+    completed_at: datetime | None = Field(None, description="Upload completion time")
+    estimated_processing_time: float | None = Field(
+        None, description="Estimated total processing time in seconds"
+    )
+
+
+class FileUploadValidation(BaseModel):
+    """File upload validation configuration schema."""
+
+    # File type restrictions
+    allowed_extensions: list[str] = Field(description="List of allowed file extensions")
+    allowed_mime_types: list[str] = Field(description="List of allowed MIME types")
+
+    # Size restrictions
+    max_file_size_mb: float = Field(description="Maximum file size in megabytes", gt=0)
+    max_total_size_mb: float = Field(
+        description="Maximum total size of all files in megabytes", gt=0
+    )
+
+    # Content validation
+    require_signature_validation: bool = Field(
+        True, description="Whether to validate file signatures"
+    )
+    scan_for_malicious_content: bool = Field(
+        True, description="Whether to scan for malicious content"
+    )
+    validate_model_structure: bool = Field(
+        True, description="Whether to validate model file structure"
+    )
+
+    # Framework-specific validation
+    framework_validators: dict[str, dict[str, Any]] = Field(
+        default_factory=dict, description="Framework-specific validation rules"
+    )
+
+    # Quality gates
+    quality_gates_enabled: bool = Field(
+        False, description="Whether to apply quality gates"
+    )
+    quality_thresholds: dict[str, float] = Field(
+        default_factory=dict, description="Quality thresholds for validation"
+    )
 
 
 class ModelRegistry(BaseModel):

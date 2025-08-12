@@ -37,19 +37,36 @@ class RedisConfig(BaseModel):
     retry_on_timeout: bool = Field(default=True, description="Retry on timeout")
 
 
-class KafkaConfig(BaseModel):
-    """Kafka configuration settings."""
+class RedisQueueConfig(BaseModel):
+    """Redis queue configuration settings."""
 
-    bootstrap_servers: list[str] = Field(
-        default=["localhost:9092"], description="Kafka bootstrap servers"
+    url: str = Field(
+        default="redis://localhost:6379/0", description="Redis queue connection URL"
     )
-    consumer_group_id: str = Field(
-        default="its-camera-ai", description="Consumer group ID"
+    pool_size: int = Field(default=20, description="Connection pool size")
+    timeout: int = Field(default=30, description="Connection timeout")
+    retry_on_failure: bool = Field(
+        default=True, description="Retry on connection failure"
     )
-    auto_offset_reset: str = Field(
-        default="latest", description="Auto offset reset policy"
+
+    # Queue settings
+    input_queue: str = Field(default="camera_frames", description="Input queue name")
+    output_queue: str = Field(
+        default="processed_frames", description="Output queue name"
     )
-    enable_auto_commit: bool = Field(default=True, description="Enable auto commit")
+    max_queue_length: int = Field(default=10000, description="Maximum queue length")
+    batch_size: int = Field(default=20, description="Batch processing size")
+
+    # Serialization settings
+    enable_compression: bool = Field(
+        default=True, description="Enable image compression"
+    )
+    compression_format: str = Field(
+        default="jpeg", description="Image compression format"
+    )
+    compression_quality: int = Field(
+        default=85, description="Compression quality (1-100)"
+    )
 
 
 class MLConfig(BaseModel):
@@ -133,7 +150,7 @@ class Settings(BaseSettings):
     # Component configurations
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
-    kafka: KafkaConfig = Field(default_factory=KafkaConfig)
+    redis_queue: RedisQueueConfig = Field(default_factory=RedisQueueConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

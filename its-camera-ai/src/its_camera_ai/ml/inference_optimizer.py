@@ -35,15 +35,15 @@ from torch.amp import autocast
 from ultralytics import YOLO
 
 try:
-    import tensorrt as trt
-    import torch_tensorrt
+    import tensorrt as trt  # noqa: F401
+    import torch_tensorrt  # noqa: F401
 
     TRT_AVAILABLE = True
 except ImportError:
     TRT_AVAILABLE = False
 
 try:
-    import onnxruntime as ort
+    import onnxruntime as ort  # noqa: F401
 
     ONNX_AVAILABLE = True
 except ImportError:
@@ -484,7 +484,7 @@ class TensorRTOptimizer:
                 def get_batch_size(self):
                     return self.batch_size
 
-                def get_batch(self, names):
+                def get_batch(self, _names):
                     if self.current_index + self.batch_size > len(
                         self.calibration_files
                     ):
@@ -948,7 +948,7 @@ class OptimizedInferenceEngine:
         camera_id: str,
         inference_time: float,
         preprocess_time: float,
-        start_time: float,
+        _start_time: float,
     ) -> DetectionResult:
         """Convert model predictions to structured result."""
         # Apply NMS and confidence filtering

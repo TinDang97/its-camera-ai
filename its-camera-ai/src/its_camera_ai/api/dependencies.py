@@ -4,10 +4,16 @@ Provides reusable dependency functions for database connections,
 authentication, caching, and other shared resources.
 """
 
+import hashlib
+import tempfile
 from collections.abc import AsyncGenerator
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 import redis.asyncio as redis
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -316,7 +322,323 @@ class RateLimiter:
         await cache_service.increment_counter(key, self.period)
 
 
+# Global upload tracking
+_upload_sessions: dict[str, dict[str, Any]] = {}
+
+
+class FileUploadManager:
+    """File upload session manager."""
+
+    def __init__(self):
+        self.sessions = _upload_sessions
+
+    def create_upload_session(self, user_id: str, model_name: str) -> str:
+        """Create a new upload session.
+
+        Args:
+            user_id: User creating the upload
+            model_name: Name of the model being uploaded
+
+        Returns:
+            str: Upload session ID
+        """
+        upload_id = str(uuid4())
+        self.sessions[upload_id] = {
+            "upload_id": upload_id,
+            "user_id": user_id,
+            "model_name": model_name,
+            "status": "initialized",
+            "progress": 0.0,
+            "files": {},
+            "validation_results": {},
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+        }
+        return upload_id
+
+    def get_upload_session(self, upload_id: str) -> dict[str, Any] | None:
+        """Get upload session by ID.
+
+        Args:
+            upload_id: Upload session ID
+
+        Returns:
+            dict: Upload session data or None if not found
+        """
+        return self.sessions.get(upload_id)
+
+    def update_upload_progress(
+        self, upload_id: str, progress: float, status: str | None = None
+    ) -> bool:
+        """Update upload progress.
+
+        Args:
+            upload_id: Upload session ID
+            progress: Progress percentage (0-100)
+            status: Optional status update
+
+        Returns:
+            bool: True if update successful
+        """
+        session = self.sessions.get(upload_id)
+        if not session:
+            return False
+
+        session["progress"] = min(100.0, max(0.0, progress))
+        if status:
+            session["status"] = status
+        session["updated_at"] = datetime.now()
+        return True
+
+    def add_file_to_session(
+        self, upload_id: str, file_type: str, file_info: dict[str, Any]
+    ) -> bool:
+        """Add file information to upload session.
+
+        Args:
+            upload_id: Upload session ID
+            file_type: Type of file (model, config, requirements)
+            file_info: File information dictionary
+
+        Returns:
+            bool: True if successful
+        """
+        session = self.sessions.get(upload_id)
+        if not session:
+            return False
+
+        session["files"][file_type] = file_info
+        session["updated_at"] = datetime.now()
+        return True
+
+    def cleanup_session(self, upload_id: str) -> bool:
+        """Clean up upload session.
+
+        Args:
+            upload_id: Upload session ID
+
+        Returns:
+            bool: True if cleanup successful
+        """
+        return self.sessions.pop(upload_id, None) is not None
+
+
+# Global file upload manager
+_upload_manager: FileUploadManager | None = None
+
+
+def get_upload_manager() -> FileUploadManager:
+    """Get file upload manager dependency.
+
+    Returns:
+        FileUploadManager: Upload manager instance
+    """
+    global _upload_manager
+    if _upload_manager is None:
+        _upload_manager = FileUploadManager()
+    return _upload_manager
+
+
+async def validate_file_upload(
+    file: UploadFile,
+    max_size_mb: float = 500.0,
+    allowed_extensions: set[str] | None = None,
+) -> dict[str, Any]:
+    """Validate uploaded file.
+
+    Args:
+        file: Uploaded file
+        max_size_mb: Maximum file size in MB
+        allowed_extensions: Set of allowed file extensions
+
+    Returns:
+        dict: Validation results
+
+    Raises:
+        HTTPException: If validation fails
+    """
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must have a filename",
+        )
+
+    # Check file extension
+    file_path = Path(file.filename)
+    extension = file_path.suffix.lower()
+
+    if allowed_extensions and extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File extension {extension} not allowed. Allowed: {', '.join(allowed_extensions)}",
+        )
+
+    # Read and validate file content
+    content = await file.read()
+    file_size = len(content)
+
+    # Check file size
+    max_size_bytes = max_size_mb * 1024 * 1024
+    if file_size > max_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size {file_size / (1024*1024):.1f}MB exceeds maximum {max_size_mb}MB",
+        )
+
+    # Calculate checksum
+    checksum = hashlib.sha256(content).hexdigest()
+
+    # Reset file position for future reads
+    await file.seek(0)
+
+    return {
+        "filename": file.filename,
+        "size": file_size,
+        "extension": extension,
+        "content_type": file.content_type,
+        "checksum": checksum,
+        "validation_passed": True,
+    }
+
+
+async def create_temp_file(upload_file: UploadFile, prefix: str = "upload_") -> str:
+    """Create temporary file from upload.
+
+    Args:
+        upload_file: Uploaded file
+        prefix: Filename prefix
+
+    Returns:
+        str: Path to temporary file
+
+    Raises:
+        HTTPException: If file creation fails
+    """
+    try:
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, prefix=prefix) as temp_file:
+            content = await upload_file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+
+        # Reset upload file position
+        await upload_file.seek(0)
+
+        return temp_path
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create temporary file: {str(e)}",
+        ) from e
+
+
+class BackgroundTaskManager:
+    """Background task tracking and management."""
+
+    def __init__(self):
+        self.tasks: dict[str, dict[str, Any]] = {}
+
+    def create_task(
+        self, task_type: str, task_data: dict[str, Any], user_id: str
+    ) -> str:
+        """Create a new background task.
+
+        Args:
+            task_type: Type of task (upload_processing, model_validation, etc.)
+            task_data: Task-specific data
+            user_id: User who initiated the task
+
+        Returns:
+            str: Task ID
+        """
+        task_id = str(uuid4())
+        self.tasks[task_id] = {
+            "task_id": task_id,
+            "task_type": task_type,
+            "status": "pending",
+            "progress": 0.0,
+            "user_id": user_id,
+            "data": task_data,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+            "error_message": None,
+        }
+        return task_id
+
+    def update_task(
+        self,
+        task_id: str,
+        status: str | None = None,
+        progress: float | None = None,
+        error_message: str | None = None,
+    ) -> bool:
+        """Update task status.
+
+        Args:
+            task_id: Task ID
+            status: New status
+            progress: Progress percentage
+            error_message: Error message if failed
+
+        Returns:
+            bool: True if update successful
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            return False
+
+        if status:
+            task["status"] = status
+        if progress is not None:
+            task["progress"] = min(100.0, max(0.0, progress))
+        if error_message:
+            task["error_message"] = error_message
+
+        task["updated_at"] = datetime.now()
+        return True
+
+    def get_task(self, task_id: str) -> dict[str, Any] | None:
+        """Get task by ID.
+
+        Args:
+            task_id: Task ID
+
+        Returns:
+            dict: Task data or None if not found
+        """
+        return self.tasks.get(task_id)
+
+    def cleanup_task(self, task_id: str) -> bool:
+        """Clean up completed task.
+
+        Args:
+            task_id: Task ID
+
+        Returns:
+            bool: True if cleanup successful
+        """
+        return self.tasks.pop(task_id, None) is not None
+
+
+# Global background task manager
+_task_manager: BackgroundTaskManager | None = None
+
+
+def get_task_manager() -> BackgroundTaskManager:
+    """Get background task manager dependency.
+
+    Returns:
+        BackgroundTaskManager: Task manager instance
+    """
+    global _task_manager
+    if _task_manager is None:
+        _task_manager = BackgroundTaskManager()
+    return _task_manager
+
+
 # Common rate limiters
 rate_limit_strict = RateLimiter(calls=10, period=60)  # 10 calls per minute
 rate_limit_normal = RateLimiter(calls=100, period=60)  # 100 calls per minute
 rate_limit_relaxed = RateLimiter(calls=1000, period=60)  # 1000 calls per minute
+rate_limit_upload = RateLimiter(calls=5, period=3600)  # 5 uploads per hour

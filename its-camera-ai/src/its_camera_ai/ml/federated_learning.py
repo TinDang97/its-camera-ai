@@ -318,7 +318,7 @@ class FederatedAggregator:
         return final_weights
 
     def _robust_aggregation(
-        self, decrypted_updates: dict[str, dict], base_weights: dict[str, torch.Tensor]
+        self, decrypted_updates: dict[str, dict], _base_weights: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
         """Robust aggregation against Byzantine failures."""
 

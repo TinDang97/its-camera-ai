@@ -1,0 +1,72 @@
+{
+  "_comment": "ITS Camera AI - Redis Queue Configuration Example",
+  "_description": "Configuration for high-performance Redis queue-based stream processing with gRPC serialization",
+  
+  "redis_url": "redis://localhost:6379/0",
+  "input_queue": "camera_frames",
+  "output_queue": "processed_frames",
+  "queue_pool_size": 20,
+  
+  "max_concurrent_streams": 1000,
+  "quality_threshold": 0.7,
+  "processing_timeout": 5.0,
+  
+  "serialization": {
+    "enable_compression": true,
+    "compression_format": "jpeg",
+    "compression_quality": 85,
+    "enable_batch_processing": true,
+    "batch_size": 20
+  },
+  
+  "performance": {
+    "target_latency_ms": 100,
+    "target_throughput_fps": 50,
+    "max_memory_usage_mb": 2048,
+    "enable_metrics": true
+  },
+  
+  "queue_settings": {
+    "input_queue_config": {
+      "max_length": 10000,
+      "consumer_group": "stream_processor",
+      "consumer_name": "processor_worker",
+      "batch_size": 20,
+      "block_time_ms": 1000,
+      "retry_attempts": 3,
+      "dead_letter_queue": true
+    },
+    "output_queue_config": {
+      "max_length": 50000,
+      "consumer_group": "output_consumers",
+      "consumer_name": "output_worker",
+      "batch_size": 50,
+      "enable_compression": true
+    }
+  },
+  
+  "monitoring": {
+    "enable_performance_tracking": true,
+    "metrics_update_interval_seconds": 60,
+    "health_check_interval_seconds": 30,
+    "enable_detailed_logging": false
+  },
+  
+  "camera_defaults": {
+    "resolution": [1920, 1080],
+    "fps": 30,
+    "encoding": "h264",
+    "quality_threshold": 0.7,
+    "roi_boxes": [],
+    "processing_enabled": true
+  },
+  
+  "production_optimizations": {
+    "enable_connection_pooling": true,
+    "pool_size": 20,
+    "connection_timeout": 30,
+    "retry_on_failure": true,
+    "max_retries": 3,
+    "retry_delay_seconds": 1
+  }
+}

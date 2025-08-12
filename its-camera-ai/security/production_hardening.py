@@ -467,7 +467,7 @@ class ContainerHardening:
 
         return result
 
-    async def _scan_image_vulnerabilities(self, image: str) -> dict[str, Any]:
+    async def _scan_image_vulnerabilities(self, _image: str) -> dict[str, Any]:
         """Scan container image for vulnerabilities."""
         # Simulate vulnerability scanning
         return {"vulnerability_count": 5}
@@ -739,12 +739,12 @@ class KubernetesHardening:
         logger.info("Pod Security Standards hardening manifest created")
         return True
 
-    async def _secure_etcd(self, manifest_dir: Path) -> bool:
+    async def _secure_etcd(self, _manifest_dir: Path) -> bool:
         """Secure etcd configuration."""
         logger.info("Etcd security hardening applied")
         return True
 
-    async def _configure_admission_controllers(self, manifest_dir: Path) -> bool:
+    async def _configure_admission_controllers(self, _manifest_dir: Path) -> bool:
         """Configure admission controllers."""
         logger.info("Admission controllers hardening applied")
         return True
@@ -1109,7 +1109,7 @@ class ProductionHardeningOrchestrator:
 
         return recommendations
 
-    def _generate_next_steps(self, results: dict[str, Any]) -> list[str]:
+    def _generate_next_steps(self, _results: dict[str, Any]) -> list[str]:
         """Generate next steps for hardening process."""
         next_steps = [
             "Review hardening report with security team",

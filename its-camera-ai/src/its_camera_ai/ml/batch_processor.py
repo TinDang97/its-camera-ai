@@ -336,7 +336,7 @@ class GPULoadBalancer:
                 self.device_loads[device_id] = util.gpu / 100.0
         except Exception:
             # Fallback to simple round-robin if pynvml unavailable
-            pass
+            logger.debug("Failed to query GPU utilization, using round-robin")
 
         self.last_load_update = current_time
 
@@ -453,7 +453,7 @@ class SmartBatchProcessor:
         except TimeoutError:
             # Queue is full, drop request
             self.metrics.requests_dropped += 1
-            raise RuntimeError(f"Request queue full for priority {priority.name}")
+            raise RuntimeError(f"Request queue full for priority {priority.name}") from None
 
         # Wait for result
         try:
@@ -461,7 +461,7 @@ class SmartBatchProcessor:
             return result
         except TimeoutError:
             self.metrics.requests_expired += 1
-            raise RuntimeError("Request timeout - system overloaded")
+            raise RuntimeError("Request timeout - system overloaded") from None
 
     async def _process_batches_for_device(self, device_id: int):
         """Process batches continuously for a specific device."""

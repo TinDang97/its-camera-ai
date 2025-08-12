@@ -73,8 +73,23 @@ app:
           - path: /
             pathType: Prefix
 
-# Inference services configuration
+# Inference services configuration with gRPC optimization
 inference:
+  # gRPC configuration for high-performance serialization
+  grpc:
+    enabled: true
+    port: 50051
+    compression:
+      enabled: true
+      format: "jpeg"  # jpeg, png, webp
+      quality: 85
+      level: 6
+    maxMessageSize: "100MB"
+    keepalive:
+      time: "60s"
+      timeout: "10s"
+      permitWithoutCalls: true
+    
   # Triton Inference Server (Linux/NVIDIA)
   triton:
     enabled: false
@@ -100,10 +115,17 @@ inference:
       grpc: 8001
       metrics: 8002
 
-  # BentoML Service (Cross-platform)
+  # BentoML Service (Cross-platform) with Redis Streams integration
   bentoml:
     enabled: true
     replicas: 2
+    # Redis Streams integration
+    redisStreams:
+      enabled: true
+      inputQueue: "camera_frames"
+      outputQueue: "processed_frames"
+      batchSize: 20
+      consumerGroup: "ml_inference"
     image:
       repository: its-camera-ai-bentoml
       tag: latest
@@ -126,7 +148,7 @@ inference:
         workers: 2
         backend: "coreml"
 
-  # Horizontal Pod Autoscaler
+  # Horizontal Pod Autoscaler with Redis Streams metrics
   hpa:
     enabled: true
     minReplicas: 2
@@ -142,6 +164,17 @@ inference:
           target:
             type: AverageValue
             averageValue: "10"
+      # Redis Streams metrics
+      - type: External
+        external:
+          metric:
+            name: redis_stream_length
+            selector:
+              matchLabels:
+                stream_name: "camera_frames"
+          target:
+            type: AverageValue
+            averageValue: "100"
 
 # Model management
 models:
@@ -217,17 +250,61 @@ redis:
       limits:
         memory: "1Gi"
         cpu: "500m"
+  # Cache configuration (separate from streams)
+  cache:
+    databases:
+      inference_cache: 0
+      session_cache: 1
+      analytics_cache: 2
+      config_cache: 3
 
+# Kafka removed - replaced with Redis Streams
 kafka:
+  enabled: false
+  
+# Redis Streams for high-performance queue processing
+redisStreams:
   enabled: true
-  replicaCount: 1
+  replicas: 3
+  image:
+    repository: redis
+    tag: "7.2.0-alpine"
   resources:
     requests:
-      memory: "1Gi"
-      cpu: "500m"
+      memory: "8Gi"
+      cpu: "2"
     limits:
-      memory: "2Gi"
-      cpu: "1000m"
+      memory: "16Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    storageClass: "fast-ssd"
+    size: "200Gi"
+  auth:
+    enabled: true
+    password: "ItsCarneraAIRedisPassword2024"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: "10s"
+  # Queue-specific configuration
+  queueConfig:
+    maxLength: 50000
+    consumerGroups:
+      - name: "stream_processor"
+        consumers: 10
+      - name: "ml_inference"
+        consumers: 6
+      - name: "output_consumers"
+        consumers: 5
+    streams:
+      - name: "camera_frames"
+        maxLength: 10000
+      - name: "processed_frames"
+        maxLength: 50000
+      - name: "inference_queue"
+        maxLength: 20000
 
 # Security configuration
 security:
@@ -249,7 +326,7 @@ security:
   networkPolicy:
     enabled: true
 
-# Platform-specific node selection
+# Platform-specific node selection with workload types
 nodeSelector:
   enabled: true
   linux:
@@ -258,10 +335,28 @@ nodeSelector:
   macos:
     kubernetes.io/os: darwin
     kubernetes.io/arch: amd64
+  # Workload-specific node selection
+  workloadTypes:
+    streaming:
+      workload-type: streaming
+    ml:
+      workload-type: ml-inference
+    database:
+      workload-type: database
 
-# Tolerations for GPU nodes
+# Tolerations for specialized nodes
 tolerations:
   gpu:
     - key: nvidia.com/gpu
       operator: Exists
+      effect: NoSchedule
+  streaming:
+    - key: workload-type
+      operator: Equal
+      value: streaming
+      effect: NoSchedule
+  database:
+    - key: workload-type
+      operator: Equal
+      value: database
       effect: NoSchedule

@@ -4,7 +4,7 @@ Provides CRUD operations for camera management, stream control,
 health monitoring, and batch operations.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -47,7 +47,7 @@ cameras_db: dict[str, dict[str, Any]] = {}
 stream_health_db: dict[str, StreamHealth] = {}
 
 
-async def check_stream_health(camera_id: str, stream_url: str) -> StreamHealth:
+async def check_stream_health(_camera_id: str, _stream_url: str) -> StreamHealth:
     """Check the health of a camera stream.
 
     Args:
@@ -468,7 +468,7 @@ async def update_camera(
             user_id=current_user.id,
         )
 
-        return await get_camera(camera_id, current_user, db, cache)
+        return await get_camera(camera_id, _db, current_user)
 
     except Exception as e:
         logger.error(

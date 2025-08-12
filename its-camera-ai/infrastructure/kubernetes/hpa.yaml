@@ -41,17 +41,17 @@ spec:
       target:
         type: AverageValue
         averageValue: "100"  # Scale up when more than 100 RPS per pod
-  # External metric: Queue depth from Kafka
+  # External metric: Queue depth from Redis Streams
   - type: External
     external:
       metric:
-        name: kafka_consumer_lag
+        name: redis_stream_length
         selector:
           matchLabels:
-            topic: api-requests
+            stream_name: api_requests
       target:
         type: AverageValue
-        averageValue: "50"  # Scale up when lag > 50 messages
+        averageValue: "50"  # Scale up when stream length > 50 messages
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 60
@@ -230,14 +230,15 @@ spec:
       target:
         type: Utilization
         averageUtilization: 70
-  # Kafka consumer lag
+  # Redis Streams consumer lag
   - type: External
     external:
       metric:
-        name: kafka_consumer_lag
+        name: redis_stream_consumer_lag
         selector:
           matchLabels:
-            topic: traffic-events
+            stream_name: traffic_events
+            consumer_group: event_processors
       target:
         type: AverageValue
         averageValue: "200"  # Scale when lag > 200 messages
@@ -264,11 +265,11 @@ spec:
         periodSeconds: 60
 
 ---
-# KEDA ScaledObject for advanced Kafka-based scaling
+# KEDA ScaledObject for advanced Redis Streams-based scaling
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: ml-inference-kafka-scaler
+  name: ml-inference-redis-scaler
   namespace: its-camera-ai
   labels:
     app.kubernetes.io/name: its-camera-ai
@@ -282,17 +283,15 @@ spec:
   minReplicaCount: 6
   maxReplicaCount: 50
   triggers:
-  # Kafka trigger for camera frames
-  - type: kafka
+  # Redis Streams trigger for camera frames
+  - type: redis-streams
     metadata:
-      bootstrapServers: kafka-cluster-kafka-bootstrap.kafka:9092
+      address: redis-streams:6379
+      stream: camera_frames
       consumerGroup: ml-inference-group
-      topic: camera-frames
-      lagThreshold: '100'
-      offsetResetPolicy: latest
-      scaleToZeroOnInvalidOffset: 'false'
+      pendingEntriesCount: '100'
     authenticationRef:
-      name: kafka-auth
+      name: redis-auth
   # Prometheus trigger for queue depth
   - type: prometheus
     metadata:
@@ -337,22 +336,16 @@ spec:
       query: avg(rate(container_network_receive_bytes_total{namespace="its-camera-ai"}[5m]))
 
 ---
-# KEDA TriggerAuthentication for Kafka
+# KEDA TriggerAuthentication for Redis
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
-  name: kafka-auth
+  name: redis-streams-auth
   namespace: its-camera-ai
 spec:
   secretTargetRef:
-  - parameter: sasl
-    name: kafka-credentials
-    key: sasl
-  - parameter: username
-    name: kafka-credentials
-    key: username
   - parameter: password
-    name: kafka-credentials
+    name: redis-auth
     key: password
 
 ---

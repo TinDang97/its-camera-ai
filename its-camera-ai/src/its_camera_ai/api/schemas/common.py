@@ -1,7 +1,7 @@
 """Common Pydantic schemas used across multiple API endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -31,7 +31,7 @@ class ErrorResponse(BaseModel):
     )
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse[T](BaseModel):
     """Paginated response schema for list endpoints."""
 
     items: list[T] = Field(description="List of items")

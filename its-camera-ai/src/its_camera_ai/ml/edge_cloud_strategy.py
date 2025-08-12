@@ -202,7 +202,7 @@ class BandwidthOptimizer:
         except ImportError:
             return frame.tobytes()
 
-    def cache_result(self, frame_id: str, result: DetectionResult):
+    def cache_result(self, _frame_id: str, result: DetectionResult):
         """Cache inference result for similar frames."""
         # Simple caching based on frame similarity
         # In production, use perceptual hashing

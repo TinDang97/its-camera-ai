@@ -301,7 +301,7 @@ async def login(
         return LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
-            token_type="bearer",
+            token_type="bearer",  # noqa: S106
             expires_in=expires_in,
             user=UserResponse(
                 id=user.id,
@@ -324,7 +324,7 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed",
-        )
+        ) from e
 
 
 @router.post(
@@ -364,7 +364,7 @@ async def refresh_token(
         user_id: str = payload.get("sub")
         token_type: str = payload.get("type")
 
-        if user_id is None or token_type != "refresh":
+        if user_id is None or token_type != "refresh":  # noqa: S105
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid refresh token",
@@ -374,7 +374,7 @@ async def refresh_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
-        )
+        ) from None
 
     # Verify user still exists and is active
     user = await auth_service.get_user_by_id(db, user_id)
@@ -393,7 +393,7 @@ async def refresh_token(
 
     return TokenRefreshResponse(
         access_token=access_token,
-        token_type="bearer",
+        token_type="bearer",  # noqa: S106
         expires_in=expires_in,
     )
 
@@ -406,7 +406,7 @@ async def refresh_token(
 )
 async def logout(
     current_user: User = Depends(get_current_user),
-    cache: CacheService = Depends(get_cache_service),
+    _cache: CacheService = Depends(get_cache_service),
 ) -> SuccessResponse:
     """Logout user and invalidate tokens.
 
@@ -473,7 +473,7 @@ async def verify_email(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification token",
-        )
+        ) from None
 
     # Get user
     user = await db.get(User, user_id)
@@ -601,7 +601,7 @@ async def confirm_password_reset(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token",
-        )
+        ) from None
 
     # Get user
     user = await db.get(User, user_id)
@@ -729,7 +729,7 @@ async def update_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Profile update failed",
-        )
+        ) from e
 
 
 @router.post(
@@ -814,12 +814,15 @@ async def setup_mfa(
 
     backup_codes = [secrets.token_hex(4).upper() for _ in range(10)]
 
+    # Generate proper TOTP secret instead of hardcoded value
+    totp_secret = secrets.token_urlsafe(32) if mfa_data.method == "totp" else None
+
     return MFASetupResponse(
-        secret="JBSWY3DPEHPK3PXP" if mfa_data.method == "totp" else None,
+        secret=totp_secret,
         backup_codes=backup_codes,
         qr_code_url=(
-            f"otpauth://totp/ITS-Camera-AI:{current_user.username}?secret=JBSWY3DPEHPK3PXP&issuer=ITS-Camera-AI"
-            if mfa_data.method == "totp"
+            f"otpauth://totp/ITS-Camera-AI:{current_user.username}?secret={totp_secret}&issuer=ITS-Camera-AI"
+            if mfa_data.method == "totp" and totp_secret
             else None
         ),
     )
@@ -832,7 +835,7 @@ async def setup_mfa(
     description="Verify multi-factor authentication code.",
 )
 async def verify_mfa(
-    mfa_data: MFAVerifyRequest,
+    _mfa_data: MFAVerifyRequest,
     current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
     """Verify MFA code.

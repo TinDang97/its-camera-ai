@@ -1,0 +1,97 @@
+{
+  "compression": {
+    "small": {
+      "original_size_mb": 0.2197265625,
+      "compressed_size_mb": 0.052532196044921875,
+      "compression_ratio": 0.23907986111111112,
+      "compression_time_ms": 1.6958951950073242,
+      "throughput_mbps": 129.56376263513798
+    },
+    "medium": {
+      "original_size_mb": 0.87890625,
+      "compressed_size_mb": 0.2090311050415039,
+      "compression_ratio": 0.23783094618055556,
+      "compression_time_ms": 3.3125877380371094,
+      "throughput_mbps": 265.32316107672375
+    },
+    "hd": {
+      "original_size_mb": 2.63671875,
+      "compressed_size_mb": 0.6266374588012695,
+      "compression_ratio": 0.23765805844907406,
+      "compression_time_ms": 10.36834716796875,
+      "throughput_mbps": 254.3046357615894
+    },
+    "full hd": {
+      "original_size_mb": 5.9326171875,
+      "compressed_size_mb": 1.4116020202636719,
+      "compression_ratio": 0.2379391718106996,
+      "compression_time_ms": 23.16570281982422,
+      "throughput_mbps": 256.09484994442386
+    }
+  },
+  "serialization": {
+    "small": {
+      "original_size_mb": 0.2197265625,
+      "serialized_size_mb": 0.03307151794433594,
+      "compression_ratio": 0.15051215277777777,
+      "serialization_time_ms": 0.002396106719970703,
+      "throughput_fps": 417343.68159203976
+    },
+    "medium": {
+      "original_size_mb": 0.87890625,
+      "serialized_size_mb": 0.13194942474365234,
+      "compression_ratio": 0.1501291232638889,
+      "serialization_time_ms": 0.0015497207641601562,
+      "throughput_fps": 645277.5384615385
+    },
+    "large": {
+      "original_size_mb": 2.63671875,
+      "serialized_size_mb": 0.39562129974365234,
+      "compression_ratio": 0.15004304108796296,
+      "serialization_time_ms": 0.0015497207641601562,
+      "throughput_fps": 645277.5384615385
+    }
+  },
+  "memory": {
+    "batch_1": {
+      "total_memory_mb": 0.921875,
+      "memory_per_frame_mb": 0.921875,
+      "frames": 1
+    },
+    "batch_10": {
+      "total_memory_mb": 5.4375,
+      "memory_per_frame_mb": 0.54375,
+      "frames": 10
+    },
+    "batch_50": {
+      "total_memory_mb": 34.03125,
+      "memory_per_frame_mb": 0.680625,
+      "frames": 50
+    },
+    "batch_100": {
+      "total_memory_mb": 82.15625,
+      "memory_per_frame_mb": 0.8215625,
+      "frames": 100
+    }
+  },
+  "comparison": {
+    "kafka_baseline": {
+      "avg_latency_ms": 180,
+      "bandwidth_ratio": 1.0,
+      "throughput_fps": 25,
+      "memory_overhead": 1.5
+    },
+    "redis_grpc": {
+      "avg_latency_ms": 85,
+      "bandwidth_ratio": 0.25,
+      "throughput_fps": 60,
+      "memory_overhead": 1.2
+    },
+    "improvements": {
+      "latency_improvement": 2.1176470588235294,
+      "bandwidth_reduction": 0.75,
+      "throughput_improvement": 2.4,
+      "memory_improvement": 1.25
+    }
+  }
+}

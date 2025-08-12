@@ -1,0 +1,459 @@
+# Redis Streams Monitoring Configuration
+# Comprehensive monitoring for Redis-based queue system
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: redis-streams-alerts
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: monitoring
+    team: its-camera-ai
+spec:
+  groups:
+  - name: redis-streams.rules
+    interval: 15s
+    rules:
+    
+    # Recording rules for better performance
+    - record: redis:stream_length:rate5m
+      expr: rate(redis_stream_length[5m])
+      labels:
+        service: redis-streams
+    
+    - record: redis:stream_consumer_lag:avg
+      expr: avg(redis_stream_consumer_lag) by (stream, consumer_group)
+      labels:
+        service: redis-streams
+    
+    # High stream queue length
+    - alert: RedisStreamHighQueueLength
+      expr: redis_stream_length{stream=~"camera_frames|processed_frames"} > 10000
+      for: 2m
+      labels:
+        severity: warning
+        service: redis-streams
+        component: queue
+      annotations:
+        summary: "Redis stream {{ $labels.stream }} has high queue length"
+        description: "Stream {{ $labels.stream }} length is {{ $value }}, which exceeds 10,000 messages"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#high-queue-length"
+    
+    # Critical stream queue length
+    - alert: RedisStreamCriticalQueueLength
+      expr: redis_stream_length{stream=~"camera_frames|processed_frames"} > 50000
+      for: 1m
+      labels:
+        severity: critical
+        service: redis-streams
+        component: queue
+      annotations:
+        summary: "Redis stream {{ $labels.stream }} has critical queue length"
+        description: "Stream {{ $labels.stream }} length is {{ $value }}, system may be overloaded"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#critical-queue-length"
+    
+    # High consumer lag
+    - alert: RedisStreamHighConsumerLag
+      expr: redis_stream_consumer_lag > 1000
+      for: 5m
+      labels:
+        severity: warning
+        service: redis-streams
+        component: consumer
+      annotations:
+        summary: "Redis stream consumer lag is high"
+        description: "Consumer group {{ $labels.consumer_group }} on stream {{ $labels.stream }} has lag of {{ $value }} messages"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#high-consumer-lag"
+    
+    # Consumer group stalled
+    - alert: RedisStreamConsumerStalled
+      expr: increase(redis_stream_consumer_lag[10m]) > 500
+      for: 5m
+      labels:
+        severity: critical
+        service: redis-streams
+        component: consumer
+      annotations:
+        summary: "Redis stream consumer appears stalled"
+        description: "Consumer group {{ $labels.consumer_group }} lag increased by {{ $value }} in 10 minutes"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#consumer-stalled"
+    
+    # High memory usage
+    - alert: RedisStreamsHighMemoryUsage
+      expr: redis_memory_used_bytes / redis_config_maxmemory * 100 > 85
+      for: 5m
+      labels:
+        severity: warning
+        service: redis-streams
+        component: memory
+      annotations:
+        summary: "Redis streams instance has high memory usage"
+        description: "Redis instance {{ $labels.instance }} memory usage is {{ $value }}%"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#high-memory"
+    
+    # Low throughput
+    - alert: RedisStreamsLowThroughput
+      expr: rate(redis_stream_entries_added_total[5m]) < 10
+      for: 10m
+      labels:
+        severity: info
+        service: redis-streams
+        component: performance
+      annotations:
+        summary: "Redis streams has low message throughput"
+        description: "Stream {{ $labels.stream }} throughput is {{ $value }} messages/sec over 5 minutes"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#low-throughput"
+    
+    # Connection limit approaching
+    - alert: RedisStreamsHighConnectionCount
+      expr: redis_connected_clients > 8000
+      for: 2m
+      labels:
+        severity: warning
+        service: redis-streams
+        component: connections
+      annotations:
+        summary: "Redis streams has high connection count"
+        description: "Redis instance {{ $labels.instance }} has {{ $value }} connections (limit: 10000)"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#high-connections"
+    
+    # Persistence issues
+    - alert: RedisStreamsLastSaveFailed
+      expr: redis_rdb_last_save_timestamp_seconds < (time() - 7200)
+      for: 5m
+      labels:
+        severity: critical
+        service: redis-streams
+        component: persistence
+      annotations:
+        summary: "Redis streams RDB save is overdue"
+        description: "Last RDB save was {{ $value | humanizeDuration }} ago"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#persistence-issues"
+    
+    # High CPU usage
+    - alert: RedisStreamsHighCPUUsage
+      expr: rate(redis_cpu_sys_seconds_total[5m]) * 100 > 80
+      for: 5m
+      labels:
+        severity: warning
+        service: redis-streams
+        component: cpu
+      annotations:
+        summary: "Redis streams instance has high CPU usage"
+        description: "Redis CPU usage is {{ $value }}% on {{ $labels.instance }}"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#high-cpu"
+    
+    # gRPC serialization performance
+    - alert: GRPCSerializationSlowPerformance
+      expr: histogram_quantile(0.95, rate(grpc_serialization_duration_seconds_bucket[5m])) > 0.01
+      for: 5m
+      labels:
+        severity: warning
+        service: grpc-serialization
+        component: performance
+      annotations:
+        summary: "gRPC serialization is slow"
+        description: "95th percentile serialization time is {{ $value }}s"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/grpc#slow-serialization"
+    
+    # Dead letter queue accumulation
+    - alert: RedisStreamsDeadLetterQueueGrowing
+      expr: increase(redis_stream_length{stream=~".*:dlq"}[1h]) > 100
+      for: 10m
+      labels:
+        severity: warning
+        service: redis-streams
+        component: dlq
+      annotations:
+        summary: "Dead letter queue is accumulating messages"
+        description: "DLQ {{ $labels.stream }} added {{ $value }} messages in the last hour"
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/redis-streams#dlq-growth"
+
+---
+# Grafana Dashboard for Redis Streams
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-streams-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: monitoring
+data:
+  redis-streams-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Redis Streams - Queue Performance",
+        "tags": ["redis", "streams", "queue", "its-camera-ai"],
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Stream Queue Lengths",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "redis_stream_length",
+                "legendFormat": "{{stream}} queue length"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Queue Length",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+            "alert": {
+              "conditions": [
+                {
+                  "query": {"queryType": "", "refId": "A"},
+                  "reducer": {"params": [], "type": "last"},
+                  "evaluator": {"params": [10000], "type": "gt"}
+                }
+              ],
+              "executionErrorState": "alerting",
+              "for": "2m",
+              "frequency": "10s",
+              "handler": 1,
+              "name": "High Queue Length",
+              "noDataState": "no_data"
+            }
+          },
+          {
+            "id": 2,
+            "title": "Message Throughput",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(redis_stream_entries_added_total[5m])",
+                "legendFormat": "{{stream}} messages/sec"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Messages/sec",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Consumer Lag",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "redis_stream_consumer_lag",
+                "legendFormat": "{{consumer_group}} lag"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Lag (messages)",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Redis Memory Usage",
+            "type": "singlestat",
+            "targets": [
+              {
+                "expr": "redis_memory_used_bytes / redis_config_maxmemory * 100",
+                "legendFormat": "Memory Usage %"
+              }
+            ],
+            "thresholds": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "red", "value": 85}
+            ],
+            "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Connected Clients",
+            "type": "singlestat",
+            "targets": [
+              {
+                "expr": "redis_connected_clients",
+                "legendFormat": "Connections"
+              }
+            ],
+            "thresholds": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5000},
+              {"color": "red", "value": 8000}
+            ],
+            "gridPos": {"h": 8, "w": 6, "x": 18, "y": 8}
+          },
+          {
+            "id": 6,
+            "title": "gRPC Serialization Performance",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(grpc_serialization_duration_seconds_bucket[5m]))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, rate(grpc_serialization_duration_seconds_bucket[5m]))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Duration (seconds)",
+                "min": 0,
+                "max": 0.05
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 7,
+            "title": "Compression Efficiency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "grpc_compression_ratio",
+                "legendFormat": "Compression ratio"
+              },
+              {
+                "expr": "rate(grpc_compressed_bytes_total[5m])",
+                "legendFormat": "Compressed bytes/sec"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          },
+          {
+            "id": 8,
+            "title": "Processing Pipeline Performance",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(frame_processing_duration_seconds_bucket[5m]))",
+                "legendFormat": "Frame processing P95"
+              },
+              {
+                "expr": "rate(frames_processed_total[5m])",
+                "legendFormat": "Frames processed/sec"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Duration/Rate",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24}
+          }
+        ]
+      }
+    }
+
+---
+# Custom Metrics Configuration for Redis Streams
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-streams-custom-metrics
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: metrics
+data:
+  custom-metrics.yaml: |
+    # Custom metrics configuration for Redis Streams HPA
+    rules:
+    
+    # Stream length metric
+    - seriesQuery: 'redis_stream_length{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^redis_stream_length"
+        as: "redis_stream_queue_length"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+    
+    # Consumer lag metric
+    - seriesQuery: 'redis_stream_consumer_lag{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^redis_stream_consumer_lag"
+        as: "redis_stream_lag"
+      metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+    
+    # gRPC request rate
+    - seriesQuery: 'grpc_server_handled_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^grpc_server_handled_total"
+        as: "grpc_requests_per_second"
+      metricsQuery: 'rate(<<.Series>>{<<.LabelMatchers>>}[1m])'
+    
+    # Processing latency
+    - seriesQuery: 'frame_processing_duration_seconds{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^frame_processing_duration_seconds"
+        as: "frame_processing_latency_p95"
+      metricsQuery: 'histogram_quantile(0.95, rate(<<.Series>>{<<.LabelMatchers>>}[2m]))'
+
+---
+# ServiceMonitor for Redis Streams detailed metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-streams-detailed-monitor
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: detailed-monitoring
+    team: its-camera-ai
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis-streams
+      app.kubernetes.io/component: queue-engine
+  endpoints:
+  - port: metrics
+    interval: 10s  # More frequent scraping for queue metrics
+    scrapeTimeout: 8s
+    path: /metrics
+    metricRelabelings:
+    # Add queue-specific labels
+    - sourceLabels: [__name__]
+      regex: 'redis_stream_(.+)'
+      targetLabel: queue_metric
+      replacement: '${1}'
+    # Relabel stream names for better organization
+    - sourceLabels: [stream]
+      regex: 'camera_frames'
+      targetLabel: queue_type
+      replacement: 'input'
+    - sourceLabels: [stream]
+      regex: 'processed_frames'
+      targetLabel: queue_type
+      replacement: 'output'

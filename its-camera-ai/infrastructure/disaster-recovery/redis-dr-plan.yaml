@@ -1,0 +1,510 @@
+# Redis Disaster Recovery and Capacity Planning
+# Comprehensive backup, restore, and scaling procedures
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-dr-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: disaster-recovery
+data:
+  dr-config.yaml: |
+    # Disaster Recovery Configuration
+    disaster_recovery:
+      # Recovery Time Objective (RTO): 5 minutes
+      # Recovery Point Objective (RPO): 1 minute
+      
+      backup_strategy:
+        frequency: "*/15 * * * *"  # Every 15 minutes
+        retention_local: "24h"
+        retention_remote: "30d"
+        storage_locations:
+          - "s3://its-camera-ai-redis-backups-prod"
+          - "s3://its-camera-ai-redis-backups-dr"
+        
+      replication:
+        cross_region: true
+        regions:
+          primary: "us-west-2"
+          secondary: "us-east-1"
+        
+      monitoring:
+        heartbeat_interval: "30s"
+        failover_detection: "2m"
+        automated_failover: true
+        
+    capacity_planning:
+      current_metrics:
+        peak_throughput: "10000 msg/sec"
+        avg_throughput: "3000 msg/sec"
+        peak_memory: "12GB per node"
+        peak_cpu: "4 cores per node"
+        
+      scaling_triggers:
+        memory_threshold: 80
+        cpu_threshold: 70
+        queue_length_threshold: 5000
+        
+      growth_projections:
+        monthly_growth: 15
+        yearly_capacity: "50000 msg/sec"
+        max_nodes: 20
+
+---
+# Backup CronJob with enhanced features
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-enhanced-backup
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "*/15 * * * *"  # Every 15 minutes
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900  # 15 minutes timeout
+      
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: redis-backup
+            app.kubernetes.io/component: backup-job
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: redis-backup-sa
+          
+          initContainers:
+          - name: backup-init
+            image: redis:7.2.0-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Checking Redis cluster health..."
+              for i in 0 1 2; do
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" ping
+                if [ $? -ne 0 ]; then
+                  echo "Redis instance $i is not healthy"
+                  exit 1
+                fi
+              done
+              echo "All Redis instances are healthy"
+            env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-auth
+                  key: password
+          
+          containers:
+          - name: redis-backup
+            image: its-camera-ai/redis-backup:v1.0.0
+            imagePullPolicy: IfNotPresent
+            
+            command:
+            - /bin/sh
+            - -c
+            - |
+              #!/bin/sh
+              set -e
+              
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_DIR="/tmp/backup_$TIMESTAMP"
+              mkdir -p $BACKUP_DIR
+              
+              echo "Starting Redis backup at $TIMESTAMP"
+              
+              # Backup each Redis instance
+              for i in 0 1 2; do
+                echo "Backing up redis-streams-$i..."
+                
+                # Create consistent snapshot
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" BGSAVE
+                
+                # Wait for background save to complete
+                while [ "$(redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" LASTSAVE)" = "$(redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" LASTSAVE)" ]; do
+                  sleep 1
+                done
+                
+                # Get configuration and data
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" CONFIG GET "*" > $BACKUP_DIR/redis-$i-config.txt
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" INFO > $BACKUP_DIR/redis-$i-info.txt
+                
+                # Backup stream metadata
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" XINFO GROUPS camera_frames > $BACKUP_DIR/redis-$i-streams-camera.txt || true
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" XINFO GROUPS processed_frames > $BACKUP_DIR/redis-$i-streams-processed.txt || true
+                
+                echo "Backup completed for redis-streams-$i"
+              done
+              
+              # Create backup archive
+              cd /tmp
+              tar -czf backup_$TIMESTAMP.tar.gz backup_$TIMESTAMP/
+              
+              # Upload to S3 with encryption
+              aws s3 cp backup_$TIMESTAMP.tar.gz s3://its-camera-ai-redis-backups-prod/backups/ \
+                --server-side-encryption AES256 \
+                --metadata "timestamp=$TIMESTAMP,type=full-backup"
+              
+              # Upload to DR location
+              aws s3 cp backup_$TIMESTAMP.tar.gz s3://its-camera-ai-redis-backups-dr/backups/ \
+                --server-side-encryption AES256 \
+                --metadata "timestamp=$TIMESTAMP,type=full-backup"
+              
+              # Cleanup old local backups
+              rm -rf backup_$TIMESTAMP backup_$TIMESTAMP.tar.gz
+              
+              # Send backup metrics to monitoring
+              curl -X POST http://pushgateway.monitoring:9091/metrics/job/redis-backup \
+                -d "redis_backup_success{instance=\"$HOSTNAME\"} 1"
+              
+              echo "Backup completed successfully at $TIMESTAMP"
+            
+            env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-auth
+                  key: password
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+            
+            volumeMounts:
+            - name: aws-credentials
+              mountPath: /root/.aws
+              readOnly: true
+          
+          volumes:
+          - name: aws-credentials
+            secret:
+              secretName: aws-backup-credentials
+
+---
+# Service Account for backup operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis-backup-sa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: backup
+
+---
+# RBAC for backup service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: redis-backup-role
+  namespace: its-camera-ai
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/exec"]
+  verbs: ["get", "list", "create"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: redis-backup-binding
+  namespace: its-camera-ai
+subjects:
+- kind: ServiceAccount
+  name: redis-backup-sa
+  namespace: its-camera-ai
+roleRef:
+  kind: Role
+  name: redis-backup-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Restore Job Template
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-restore-template
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: restore
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis-restore
+        app.kubernetes.io/component: restore-job
+    spec:
+      restartPolicy: Never
+      serviceAccountName: redis-backup-sa
+      
+      containers:
+      - name: redis-restore
+        image: its-camera-ai/redis-backup:v1.0.0
+        
+        command:
+        - /bin/sh
+        - -c
+        - |
+          #!/bin/sh
+          set -e
+          
+          RESTORE_TIMESTAMP=${RESTORE_TIMESTAMP:-latest}
+          
+          echo "Starting Redis restore from backup: $RESTORE_TIMESTAMP"
+          
+          # Download backup from S3
+          if [ "$RESTORE_TIMESTAMP" = "latest" ]; then
+            BACKUP_FILE=$(aws s3 ls s3://its-camera-ai-redis-backups-prod/backups/ | tail -1 | awk '{print $4}')
+          else
+            BACKUP_FILE="backup_$RESTORE_TIMESTAMP.tar.gz"
+          fi
+          
+          echo "Restoring from backup: $BACKUP_FILE"
+          
+          # Download and extract backup
+          aws s3 cp s3://its-camera-ai-redis-backups-prod/backups/$BACKUP_FILE /tmp/
+          cd /tmp
+          tar -xzf $BACKUP_FILE
+          
+          BACKUP_DIR=$(ls -d backup_*/ | head -1)
+          cd $BACKUP_DIR
+          
+          # Stop Redis instances gracefully
+          for i in 0 1 2; do
+            echo "Stopping redis-streams-$i..."
+            kubectl exec redis-streams-$i -- redis-cli -a "$REDIS_PASSWORD" SHUTDOWN NOSAVE || true
+          done
+          
+          # Wait for pods to restart
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=redis-streams --timeout=300s
+          
+          # Restore configuration and data
+          for i in 0 1 2; do
+            echo "Restoring redis-streams-$i..."
+            
+            # Restore basic configuration
+            while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" CONFIG SET $line || true
+              fi
+            done < redis-$i-config.txt
+            
+            echo "Configuration restored for redis-streams-$i"
+          done
+          
+          # Recreate consumer groups
+          redis-cli -h redis-streams-0.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" XGROUP CREATE camera_frames stream_processor 0 MKSTREAM || true
+          redis-cli -h redis-streams-0.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" XGROUP CREATE camera_frames ml_inference 0 MKSTREAM || true
+          redis-cli -h redis-streams-0.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" XGROUP CREATE processed_frames output_consumers 0 MKSTREAM || true
+          
+          # Verify restore
+          for i in 0 1 2; do
+            redis-cli -h redis-streams-$i.redis-streams-headless -p 6379 -a "$REDIS_PASSWORD" ping
+            if [ $? -ne 0 ]; then
+              echo "Restore verification failed for redis-streams-$i"
+              exit 1
+            fi
+          done
+          
+          echo "Redis restore completed successfully"
+          
+          # Send restore metrics
+          curl -X POST http://pushgateway.monitoring:9091/metrics/job/redis-restore \
+            -d "redis_restore_success{instance=\"$HOSTNAME\"} 1"
+        
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-auth
+              key: password
+        - name: RESTORE_TIMESTAMP
+          value: "latest"  # Can be overridden
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+
+---
+# Capacity Planning Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-capacity-analysis
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: capacity-planning
+spec:
+  schedule: "0 6 * * 1"  # Weekly on Monday at 6 AM
+  
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          
+          containers:
+          - name: capacity-analyzer
+            image: its-camera-ai/capacity-analyzer:v1.0.0
+            
+            command:
+            - /bin/sh
+            - -c
+            - |
+              #!/bin/sh
+              set -e
+              
+              echo "Starting capacity analysis..."
+              
+              # Collect metrics from Prometheus
+              PROMETHEUS_URL="http://prometheus.monitoring:9090"
+              
+              # Get average throughput over last week
+              AVG_THROUGHPUT=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=avg_over_time(rate(redis_stream_entries_added_total[7d])[7d:])" | jq -r '.data.result[0].value[1]')
+              
+              # Get peak throughput
+              PEAK_THROUGHPUT=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=max_over_time(rate(redis_stream_entries_added_total[5m])[7d:])" | jq -r '.data.result[0].value[1]')
+              
+              # Get memory usage trends
+              AVG_MEMORY=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=avg_over_time(redis_memory_used_bytes[7d:])" | jq -r '.data.result[0].value[1]')
+              
+              # Calculate growth rate
+              GROWTH_RATE=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=(rate(redis_stream_entries_added_total[7d:1d]) - rate(redis_stream_entries_added_total[14d:7d])) / rate(redis_stream_entries_added_total[14d:7d]) * 100" | jq -r '.data.result[0].value[1]')
+              
+              # Generate capacity report
+              cat > /tmp/capacity_report.json <<EOF
+              {
+                "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "current_metrics": {
+                  "avg_throughput": $AVG_THROUGHPUT,
+                  "peak_throughput": $PEAK_THROUGHPUT,
+                  "avg_memory_usage": $AVG_MEMORY,
+                  "growth_rate_percent": $GROWTH_RATE
+                },
+                "projections": {
+                  "monthly_throughput": $(echo "$AVG_THROUGHPUT * (1 + $GROWTH_RATE/100) ^ 4" | bc -l),
+                  "yearly_throughput": $(echo "$AVG_THROUGHPUT * (1 + $GROWTH_RATE/100) ^ 48" | bc -l)
+                },
+                "recommendations": {
+                  "scale_trigger": $(echo "$PEAK_THROUGHPUT * 1.5" | bc -l),
+                  "memory_limit": $(echo "$AVG_MEMORY * 2" | bc -l),
+                  "additional_nodes_needed": $(echo "($PEAK_THROUGHPUT * 1.5) / 3000" | bc -l | cut -d. -f1)
+                }
+              }
+              EOF
+              
+              # Upload report to S3
+              aws s3 cp /tmp/capacity_report.json s3://its-camera-ai-redis-backups-prod/capacity-reports/$(date +%Y%m%d)_capacity_report.json
+              
+              # Send alert if scaling recommended
+              NODES_NEEDED=$(cat /tmp/capacity_report.json | jq -r '.recommendations.additional_nodes_needed')
+              if [ "$NODES_NEEDED" -gt 0 ]; then
+                curl -X POST http://alertmanager.monitoring:9093/api/v1/alerts \
+                  -H "Content-Type: application/json" \
+                  -d '[{
+                    "labels": {
+                      "alertname": "RedisCapacityScalingNeeded",
+                      "severity": "warning",
+                      "service": "redis-streams"
+                    },
+                    "annotations": {
+                      "summary": "Redis capacity scaling recommended",
+                      "description": "Analysis suggests adding '$NODES_NEEDED' additional Redis nodes"
+                    }
+                  }]'
+              fi
+              
+              echo "Capacity analysis completed"
+            
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 200m
+                memory: 256Mi
+
+---
+# Emergency Scale-out Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-emergency-scale
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: redis-streams
+    app.kubernetes.io/component: emergency-scaling
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      
+      containers:
+      - name: emergency-scaler
+        image: bitnami/kubectl:latest
+        
+        command:
+        - /bin/sh
+        - -c
+        - |
+          #!/bin/sh
+          set -e
+          
+          echo "Emergency Redis scaling initiated..."
+          
+          # Scale StatefulSet to 6 replicas
+          kubectl patch statefulset redis-streams -p '{"spec":{"replicas":6}}'
+          
+          # Wait for new pods to be ready
+          kubectl wait --for=condition=ready pod redis-streams-3 redis-streams-4 redis-streams-5 --timeout=300s
+          
+          # Configure new Redis instances
+          for i in 3 4 5; do
+            echo "Configuring redis-streams-$i..."
+            
+            # Wait for Redis to be available
+            until kubectl exec redis-streams-$i -- redis-cli ping; do
+              echo "Waiting for redis-streams-$i to be ready..."
+              sleep 5
+            done
+            
+            # Set memory limit
+            kubectl exec redis-streams-$i -- redis-cli CONFIG SET maxmemory 12gb
+            kubectl exec redis-streams-$i -- redis-cli CONFIG SET maxmemory-policy volatile-lru
+          done
+          
+          # Update HPA max replicas for dependent services
+          kubectl patch hpa camera-stream-hpa -p '{"spec":{"maxReplicas":150}}'
+          kubectl patch hpa ml-inference-hpa -p '{"spec":{"maxReplicas":75}}'
+          
+          echo "Emergency scaling completed successfully"
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi

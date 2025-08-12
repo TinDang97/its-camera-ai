@@ -377,7 +377,7 @@ class EdgeModelOptimizer:
         return optimized_models
 
     def _optimize_for_intel_ncs(
-        self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
+        self, model_path: Path, _device_profile: EdgeDeviceProfile, output_dir: Path
     ) -> dict[str, Path]:
         """Optimize for Intel Neural Compute Stick."""
 
@@ -599,7 +599,7 @@ CMD ["python", "src/tca/app/edge_inference_server.py"]
 
         return dockerfile_content
 
-    def _add_jetson_setup(self, device_profile: EdgeDeviceProfile) -> str:
+    def _add_jetson_setup(self, _device_profile: EdgeDeviceProfile) -> str:
         """Add Jetson-specific setup."""
         return """
 # NVIDIA Jetson setup
@@ -616,7 +616,7 @@ ENV LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 """
 
-    def _add_intel_ncs_setup(self, device_profile: EdgeDeviceProfile) -> str:
+    def _add_intel_ncs_setup(self, _device_profile: EdgeDeviceProfile) -> str:
         """Add Intel NCS2-specific setup."""
         return """
 # Intel NCS2 setup
@@ -630,7 +630,7 @@ RUN echo "source $INTEL_OPENVINO_DIR/bin/setupvars.sh" >> ~/.bashrc
 
 """
 
-    def _add_raspberry_pi_setup(self, device_profile: EdgeDeviceProfile) -> str:
+    def _add_raspberry_pi_setup(self, _device_profile: EdgeDeviceProfile) -> str:
         """Add Raspberry Pi-specific setup."""
         return """
 # Raspberry Pi optimization
@@ -859,11 +859,13 @@ class KubernetesManifestGenerator:
         }
 
         # Add GPU resources for applicable devices
-        if device_profile.enable_gpu_acceleration:
-            if device_profile.device_type.value.startswith("jetson"):
-                manifest["spec"]["template"]["spec"]["containers"][0]["resources"][
-                    "limits"
-                ]["nvidia.com/gpu"] = 1
+        if (
+            device_profile.enable_gpu_acceleration
+            and device_profile.device_type.value.startswith("jetson")
+        ):
+            manifest["spec"]["template"]["spec"]["containers"][0]["resources"][
+                "limits"
+            ]["nvidia.com/gpu"] = 1
 
         return manifest
 

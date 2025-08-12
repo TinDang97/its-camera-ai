@@ -29,7 +29,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import cv2
 import numpy as np
@@ -38,22 +38,85 @@ from PIL import Image
 # Async messaging and serialization
 try:
     import redis.asyncio as aioredis
-    from .redis_queue_manager import RedisQueueManager, QueueConfig, QueueType
+
     from .grpc_serialization import ProcessedFrameSerializer
+    from .redis_queue_manager import QueueConfig, QueueType, RedisQueueManager
 
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
-    
+
     # Fallback classes for development
     class RedisQueueManager:
-        pass
+        """Fallback Redis queue manager when Redis is not available."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def connect(self):
+            """Connect to Redis (no-op in fallback)."""
+            pass
+
+        async def disconnect(self):
+            """Disconnect from Redis (no-op in fallback)."""
+            pass
+
+        async def create_queue(self, *_args, **_kwargs):
+            """Create a queue (no-op in fallback)."""
+            pass
+
+        async def enqueue(self, *_args, **_kwargs):
+            """Enqueue a message (always succeeds in fallback)."""
+            return True
+
+        async def dequeue(self, *_args, **_kwargs):
+            """Dequeue a message (returns None in fallback)."""
+            return None
+
+        async def dequeue_batch(self, *_args, **_kwargs):
+            """Dequeue batch of messages (returns empty list in fallback)."""
+            return []
+
+        async def acknowledge(self, *_args, **_kwargs):
+            """Acknowledge a message (always succeeds in fallback)."""
+            return True
+
+        async def get_queue_metrics(self, *_args, **_kwargs):
+            """Get queue metrics (returns empty dict in fallback)."""
+            return {}
+
+        async def health_check(self):
+            """Health check (always healthy in fallback)."""
+            return {"status": "healthy", "fallback": True}
+
+        async def __aenter__(self):
+            """Async context manager entry."""
+            await self.connect()
+            return self
+
+        async def __aexit__(self, *args):
+            """Async context manager exit."""
+            await self.disconnect()
+
     class QueueConfig:
-        pass
+        """Fallback queue configuration."""
+
+        def __init__(self, name: str = "default", queue_type: str = "stream", **_kwargs):
+            self.name = name
+            self.queue_type = queue_type
+
     class QueueType:
         STREAM = "stream"
+        LIST = "list"
+
     class ProcessedFrameSerializer:
-        pass
+        """Fallback frame serializer."""
+
+        def serialize(self, *_args, **_kwargs):
+            return b""
+
+        def deserialize(self, *_args, **_kwargs):
+            return None
 
 
 logger = logging.getLogger(__name__)
@@ -420,7 +483,7 @@ class StreamProcessor:
         self.input_queue = config.get("input_queue", "camera_frames")
         self.output_queue = config.get("output_queue", "processed_frames")
         self.queue_pool_size = config.get("queue_pool_size", 20)
-        
+
         # gRPC serialization
         self.enable_compression = config.get("enable_compression", True)
         self.compression_format = config.get("compression_format", "jpeg")
@@ -440,8 +503,8 @@ class StreamProcessor:
             "error_count": 0,
         }
 
-        self.queue_manager: Optional[RedisQueueManager] = None
-        self.serializer: Optional[ProcessedFrameSerializer] = None
+        self.queue_manager: RedisQueueManager | None = None
+        self.serializer: ProcessedFrameSerializer | None = None
         self.redis_client = None
 
         logger.info("Stream processor initialized")
@@ -467,16 +530,16 @@ class StreamProcessor:
 
     async def _setup_redis_queues(self):
         """Setup Redis queue manager for high-performance streaming."""
-        
+
         self.queue_manager = RedisQueueManager(
             redis_url=self.redis_url,
             pool_size=self.queue_pool_size,
             timeout=30,
-            retry_on_failure=True
+            retry_on_failure=True,
         )
-        
+
         await self.queue_manager.connect()
-        
+
         # Create input and output queues
         input_config = QueueConfig(
             name=self.input_queue,
@@ -486,9 +549,9 @@ class StreamProcessor:
             consumer_name="processor_worker",
             batch_size=20,
             block_time_ms=1000,
-            enable_compression=self.enable_compression
+            enable_compression=self.enable_compression,
         )
-        
+
         output_config = QueueConfig(
             name=self.output_queue,
             queue_type=QueueType.STREAM,
@@ -496,12 +559,12 @@ class StreamProcessor:
             consumer_group="output_consumers",
             consumer_name="output_worker",
             batch_size=50,
-            enable_compression=self.enable_compression
+            enable_compression=self.enable_compression,
         )
-        
+
         await self.queue_manager.create_queue(input_config)
         await self.queue_manager.create_queue(output_config)
-        
+
         logger.info("Redis queue connections established")
 
     async def _setup_redis_cache(self):
@@ -513,43 +576,152 @@ class StreamProcessor:
             cache_url = cache_url.replace("/0", "/1")  # Use DB 1 for cache
         elif not cache_url.endswith(("/1", "/2", "/3")):
             cache_url += "/1"
-        
-        self.redis_client = await aioredis.from_url(
-            cache_url, decode_responses=True
-        )
+
+        self.redis_client = await aioredis.from_url(cache_url, decode_responses=True)
 
         logger.info("Redis cache connection established")
-    
+
     def _setup_serializer(self):
         """Setup gRPC serializer for efficient data transfer."""
-        
+
         self.serializer = ProcessedFrameSerializer(
             compression_format=self.compression_format,
             compression_quality=self.compression_quality,
-            enable_compression=self.enable_compression
+            enable_compression=self.enable_compression,
         )
-        
-        logger.info(f"gRPC serializer initialized with {self.compression_format} compression")
+
+        logger.info(
+            f"gRPC serializer initialized with {self.compression_format} compression"
+        )
 
     async def _consume_frames(self):
-        """Consume and process frames from Kafka."""
+        """Consume and process frames from Redis queues."""
 
-        if not self.kafka_consumer:
-            logger.warning("Kafka consumer not available")
+        if not self.queue_manager:
+            logger.warning("Queue manager not available")
             return
 
         try:
-            async for message in self.kafka_consumer:
+            while True:
                 try:
-                    frame_data = message.value
-                    await self._process_frame_message(frame_data)
+                    # Batch dequeue for better performance
+                    messages = await self.queue_manager.dequeue_batch(
+                        self.input_queue, batch_size=20, timeout_ms=1000
+                    )
+
+                    if messages:
+                        # Process batch
+                        await self._process_frame_batch(messages)
+                    else:
+                        # Short pause when no messages
+                        await asyncio.sleep(0.01)
 
                 except Exception as e:
-                    logger.error(f"Frame processing error: {e}")
+                    logger.error(f"Frame consumption error: {e}")
                     self.performance_metrics["error_count"] += 1
+                    await asyncio.sleep(1)  # Longer pause on error
 
         except Exception as e:
-            logger.error(f"Frame consumption error: {e}")
+            logger.error(f"Critical frame consumption error: {e}")
+
+    async def _process_frame_batch(self, messages: list[tuple[str, bytes]]):
+        """Process batch of frame messages for improved performance."""
+
+        start_time = time.time()
+        processed_count = 0
+        rejected_count = 0
+
+        try:
+            # Process messages in parallel
+            tasks = []
+            for message_id, message_data in messages:
+                task = asyncio.create_task(
+                    self._process_single_message(message_id, message_data)
+                )
+                tasks.append(task)
+
+            # Wait for all tasks to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results and handle acknowledgments
+            for i, result in enumerate(results):
+                message_id = messages[i][0]
+
+                if isinstance(result, Exception):
+                    logger.error(f"Processing failed for {message_id}: {result}")
+                    await self.queue_manager.reject(
+                        self.input_queue, message_id, reason=str(result)
+                    )
+                    self.performance_metrics["error_count"] += 1
+
+                elif result:
+                    # Successfully processed
+                    processing_time = (time.time() - start_time) * 1000
+                    await self.queue_manager.acknowledge(
+                        self.input_queue, message_id, processing_time_ms=processing_time
+                    )
+                    processed_count += 1
+
+                else:
+                    # Rejected due to validation
+                    await self.queue_manager.acknowledge(self.input_queue, message_id)
+                    rejected_count += 1
+
+            # Update metrics
+            self.performance_metrics["frames_processed"] += processed_count
+            self.performance_metrics["frames_rejected"] += rejected_count
+
+            batch_time = (time.time() - start_time) * 1000
+            logger.debug(
+                f"Processed batch: {processed_count} processed, {rejected_count} rejected, "
+                f"{batch_time:.2f}ms total"
+            )
+
+        except Exception as e:
+            logger.error(f"Batch processing error: {e}")
+            self.performance_metrics["error_count"] += 1
+
+    async def _process_single_message(
+        self, _message_id: str, message_data: bytes
+    ) -> bool:
+        """Process single message and return success status."""
+
+        try:
+            # Check if this is gRPC serialized data or legacy format
+            if self.serializer and self._is_grpc_data(message_data):
+                # Deserialize gRPC data
+                frame = self.serializer.deserialize_processed_frame(message_data)
+            else:
+                # Parse legacy JSON format
+                frame_dict = json.loads(message_data.decode("utf-8"))
+                frame = await self._parse_frame_data(frame_dict)
+
+            if not frame:
+                return False
+
+            # Process the frame through pipeline
+            processed_frame = await self._process_frame_pipeline(frame)
+
+            # Store and emit processed frame
+            if processed_frame.validation_passed:
+                self.processed_frames.append(processed_frame)
+                await self._emit_processed_frame(processed_frame)
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            logger.error(f"Single message processing error: {e}")
+            raise
+
+    def _is_grpc_data(self, data: bytes) -> bool:
+        """Check if data is gRPC serialized (simple heuristic)."""
+        try:
+            # Try to parse as protobuf - this is a simple check
+            # In production, you might want a more robust detection method
+            return len(data) > 10 and not data.startswith(b"{")
+        except Exception:
+            return False
 
     async def _process_frame_message(self, frame_data: dict[str, Any]):
         """Process individual frame message."""
@@ -828,25 +1000,38 @@ class StreamProcessor:
     def get_processing_stats(self) -> dict[str, Any]:
         """Get overall processing statistics."""
 
-        return {
+        stats = {
             "active_streams": len(self.active_streams),
             "performance_metrics": self.performance_metrics,
             "processed_frames_buffer": len(self.processed_frames),
             "quality_stats_cameras": len(self.quality_stats),
-            "kafka_available": self.kafka_consumer is not None,
-            "redis_available": self.redis_client is not None,
+            "queue_manager_available": self.queue_manager is not None,
+            "redis_cache_available": self.redis_client is not None,
+            "serialization_enabled": self.serializer is not None,
         }
+
+        # Add serialization performance metrics
+        if self.serializer:
+            serialization_metrics = self.serializer.get_performance_metrics()
+            stats["serialization_metrics"] = serialization_metrics
+
+        # Add queue metrics if available
+        if self.queue_manager:
+            try:
+                # Note: This would be async in real usage
+                pass  # asyncio.create_task(self._update_queue_stats(stats))
+            except Exception as e:
+                logger.warning(f"Failed to get queue stats: {e}")
+
+        return stats
 
     async def stop(self):
         """Stop stream processing."""
 
         logger.info("Stopping stream processor")
 
-        if self.kafka_consumer:
-            await self.kafka_consumer.stop()
-
-        if self.kafka_producer:
-            await self.kafka_producer.stop()
+        if self.queue_manager:
+            await self.queue_manager.disconnect()
 
         if self.redis_client:
             await self.redis_client.close()

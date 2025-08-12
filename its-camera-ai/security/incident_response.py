@@ -847,15 +847,15 @@ class IncidentReportGenerator:
 
         return impacts
 
-    def _identify_contributing_factors(self, incident: SecurityIncident) -> list[str]:
+    def _identify_contributing_factors(self, _incident: SecurityIncident) -> list[str]:
         """Identify contributing factors."""
         return ["Configuration weakness", "Inadequate monitoring", "User error"]
 
-    def _identify_exploited_vulnerability(self, incident: SecurityIncident) -> str:
+    def _identify_exploited_vulnerability(self, _incident: SecurityIncident) -> str:
         """Identify exploited vulnerability."""
         return "Authentication bypass vulnerability"
 
-    def _identify_attack_vector(self, incident: SecurityIncident) -> str:
+    def _identify_attack_vector(self, _incident: SecurityIncident) -> str:
         """Identify attack vector."""
         return "Network-based attack"
 

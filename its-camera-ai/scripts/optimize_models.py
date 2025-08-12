@@ -106,7 +106,7 @@ class ModelOptimizer:
             logger.error(f"❌ Error converting to ONNX: {e}")
             return False
 
-    def _create_dummy_pytorch_model(self) -> "torch.nn.Module":
+    def _create_dummy_pytorch_model(self):
         """Create a dummy PyTorch model for demonstration."""
         import torch.nn as nn
 
@@ -282,7 +282,7 @@ class ModelOptimizer:
         model_path: Path,
         output_path: Path,
         quantization_type: str = "dynamic",
-        calibration_dataset: Path | None = None,
+        _calibration_dataset: Path | None = None,
     ) -> bool:
         """Quantize model for reduced precision inference."""
         try:
@@ -309,7 +309,7 @@ class ModelOptimizer:
             return False
 
     async def _quantize_onnx(
-        self, onnx_path: Path, output_path: Path, quantization_type: str
+        self, onnx_path: Path, output_path: Path, _quantization_type: str
     ) -> bool:
         """Quantize ONNX model."""
         try:
@@ -332,7 +332,7 @@ class ModelOptimizer:
             return False
 
     async def _quantize_pytorch(
-        self, pytorch_path: Path, output_path: Path, quantization_type: str
+        self, _pytorch_path: Path, output_path: Path, _quantization_type: str
     ) -> bool:
         """Quantize PyTorch model."""
         try:

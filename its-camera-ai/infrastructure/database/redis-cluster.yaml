@@ -1,22 +1,37 @@
 # Redis Cluster Configuration for ITS Camera AI System
-# High-performance caching and session management
-# Optimized for sub-100ms latency requirements
+# High-performance streaming queue and caching system
+# Optimized for sub-100ms latency requirements with gRPC support
 
 apiVersion: redis.redis.opstreelabs.in/v1beta1
 kind: RedisCluster
 metadata:
-  name: redis-cluster
+  name: redis-queue-cluster
   namespace: its-camera-ai-system
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: queue-cluster
+    app.kubernetes.io/version: "7.2.0"
+    app.kubernetes.io/part-of: its-camera-ai
 spec:
   clusterSize: 6
   clusterVersion: v7.2.0
 
-  # Redis configuration optimized for camera data caching
+  # Redis configuration optimized for high-throughput streaming
   redisExporter:
     enabled: true
     image: quay.io/opstree/redis-exporter:v1.55.0
+    
+  # TLS configuration for secure communication
+  TLS:
+    ca: redis-ca
+    cert: redis-cert
+    key: redis-key
+    
+  # Cluster configuration for streaming workloads
+  redisFollower:
+    replicas: 3
 
-  # Storage configuration
+  # Storage configuration optimized for streaming data
   storage:
     volumeClaimTemplate:
       spec:
@@ -24,26 +39,52 @@ spec:
         storageClassName: fast-ssd
         resources:
           requests:
-            storage: 500Gi
+            storage: 1Ti  # Increased for streaming queue data
+      metadata:
+        labels:
+          workload-type: streaming-queue
 
-  # Redis configuration
+  # Redis configuration optimized for streaming queues
   redisConfig:
-    # Memory management
-    maxmemory: "30gb"
-    maxmemory-policy: "allkeys-lru"
+    # Memory management for high-throughput queues
+    maxmemory: "50gb"  # Increased for queue data
+    maxmemory-policy: "volatile-lru"  # Better for queue data with TTL
 
-    # Persistence settings for cached inference results
-    save: "900 1 300 10 60 10000"
+    # Persistence settings optimized for streaming queues
+    save: "300 1 60 100 10 10000"  # More frequent saves for queue data
     rdbcompression: "yes"
     rdbchecksum: "yes"
+    
+    # Stream-specific configurations
+    stream-node-max-bytes: "4096"
+    stream-node-max-entries: "100"
+    
+    # AOF for better durability with queues
+    appendonly: "yes"
+    appendfsync: "everysec"
+    auto-aof-rewrite-percentage: "100"
+    auto-aof-rewrite-min-size: "64mb"
 
     # Network and timeout settings
     timeout: "300"
     tcp-keepalive: "300"
 
-    # Performance tuning
-    tcp-backlog: "511"
+    # Performance tuning for high-throughput streaming
+    tcp-backlog: "1024"  # Increased for more concurrent connections
     databases: "16"
+    
+    # Connection and threading optimizations
+    io-threads: "4"
+    io-threads-do-reads: "yes"
+    
+    # Memory optimization for large payloads
+    hash-max-ziplist-entries: "1024"
+    hash-max-ziplist-value: "16384"  # Larger for gRPC payloads
+    
+    # Lazy deletion for better performance
+    lazyfree-lazy-eviction: "yes"
+    lazyfree-lazy-expire: "yes"
+    lazyfree-lazy-server-del: "yes"
 
     # Replication settings
     repl-diskless-sync: "yes"
@@ -54,14 +95,14 @@ spec:
     client-output-buffer-limit-replica: "256mb 64mb 60"
     client-output-buffer-limit-pubsub: "32mb 8mb 60"
 
-  # Resource allocation
+  # Resource allocation optimized for streaming workloads
   resources:
     requests:
-      cpu: "2"
-      memory: "32Gi"
+      cpu: "4"  # Increased for higher throughput
+      memory: "64Gi"  # Increased for queue data
     limits:
-      cpu: "4"
-      memory: "64Gi"
+      cpu: "8"  # Higher limits for burst capacity
+      memory: "128Gi"
 
   # Node affinity for performance
   affinity:

@@ -158,14 +158,9 @@ class InferenceBenchmark:
             print(f"  ❌ Error benchmarking PyTorch model: {e}")
             return {}
 
-    def create_mock_model(self, _input_shape: tuple, device: str) -> "torch.nn.Module":
-        from typing import TYPE_CHECKING
-
-        if TYPE_CHECKING:
-            import torch
+    def create_mock_model(self, _input_shape: tuple, device: str):
         """Create a mock model for benchmarking."""
         try:
-            import torch
             import torch.nn as nn
 
             class MockYOLO(nn.Module):

@@ -43,7 +43,8 @@ from cryptography.x509 import (
     load_pem_x509_certificate,
     random_serial_number,
 )
-from cryptography.x509.oid import NameOID
+
+# NameOID already imported above
 
 logger = structlog.get_logger(__name__)
 
@@ -328,7 +329,7 @@ class EncryptionManager:
 
         except Exception as e:
             logger.error("Decryption failed", error=str(e))
-            raise SecurityError(f"Decryption failed: {e}")
+            raise SecurityError(f"Decryption failed: {e}") from e
 
     def rotate_keys(self) -> bool:
         """Rotate encryption keys periodically."""
@@ -422,7 +423,7 @@ class PrivacyEngine:
             "gdpr_compliant": True,
         }
 
-    def _blur_sensitive_regions(self, frame_data: bytes, boxes: list[dict]) -> str:
+    def _blur_sensitive_regions(self, frame_data: bytes, _boxes: list[dict]) -> str:
         """Apply privacy-preserving transformations to sensitive regions."""
         # In production: implement actual face/license plate blurring
         # For now, return a privacy marker
@@ -546,13 +547,13 @@ class MultiFactorAuthenticator:
             logger.warning("Invalid JWT token", error=str(e))
             return None
 
-    def _verify_credentials(self, username: str, password: str) -> bool:
+    def _verify_credentials(self, _username: str, password: str) -> bool:
         """Verify user credentials against secure store."""
         # In production: implement proper credential verification
         # For now, simulate credential check
         return len(password) >= 12 and any(c.isupper() for c in password)
 
-    def _verify_totp(self, username: str, totp_code: str) -> bool:
+    def _verify_totp(self, _username: str, totp_code: str) -> bool:
         """Verify TOTP code."""
         # In production: implement proper TOTP verification
         return len(totp_code) == 6 and totp_code.isdigit()
@@ -930,7 +931,7 @@ async def create_zero_trust_security_system() -> dict[str, Any]:
 
 
 # Security middleware factory
-def create_security_middleware(security_system: dict[str, Any]):
+def create_security_middleware(_security_system: dict[str, Any]):
     """Create security middleware for FastAPI integration."""
 
     async def security_middleware(request, call_next):
@@ -1011,13 +1012,13 @@ def create_security_middleware(security_system: dict[str, Any]):
 
             from fastapi import HTTPException
 
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=401, detail="Unauthorized") from None
 
         except Exception as e:
             logger.error("Security middleware error", error=str(e))
             from fastapi import HTTPException
 
-            raise HTTPException(status_code=500, detail="Internal security error")
+            raise HTTPException(status_code=500, detail="Internal security error") from e
 
     return security_middleware
 
