@@ -377,7 +377,7 @@ from its_camera_ai.storage import get_storage_service
 storage = await get_storage_service()
 stats = storage.get_stats()
 
-# Export to Prometheus, InfluxDB, etc.
+# Export to Prometheus, TimescaleDB, etc.
 metrics = {
     "storage_upload_speed_mbps": stats.average_upload_speed_bps / 1024 / 1024,
     "storage_success_rate": stats.get_success_rate(),

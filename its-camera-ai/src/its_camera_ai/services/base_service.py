@@ -4,7 +4,7 @@ Provides generic async CRUD functionality with error handling,
 logging, and transaction management for all service classes.
 """
 
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
@@ -19,9 +19,9 @@ T = TypeVar("T", bound=BaseModel)
 logger = get_logger(__name__)
 
 
-class BaseAsyncService(Generic[T]):
+class BaseAsyncService[T: BaseModel]:
     """Base async service class for database operations.
-    
+
     Provides common CRUD operations with proper error handling,
     logging, and transaction management.
     """
@@ -32,13 +32,13 @@ class BaseAsyncService(Generic[T]):
 
     async def create(self, **kwargs: Any) -> T:
         """Create a new model instance.
-        
+
         Args:
             **kwargs: Model field values
-            
+
         Returns:
             Created model instance
-            
+
         Raises:
             DatabaseError: If creation fails
         """
@@ -63,17 +63,19 @@ class BaseAsyncService(Generic[T]):
                 model=self.model.__name__,
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to create {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to create {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def get_by_id(self, id_value: str | UUID | int) -> T | None:
         """Get model instance by ID.
-        
+
         Args:
             id_value: Model ID value
-            
+
         Returns:
             Model instance if found, None otherwise
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -98,15 +100,15 @@ class BaseAsyncService(Generic[T]):
         order_by: str | None = None,
     ) -> list[T]:
         """Get all model instances.
-        
+
         Args:
             limit: Maximum number of instances to return
             offset: Number of instances to skip
             order_by: Field name to order by
-            
+
         Returns:
             List of model instances
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -131,20 +133,20 @@ class BaseAsyncService(Generic[T]):
                 model=self.model.__name__,
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to get {self.model.__name__} list: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to get {self.model.__name__} list: {str(e)}"
+            ) from e
 
-    async def update_by_id(
-        self, id_value: str | UUID | int, **kwargs: Any
-    ) -> T | None:
+    async def update_by_id(self, id_value: str | UUID | int, **kwargs: Any) -> T | None:
         """Update model instance by ID.
-        
+
         Args:
             id_value: Model ID value
             **kwargs: Fields to update
-            
+
         Returns:
             Updated model instance if found, None otherwise
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -179,17 +181,19 @@ class BaseAsyncService(Generic[T]):
                 id=id_value,
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to update {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to update {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def delete_by_id(self, id_value: str | UUID | int) -> bool:
         """Delete model instance by ID.
-        
+
         Args:
             id_value: Model ID value
-            
+
         Returns:
             True if instance was deleted, False if not found
-            
+
         Raises:
             DatabaseError: If deletion fails
         """
@@ -218,17 +222,19 @@ class BaseAsyncService(Generic[T]):
                 id=id_value,
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to delete {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to delete {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def bulk_create(self, instances: list[dict[str, Any]]) -> list[T]:
         """Bulk create model instances.
-        
+
         Args:
             instances: List of instance data dictionaries
-            
+
         Returns:
             List of created model instances
-            
+
         Raises:
             DatabaseError: If bulk creation fails
         """
@@ -262,20 +268,22 @@ class BaseAsyncService(Generic[T]):
                 count=len(instances),
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to bulk create {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to bulk create {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def bulk_update(
         self, updates: list[dict[str, Any]], id_field: str = "id"
     ) -> int:
         """Bulk update model instances.
-        
+
         Args:
             updates: List of update dictionaries (must include ID field)
             id_field: Name of the ID field (default: 'id')
-            
+
         Returns:
             Number of updated instances
-            
+
         Raises:
             DatabaseError: If bulk update fails
         """
@@ -316,17 +324,19 @@ class BaseAsyncService(Generic[T]):
                 count=len(updates),
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to bulk update {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to bulk update {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def bulk_delete(self, id_values: list[str | UUID | int]) -> int:
         """Bulk delete model instances by ID.
-        
+
         Args:
             id_values: List of ID values to delete
-            
+
         Returns:
             Number of deleted instances
-            
+
         Raises:
             DatabaseError: If bulk deletion fails
         """
@@ -354,17 +364,19 @@ class BaseAsyncService(Generic[T]):
                 count=len(id_values),
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to bulk delete {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to bulk delete {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def count(self, **filters: Any) -> int:
         """Count model instances with optional filters.
-        
+
         Args:
             **filters: Filter conditions
-            
+
         Returns:
             Number of matching instances
-            
+
         Raises:
             DatabaseError: If count query fails
         """
@@ -388,17 +400,19 @@ class BaseAsyncService(Generic[T]):
                 filters=filters,
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to count {self.model.__name__}: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to count {self.model.__name__}: {str(e)}"
+            ) from e
 
     async def exists(self, **filters: Any) -> bool:
         """Check if model instance exists with given filters.
-        
+
         Args:
             **filters: Filter conditions
-            
+
         Returns:
             True if instance exists, False otherwise
-            
+
         Raises:
             DatabaseError: If existence query fails
         """
@@ -422,4 +436,6 @@ class BaseAsyncService(Generic[T]):
                 filters=filters,
                 error=str(e),
             )
-            raise DatabaseError(f"Failed to check {self.model.__name__} existence: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to check {self.model.__name__} existence: {str(e)}"
+            ) from e

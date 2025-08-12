@@ -1,0 +1,75 @@
+@startuml Authentication and Authorization Flow
+!theme cerulean-outline
+title Authentication and Authorization Flow
+
+actor "User/Client" as User
+participant "API Gateway" as Gateway
+participant "Auth Service" as Auth
+participant "JWT Manager" as JWT
+participant "MFA Service" as MFA
+participant "RBAC Service" as RBAC
+participant "Security Audit" as Audit
+participant "Database" as DB
+participant "Cache Service" as Cache
+
+== Initial Authentication ==
+User -> Gateway: Login request (username/password)
+Gateway -> Auth: Validate credentials
+Auth -> DB: Query user record
+DB -> Auth: User data + hashed password
+Auth -> Auth: Verify password hash
+Auth -> MFA: Request MFA challenge
+
+== Multi-Factor Authentication ==
+MFA -> User: Send TOTP/SMS challenge
+User -> MFA: Submit MFA code
+MFA -> MFA: Validate MFA token
+MFA -> Auth: MFA verification result
+
+== JWT Token Generation ==
+alt Authentication Successful
+    Auth -> JWT: Generate access token
+    JWT -> JWT: Create JWT with user claims
+    JWT -> Auth: Return signed JWT
+    Auth -> Cache: Store session data
+    Auth -> Audit: Log successful login
+    Auth -> Gateway: Return JWT token
+    Gateway -> User: Authentication successful + JWT
+else Authentication Failed
+    Auth -> Audit: Log failed login attempt
+    Auth -> Gateway: Authentication failed
+    Gateway -> User: Authentication error
+end
+
+== API Request Authorization ==
+User -> Gateway: API request + JWT token
+Gateway -> JWT: Validate JWT signature
+JWT -> JWT: Check token expiration
+alt Valid JWT
+    JWT -> RBAC: Extract user roles/permissions
+    RBAC -> Cache: Check permission cache
+    alt Permission Cached
+        Cache -> RBAC: Return cached permissions
+    else Permission Not Cached
+        RBAC -> DB: Query user permissions
+        DB -> RBAC: Role and permission data
+        RBAC -> Cache: Cache permissions
+    end
+    RBAC -> Gateway: Authorization result
+    alt Authorized
+        Gateway -> Gateway: Process API request
+        Gateway -> User: API response
+    else Not Authorized
+        Gateway -> Audit: Log authorization failure
+        Gateway -> User: Authorization error (403)
+    end
+else Invalid JWT
+    Gateway -> Audit: Log invalid token attempt
+    Gateway -> User: Authentication required (401)
+end
+
+== Session Management ==
+Gateway -> Cache: Update last access time
+Cache -> Cache: Extend session TTL
+
+@enduml

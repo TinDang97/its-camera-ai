@@ -1,0 +1,60 @@
+@startuml ITS Camera AI - Inference Engine Code
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!theme cerulean-outline
+
+LAYOUT_LEFT_RIGHT()
+
+title Code Diagram - Inference Engine Implementation
+
+Component(adaptiveBatcher, "Adaptive Batcher", "Component", "Batch optimization")
+Component(memoryPool, "Memory Pool", "Component", "GPU memory management")
+
+Container_Boundary(inferenceEngine, "Inference Engine") {
+    Component(inferenceOptimizer, "InferenceOptimizer", "Class", "Main inference coordination class")
+    Component(batchInferenceEngine, "BatchInferenceEngine", "Class", "Batch processing engine")
+    Component(gpuBatchProcessor, "GPUBatchProcessor", "Class", "GPU batch processing implementation")
+    
+    Component(modelLoader, "ModelLoader", "Class", "PyTorch/TensorRT model loading")
+    Component(preprocessor, "FramePreprocessor", "Class", "Image preprocessing pipeline")
+    Component(postprocessor, "ResultPostprocessor", "Class", "Detection result processing")
+    
+    Component(cacheManager, "CacheManager", "Class", "Inference result caching")
+    Component(metricsCollector, "MetricsCollector", "Class", "Performance metrics collection")
+    Component(memoryManager, "GPUMemoryManager", "Class", "GPU memory allocation")
+    
+    Component(yoloModel, "YOLO11Model", "Class", "YOLO model wrapper")
+    Component(tensorrtEngine, "TensorRTEngine", "Class", "TensorRT optimization engine")
+    Component(torchModel, "TorchModel", "Class", "PyTorch model interface")
+}
+
+ComponentDb(redis, "Redis Cache", "Database", "Inference result cache")
+ComponentDb(modelStorage, "Model Storage", "MinIO", "Model file storage")
+
+' Class relationships
+Rel(inferenceOptimizer, batchInferenceEngine, "coordinates", "method calls")
+Rel(batchInferenceEngine, gpuBatchProcessor, "delegates to", "method calls")
+Rel(gpuBatchProcessor, preprocessor, "preprocesses frames", "method calls")
+Rel(gpuBatchProcessor, postprocessor, "processes results", "method calls")
+
+Rel(inferenceOptimizer, modelLoader, "loads models", "method calls")
+Rel(modelLoader, yoloModel, "creates", "instantiation")
+Rel(modelLoader, tensorrtEngine, "optimizes with", "method calls")
+Rel(modelLoader, torchModel, "fallback to", "method calls")
+
+Rel(gpuBatchProcessor, memoryManager, "manages memory", "method calls")
+Rel(inferenceOptimizer, cacheManager, "caches results", "method calls")
+Rel(inferenceOptimizer, metricsCollector, "collects metrics", "method calls")
+
+' External connections
+Rel(adaptiveBatcher, inferenceOptimizer, "sends batches", "method calls")
+Rel(memoryPool, memoryManager, "allocates memory", "CUDA calls")
+
+Rel(cacheManager, redis, "read/write cache", "Redis protocol")
+Rel(modelLoader, modelStorage, "fetch models", "S3 API")
+
+' Key methods annotations
+note right of inferenceOptimizer : "Key Methods:\n- process_batch()\n- optimize_inference()\n- handle_gpu_memory()"
+note right of batchInferenceEngine : "Key Methods:\n- execute_inference()\n- batch_preprocess()\n- batch_postprocess()"
+note right of gpuBatchProcessor : "Key Methods:\n- gpu_forward()\n- manage_tensors()\n- optimize_batch_size()"
+
+@enduml

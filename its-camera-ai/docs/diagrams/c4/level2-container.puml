@@ -1,0 +1,58 @@
+@startuml ITS Camera AI - Container Diagram
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!theme cerulean-outline
+
+LAYOUT_WITH_LEGEND()
+
+title Container Diagram - ITS Camera AI System
+
+Person(operators, "System Operators", "Traffic and security operators")
+
+System_Boundary(itsSystem, "ITS Camera AI System") {
+    Container(webApp, "Web Dashboard", "React/TypeScript", "Real-time traffic monitoring dashboard")
+    Container(mobileApp, "Mobile App", "React Native", "Field operator mobile application")
+    
+    Container(apiGateway, "API Gateway", "FastAPI", "RESTful API gateway with authentication")
+    Container(authService, "Authentication Service", "Python/JWT", "User authentication and authorization")
+    
+    Container(streamingService, "Streaming Service", "Python/gRPC", "Real-time camera stream processing")
+    Container(visionEngine, "Core Vision Engine", "Python/PyTorch", "AI-powered vehicle detection and tracking")
+    Container(analyticsService, "Analytics Service", "Python", "Traffic analytics and rule processing")
+    Container(alertService, "Alert Service", "Python", "Incident detection and notification")
+    
+    Container(cliTool, "CLI Management Tool", "Python/Typer", "System administration and configuration")
+    
+    ContainerDb(postgresql, "PostgreSQL", "Relational Database", "Stores user data, camera config, incidents")
+    ContainerDb(redis, "Redis", "In-Memory Cache", "Session storage and message queuing")
+    ContainerDb(timescaledb, "TimescaleDB", "Time-Series DB", "Performance metrics and analytics data")
+    ContainerDb(minio, "MinIO", "Object Storage", "Video frames, ML models, and binary data")
+}
+
+System_Ext(cameras, "Traffic Cameras", "IP camera network")
+System_Ext(external, "External Systems", "Emergency services, traffic systems")
+
+Rel(operators, webApp, "Uses", "HTTPS")
+Rel(operators, mobileApp, "Uses", "HTTPS")
+Rel(operators, cliTool, "Manages", "CLI")
+
+Rel(webApp, apiGateway, "API calls", "HTTPS/REST")
+Rel(mobileApp, apiGateway, "API calls", "HTTPS/REST")
+Rel(apiGateway, authService, "Authenticates", "HTTP")
+
+Rel(cameras, streamingService, "Video streams", "RTSP/gRPC")
+Rel(streamingService, visionEngine, "Frame processing", "gRPC")
+Rel(visionEngine, analyticsService, "Detection results", "HTTP/Message Queue")
+Rel(analyticsService, alertService, "Rule violations", "HTTP")
+
+Rel(authService, postgresql, "User data", "SQL")
+Rel(authService, redis, "Sessions", "Redis Protocol")
+Rel(streamingService, redis, "Queue frames", "Redis Protocol")
+Rel(analyticsService, timescaledb, "Metrics", "SQL")
+Rel(visionEngine, minio, "Models/frames", "S3 API")
+
+Rel(alertService, external, "Notifications", "HTTP/API")
+Rel(apiGateway, postgresql, "Query data", "SQL")
+
+SHOW_LEGEND()
+
+@enduml

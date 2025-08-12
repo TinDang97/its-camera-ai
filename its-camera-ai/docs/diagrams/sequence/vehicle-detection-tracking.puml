@@ -1,0 +1,47 @@
+@startuml Vehicle Detection and Tracking Sequence
+!theme cerulean-outline
+title Vehicle Detection and Tracking Sequence
+
+participant "Core Vision Engine" as Vision
+participant "YOLO11 Model" as YOLO
+participant "Tracking Algorithm" as Tracker
+participant "Detection Results" as Results
+participant "Analytics Service" as Analytics
+participant "Database" as DB
+participant "SSE Broadcaster" as SSE
+participant "Client Dashboard" as Client
+
+== Detection Phase ==
+Vision -> YOLO: Preprocessed frame batch
+YOLO -> YOLO: Object detection inference
+YOLO -> Vision: Raw detection results
+Vision -> Vision: Filter by confidence threshold
+Vision -> Tracker: Valid detections + frame ID
+
+== Tracking Phase ==
+Tracker -> Tracker: Match detections to existing tracks
+alt New Vehicle Detected
+    Tracker -> Tracker: Initialize new track
+    Tracker -> Results: Create new vehicle record
+else Existing Vehicle
+    Tracker -> Tracker: Update track position
+    Tracker -> Results: Update vehicle trajectory
+end
+
+== Analytics Processing ==
+Results -> Analytics: Detection + tracking data
+Analytics -> Analytics: Calculate speed, direction
+Analytics -> Analytics: Check traffic rules violations
+Analytics -> DB: Store vehicle analytics
+alt Rule Violation Detected
+    Analytics -> Analytics: Generate alert
+    Analytics -> SSE: Broadcast real-time alert
+    SSE -> Client: Push notification
+end
+
+== Performance Monitoring ==
+Vision -> Vision: Log processing metrics
+Vision -> Analytics: Update throughput stats
+Analytics -> DB: Store performance data
+
+@enduml

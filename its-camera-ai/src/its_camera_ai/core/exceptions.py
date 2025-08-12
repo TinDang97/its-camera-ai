@@ -320,3 +320,25 @@ class ConcurrencyError(ITSCameraAIError):
 
         super().__init__(message, code, concurrency_details, cause)
         self.operation = operation
+
+
+class NotFoundError(ITSCameraAIError):
+    """Raised when a requested resource is not found."""
+
+    def __init__(
+        self,
+        message: str = "Resource not found",
+        resource_type: str | None = None,
+        resource_id: str | int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        code = "RESOURCE_NOT_FOUND"
+        resource_details = details or {}
+        if resource_type:
+            resource_details["resource_type"] = resource_type
+        if resource_id:
+            resource_details["resource_id"] = str(resource_id)
+
+        super().__init__(message, code, resource_details)
+        self.resource_type = resource_type
+        self.resource_id = resource_id

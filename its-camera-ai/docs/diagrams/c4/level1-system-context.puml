@@ -1,0 +1,32 @@
+@startuml ITS Camera AI - System Context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!theme cerulean-outline
+
+LAYOUT_WITH_LEGEND()
+
+title System Context Diagram - ITS Camera AI
+
+Person(trafficOp, "Traffic Operations Center", "Monitors traffic flow and manages incidents")
+Person(securityOp, "Security Operator", "Monitors security events and threat detection")
+Person(systemAdmin, "System Administrator", "Manages system configuration and deployment")
+
+System(itsCamera, "ITS Camera AI System", "AI-powered camera traffic monitoring system for real-time traffic analytics and vehicle tracking")
+
+System_Ext(cameras, "Traffic Cameras", "Network of IP cameras providing video streams")
+System_Ext(emergencyServices, "Emergency Services", "Police, fire, and medical emergency systems")
+System_Ext(trafficSystems, "Traffic Management Systems", "External traffic control and signal systems")
+System_Ext(gisSystem, "GIS Systems", "Geographic information systems for location data")
+System_Ext(mobileApps, "Mobile Applications", "Field operator mobile apps")
+
+Rel(cameras, itsCamera, "Sends video streams", "RTSP/WebRTC")
+Rel(trafficOp, itsCamera, "Monitors traffic and manages incidents", "HTTPS/WebSocket")
+Rel(securityOp, itsCamera, "Reviews security alerts", "HTTPS/WebSocket")
+Rel(systemAdmin, itsCamera, "Configures and manages system", "HTTPS/CLI")
+Rel(itsCamera, emergencyServices, "Sends critical alerts", "HTTP/API")
+Rel(itsCamera, trafficSystems, "Shares traffic data", "HTTP/API")
+Rel(itsCamera, gisSystem, "Retrieves location data", "HTTP/API")
+Rel(mobileApps, itsCamera, "Field operations", "HTTPS/API")
+
+SHOW_LEGEND()
+
+@enduml

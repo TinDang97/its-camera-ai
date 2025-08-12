@@ -1,0 +1,50 @@
+@startuml ITS Camera AI - Vision Engine Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!theme cerulean-outline
+
+LAYOUT_WITH_LEGEND()
+
+title Component Diagram - Core Vision Engine
+
+Container(streamingService, "Streaming Service", "Python/gRPC", "Camera stream processing")
+Container(analyticsService, "Analytics Service", "Python", "Traffic analytics processing")
+
+Container_Boundary(visionEngine, "Core Vision Engine") {
+    Component(adaptiveBatcher, "Adaptive Batcher", "Python", "Dynamic batch size optimization for GPU efficiency")
+    Component(gpuPreprocessor, "GPU Preprocessor", "CUDA/Python", "GPU-accelerated image preprocessing")
+    Component(memoryPool, "Memory Pool Manager", "Python/CUDA", "GPU memory allocation and optimization")
+    
+    Component(inferenceEngine, "Inference Engine", "PyTorch/TensorRT", "YOLO11 model inference execution")
+    Component(tensorrtOptimizer, "TensorRT Optimizer", "TensorRT/Python", "Model optimization for GPU inference")
+    Component(modelPipeline, "Model Pipeline", "Python", "ML pipeline orchestration and management")
+    
+    Component(visionIntegration, "Vision Integration", "OpenCV/Python", "Computer vision algorithms integration")
+    Component(batchProcessor, "Batch Processor", "Python", "Batch processing coordination")
+    Component(productionMonitoring, "Production Monitoring", "Python", "Model performance monitoring")
+    
+    ComponentDb(modelCache, "Model Cache", "Redis", "Cached inference results")
+    ComponentDb(modelRegistry, "Model Registry", "MinIO", "ML model storage and versioning")
+}
+
+System_Ext(gpuHardware, "GPU Hardware", "NVIDIA GPU cluster")
+
+Rel(streamingService, adaptiveBatcher, "Frame batches", "gRPC")
+Rel(adaptiveBatcher, gpuPreprocessor, "Optimized batches", "Internal")
+Rel(gpuPreprocessor, memoryPool, "Memory allocation", "CUDA")
+Rel(memoryPool, gpuHardware, "GPU memory", "CUDA")
+
+Rel(gpuPreprocessor, inferenceEngine, "Preprocessed tensors", "PyTorch")
+Rel(inferenceEngine, tensorrtOptimizer, "Model optimization", "TensorRT")
+Rel(tensorrtOptimizer, modelRegistry, "Optimized models", "S3 API")
+
+Rel(inferenceEngine, visionIntegration, "Raw detections", "Internal")
+Rel(visionIntegration, batchProcessor, "Processed results", "Internal")
+Rel(batchProcessor, analyticsService, "Detection results", "HTTP")
+
+Rel(inferenceEngine, modelCache, "Cache results", "Redis")
+Rel(modelPipeline, modelRegistry, "Model versions", "S3 API")
+Rel(productionMonitoring, modelPipeline, "Performance metrics", "Internal")
+
+SHOW_LEGEND()
+
+@enduml

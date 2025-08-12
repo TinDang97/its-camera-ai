@@ -1,0 +1,60 @@
+@startuml Alert and Incident Detection Flow
+!theme cerulean-outline
+title Alert and Incident Detection Flow
+
+participant "Analytics Service" as Analytics
+participant "Rule Engine" as Rules
+participant "Threat Detection" as Threat
+participant "Alert Manager" as AlertMgr
+participant "Notification Service" as Notify
+participant "Database" as DB
+participant "SSE Broadcaster" as SSE
+participant "External Systems" as External
+participant "Security Audit" as Audit
+
+== Traffic Analysis ==
+Analytics -> Analytics: Process vehicle tracking data
+Analytics -> Rules: Evaluate traffic rules
+Rules -> Rules: Check speed limits
+Rules -> Rules: Check lane violations
+Rules -> Rules: Check prohibited areas
+
+== Incident Detection ==
+alt Rule Violation Detected
+    Rules -> AlertMgr: Create traffic violation alert
+    AlertMgr -> DB: Store incident record
+    AlertMgr -> Notify: Queue notification
+else Suspicious Behavior
+    Analytics -> Threat: Analyze behavior patterns
+    Threat -> Threat: ML-based anomaly detection
+    Threat -> AlertMgr: Create security alert
+    AlertMgr -> Audit: Log security event
+end
+
+== Alert Processing ==
+AlertMgr -> AlertMgr: Prioritize alerts by severity
+AlertMgr -> DB: Update alert status
+AlertMgr -> SSE: Broadcast real-time alert
+
+== Notification Distribution ==
+Notify -> Notify: Route by alert type
+alt Critical Alert
+    Notify -> External: Send to emergency services
+    Notify -> SSE: Immediate dashboard update
+else Standard Alert
+    Notify -> SSE: Standard dashboard notification
+    Notify -> DB: Log notification sent
+end
+
+== Escalation Handling ==
+alt No Acknowledgment
+    AlertMgr -> AlertMgr: Wait for timeout
+    AlertMgr -> Notify: Escalate to supervisor
+    Notify -> External: Send escalated notification
+end
+
+== Audit Trail ==
+Audit -> DB: Store complete incident log
+Audit -> Audit: Ensure compliance logging
+
+@enduml

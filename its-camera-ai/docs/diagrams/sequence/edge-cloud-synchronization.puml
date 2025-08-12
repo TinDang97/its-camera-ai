@@ -1,0 +1,58 @@
+@startuml Edge-Cloud Synchronization
+!theme cerulean-outline
+title Edge-Cloud Synchronization Flow
+
+participant "Edge Node" as Edge
+participant "Edge Deployment Manager" as EdgeDeploy
+participant "Federated Learning" as FedLearn
+participant "Cloud Controller" as Cloud
+participant "Model Registry" as Registry
+participant "Kafka Queue" as Kafka
+participant "Cloud Analytics" as Analytics
+participant "Edge Cache" as EdgeCache
+
+== Model Deployment ==
+Cloud -> Registry: New model version available
+Registry -> EdgeDeploy: Model deployment notification
+EdgeDeploy -> Edge: Download model update
+Edge -> EdgeCache: Cache model locally
+Edge -> EdgeDeploy: Deployment confirmation
+EdgeDeploy -> Cloud: Edge model updated
+
+== Data Synchronization ==
+Edge -> EdgeCache: Store processed results locally
+EdgeCache -> Kafka: Batch upload to cloud queue
+Kafka -> Analytics: Process aggregated edge data
+Analytics -> Registry: Update global model metrics
+
+== Federated Learning ==
+Edge -> FedLearn: Local model gradients
+FedLearn -> FedLearn: Aggregate edge gradients
+FedLearn -> Cloud: Send aggregated updates
+Cloud -> Registry: Update global model
+Registry -> EdgeDeploy: Trigger model redistribution
+
+== Connectivity Handling ==
+alt Network Available
+    Edge -> Cloud: Sync pending data
+    Cloud -> Edge: Send model updates
+else Network Unavailable
+    Edge -> EdgeCache: Store in local buffer
+    EdgeCache -> EdgeCache: Compress and queue data
+    Edge -> Edge: Continue offline operation
+end
+
+== Health Monitoring ==
+Edge -> Cloud: Send health metrics
+Cloud -> Cloud: Monitor edge node status
+alt Edge Node Unhealthy
+    Cloud -> EdgeDeploy: Initiate recovery
+    EdgeDeploy -> Edge: Restart services
+end
+
+== Data Privacy ==
+Edge -> Edge: Apply local privacy filters
+Edge -> FedLearn: Send anonymized gradients only
+FedLearn -> Cloud: Ensure no raw data transmission
+
+@enduml

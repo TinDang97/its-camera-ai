@@ -1,0 +1,46 @@
+@startuml Camera Stream Processing Flow
+!theme cerulean-outline
+title Camera Stream Processing Flow
+
+actor "Camera Device" as Camera
+participant "Streaming Service" as Stream
+participant "Data Ingestion Pipeline" as Ingestion
+participant "Quality Validator" as Validator
+participant "Redis Queue" as Queue
+participant "Core Vision Engine" as Vision
+participant "Inference Engine" as Inference
+participant "Frame Service" as FrameService
+participant "Database" as DB
+
+== Stream Initialization ==
+Camera -> Stream: Initialize RTSP/WebRTC stream
+Stream -> Ingestion: Register camera stream
+Ingestion -> Queue: Create processing queue
+Ingestion --> Stream: Stream ready confirmation
+
+== Frame Processing Loop ==
+Camera -> Stream: Video frame data
+Stream -> Ingestion: Raw frame + metadata
+Ingestion -> Validator: Validate frame quality
+alt Frame Quality OK
+    Validator -> Queue: Queue frame for processing
+    Queue -> Vision: Dequeue frame batch
+    Vision -> Inference: Preprocess and batch frames
+    Inference -> Inference: GPU inference (YOLO11)
+    Inference -> Vision: Detection results
+    Vision -> FrameService: Process detections
+    FrameService -> DB: Store frame metadata
+    FrameService -> Queue: Publish results to analytics queue
+else Frame Quality Poor
+    Validator -> Ingestion: Log quality issues
+    Ingestion -> Stream: Request frame retransmission
+end
+
+== Error Handling ==
+alt Processing Error
+    Vision -> Queue: Move to dead letter queue
+    Queue -> Ingestion: Notify processing failure
+    Ingestion -> Stream: Log error and continue
+end
+
+@enduml

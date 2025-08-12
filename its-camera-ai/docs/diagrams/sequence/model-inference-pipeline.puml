@@ -1,0 +1,53 @@
+@startuml Model Inference Pipeline
+!theme cerulean-outline
+title Model Inference Pipeline
+
+participant "Adaptive Batcher" as Batcher
+participant "GPU Preprocessor" as Preprocessor
+participant "Memory Pool Manager" as MemPool
+participant "TensorRT Optimizer" as TensorRT
+participant "Inference Engine" as Engine
+participant "Model Registry" as Registry
+participant "Production Monitoring" as Monitor
+participant "Cache Service" as Cache
+
+== Model Loading ==
+Engine -> Registry: Request active model
+Registry -> Registry: Check model version
+Registry -> Engine: Return model metadata
+Engine -> TensorRT: Load optimized model
+TensorRT -> MemPool: Allocate GPU memory
+MemPool -> Engine: Memory allocation confirmation
+
+== Batch Processing ==
+Batcher -> Batcher: Accumulate incoming frames
+Batcher -> Preprocessor: Send optimal batch size
+Preprocessor -> MemPool: Get GPU memory buffer
+Preprocessor -> Preprocessor: Resize, normalize frames
+Preprocessor -> Engine: GPU-ready tensor batch
+
+== Inference Execution ==
+Engine -> Cache: Check inference cache
+alt Cache Hit
+    Cache -> Engine: Return cached results
+else Cache Miss
+    Engine -> TensorRT: Execute model inference
+    TensorRT -> Engine: Raw inference output
+    Engine -> Engine: Post-process results
+    Engine -> Cache: Store results in cache
+end
+
+== Performance Monitoring ==
+Engine -> Monitor: Log inference metrics
+Monitor -> Monitor: Check latency < 100ms
+Monitor -> Monitor: Update model performance stats
+alt Performance Degradation
+    Monitor -> Registry: Flag model for retraining
+    Registry -> Monitor: Schedule model update
+end
+
+== Memory Management ==
+Engine -> MemPool: Release GPU memory
+MemPool -> MemPool: Defragment memory pool
+
+@enduml

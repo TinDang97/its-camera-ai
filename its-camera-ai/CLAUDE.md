@@ -27,7 +27,7 @@ uv sync --group edge
 ### Code Quality & Testing
 
 ```bash
-# Run all tests with coverage
+# Run all tests with coverage (must maintain >90% coverage)
 pytest --cov=src/its_camera_ai --cov-report=html --cov-report=term-missing --cov-fail-under=90
 
 # Run specific test categories
@@ -35,6 +35,9 @@ pytest -m "not slow"          # Skip slow tests
 pytest -m integration         # Integration tests only
 pytest -m ml                  # ML model tests only
 pytest -m gpu                 # GPU-dependent tests
+pytest -m unit                # Unit tests only
+pytest -m e2e                 # End-to-end tests
+pytest -m benchmark           # Performance benchmark tests
 
 # Type checking
 mypy src/
@@ -42,6 +45,7 @@ mypy src/
 # Code formatting and linting
 black src/ tests/
 ruff check src/ tests/
+ruff format src/ tests/        # Additional ruff formatting
 isort src/ tests/
 
 # Security scanning
@@ -54,13 +58,17 @@ pip-audit
 
 ```bash
 # Run the main application
-python main.py
+python src/its_camera_ai/main.py
 
-# Run with development server (if FastAPI service exists)
-uvicorn its_camera_ai.app.api.main:app --reload --host 0.0.0.0 --port 8000
+# Run FastAPI development server
+uvicorn its_camera_ai.api.app:app --reload --host 0.0.0.0 --port 8000
 
 # Run CLI interface
 its-camera-ai --help
+
+# Run specific services
+its-camera-ai services start
+its-camera-ai monitoring dashboard
 ```
 
 ## Architecture Overview
@@ -69,10 +77,12 @@ The system follows an **event-driven microservices architecture** with the follo
 
 ### Core Structure
 
-- **`src/tca/`** - Main application code using Test-Driven Architecture (TCA) pattern
-- **`ml_architecture.py`** - Comprehensive ML pipeline with federated learning, model registry, and inference optimization
-- **`security/zero_trust_architecture.py`** - Zero-trust security framework with encryption, privacy controls, and threat detection
-- **`main.py`** - Application entry point
+- **`src/its_camera_ai/`** - Main application code with modular architecture
+- **`src/its_camera_ai/ml/`** - Comprehensive ML pipeline with federated learning, model registry, and inference optimization
+- **`security/`** - Zero-trust security framework with encryption, privacy controls, and threat detection
+- **`src/its_camera_ai/main.py`** - Application entry point
+- **`src/its_camera_ai/api/`** - FastAPI web services and routers
+- **`src/its_camera_ai/cli/`** - Comprehensive CLI interface with interactive commands
 
 ### Key Architectural Patterns
 
@@ -98,7 +108,7 @@ The system follows an **event-driven microservices architecture** with the follo
 
 - **Backend**: Python 3.12+, FastAPI, Pydantic v2
 - **ML/AI**: PyTorch 2.0+, YOLO11 (Ultralytics), OpenCV 4.8+
-- **Data**: PostgreSQL, Redis, InfluxDB, Apache Kafka
+- **Data**: PostgreSQL, Redis, TimescaleDB, Apache Kafka
 - **Infrastructure**: Docker, Kubernetes, Prometheus/Grafana
 
 ## Development Guidelines
@@ -127,10 +137,13 @@ The system follows an **event-driven microservices architecture** with the follo
 
 ### Code Organization
 
-- Follow the established `src/tca/` structure for new components
-- Use type hints and Pydantic models for all data structures
-- Implement async/await patterns for I/O operations
-- Follow the security-first approach with proper error handling
+- Follow the established `src/its_camera_ai/` modular structure for new components
+- Use type hints and Pydantic v2 models for all data structures
+- Implement async/await patterns for I/O operations with proper resource cleanup
+- Follow the security-first approach with comprehensive error handling
+- Use dependency injection patterns with `dependency-injector`
+- Maintain strict type checking with MyPy configuration
+- Follow consistent import organization with isort and black formatting
 
 ## Performance Considerations
 
@@ -155,3 +168,39 @@ The system follows an **event-driven microservices architecture** with the follo
 - **Auto-scaling** based on inference queue length and resource utilization
 - **Multi-region deployment** with automated failover
 - **CI/CD pipeline** with automated testing and security scanning
+- **Production deployment script**: `python deploy_production.py`
+- **MinIO deployment**: `./deploy-minio.sh` for object storage setup
+- **Database migrations**: Managed with Alembic (`alembic upgrade head`)
+
+## CLI Interface
+
+The system includes a comprehensive CLI built with Typer:
+
+```bash
+# Interactive dashboard
+its-camera-ai dashboard
+
+# ML model management
+its-camera-ai ml deploy --model-path ./model.pt
+its-camera-ai ml monitor --deployment-stage production
+
+# Service management
+its-camera-ai services start --service camera-processor
+its-camera-ai services status
+
+# Database operations
+its-camera-ai database migrate
+its-camera-ai database seed --env development
+
+# Security and monitoring
+its-camera-ai security audit
+its-camera-ai monitoring metrics --service inference-engine
+```
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+- always use dependency injector for cli and api

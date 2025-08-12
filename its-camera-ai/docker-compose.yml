@@ -1,5 +1,12 @@
 # Docker Compose for ITS Camera AI
-# Supports development, testing, and production environments
+# Comprehensive microservices setup with platform engineering best practices
+# Supports development, testing, production, GPU, and edge environments
+# Platform Engineering Features:
+# - Service discovery and health checks
+# - Resource management and scaling
+# - Monitoring and observability
+# - Security and compliance
+# - Multi-environment support
 
 version: '3.8'
 
@@ -162,27 +169,25 @@ services:
       - prod
       - gpu
 
-  # InfluxDB for Time Series Data
-  influxdb:
-    image: influxdb:2.7-alpine
-    container_name: its-camera-ai-influxdb
+  # TimescaleDB for Time Series Data
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: its-camera-ai-timescaledb
     restart: unless-stopped
     ports:
-      - "${INFLUXDB_PORT:-8086}:8086"
+      - "${TIMESCALEDB_PORT:-5433}:5432"
     environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: admin_password
-      DOCKER_INFLUXDB_INIT_ORG: its-camera-ai
-      DOCKER_INFLUXDB_INIT_BUCKET: metrics
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: admin-token-12345
+      POSTGRES_DB: its_metrics
+      POSTGRES_USER: timescale_user
+      POSTGRES_PASSWORD: timescale_password
+      TIMESCALEDB_TELEMETRY: "off"
     volumes:
-      - influxdb_data:/var/lib/influxdb2
-      - influxdb_config:/etc/influxdb2
+      - timescaledb_data:/var/lib/postgresql/data
+      - ${PWD}/infrastructure/database/timescale-init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
     healthcheck:
-      test: ["CMD", "influx", "ping"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U timescale_user -d its_metrics"]
+      interval: 10s
+      timeout: 5s
       retries: 3
       start_period: 30s
     networks:
@@ -410,15 +415,128 @@ services:
       - dev
       - ml
 
+  # Nginx Reverse Proxy and Load Balancer
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: its-camera-ai-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${PWD}/infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${PWD}/infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ${PWD}/infrastructure/nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - its-network
+    profiles:
+      - prod
+      - monitoring
+
+  # Loki for Log Aggregation
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: its-camera-ai-loki
+    restart: unless-stopped
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+      - ${PWD}/infrastructure/monitoring/loki.yml:/etc/loki/local-config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - its-network
+    profiles:
+      - monitoring
+
+  # Jaeger for Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    container_name: its-camera-ai-jaeger
+    restart: unless-stopped
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${JAEGER_COLLECTOR_PORT:-14268}:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    volumes:
+      - jaeger_data:/badger
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:16686/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - its-network
+    profiles:
+      - monitoring
+
+  # Node Exporter for System Metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: its-camera-ai-node-exporter
+    restart: unless-stopped
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - its-network
+    profiles:
+      - monitoring
+
+  # Alertmanager for Alert Management
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: its-camera-ai-alertmanager
+    restart: unless-stopped
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ${PWD}/infrastructure/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--web.route-prefix=/'
+    networks:
+      - its-network
+    profiles:
+      - monitoring
+
 # Named volumes for persistent data
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
-  influxdb_data:
-    driver: local
-  influxdb_config:
+  timescaledb_data:
     driver: local
   kafka_data:
     driver: local
@@ -441,6 +559,14 @@ volumes:
   grafana_data:
     driver: local
   jupyter_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  loki_data:
+    driver: local
+  jaeger_data:
+    driver: local
+  alertmanager_data:
     driver: local
 
 # Custom network

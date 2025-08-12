@@ -1,0 +1,68 @@
+@startuml Data Storage and Retrieval Flow
+!theme cerulean-outline
+title Data Storage and Retrieval Flow
+
+participant "API Client" as Client
+participant "API Router" as Router
+participant "Cache Service" as Cache
+participant "Database Service" as DB
+participant "MinIO Service" as Storage
+participant "Encryption Manager" as Crypto
+participant "Analytics Service" as Analytics
+participant "TimescaleDB" as TimeSeries
+
+== Data Write Operations ==
+Client -> Router: Store vehicle data request
+Router -> Crypto: Encrypt sensitive data
+Crypto -> Router: Encrypted payload
+Router -> DB: Store structured data
+DB -> DB: Write to PostgreSQL
+Router -> Storage: Store video frames/models
+Storage -> Crypto: Encrypt blob data
+Crypto -> Storage: Store encrypted objects
+Storage -> Router: Storage confirmation
+Router -> Cache: Invalidate related cache
+Router -> Client: Write operation successful
+
+== Time-Series Data ==
+Analytics -> TimeSeries: Store metrics data
+TimeSeries -> TimeSeries: Write to TimescaleDB
+TimeSeries -> Analytics: Write confirmation
+
+== Data Read Operations ==
+Client -> Router: Retrieve vehicle data
+Router -> Cache: Check cache for data
+alt Cache Hit
+    Cache -> Router: Return cached data
+    Router -> Client: Cached response
+else Cache Miss
+    Router -> DB: Query structured data
+    DB -> Router: Database results
+    alt Blob Data Needed
+        Router -> Storage: Retrieve binary objects
+        Storage -> Crypto: Decrypt blob data
+        Crypto -> Storage: Decrypted objects
+        Storage -> Router: Binary data
+    end
+    Router -> Cache: Store in cache
+    Router -> Crypto: Decrypt sensitive fields
+    Crypto -> Router: Decrypted data
+    Router -> Client: Complete response
+end
+
+== Analytics Queries ==
+Client -> Router: Analytics query request
+Router -> TimeSeries: Query time-series data
+TimeSeries -> Router: Aggregated metrics
+Router -> DB: Query related metadata
+DB -> Router: Contextual data
+Router -> Analytics: Process combined data
+Analytics -> Router: Formatted results
+Router -> Client: Analytics response
+
+== Data Retention ==
+DB -> DB: Archive old records
+Storage -> Storage: Move to cold storage
+Cache -> Cache: Expire old cache entries
+
+@enduml

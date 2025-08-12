@@ -1,0 +1,68 @@
+@startuml ITS Camera AI - API Service Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!theme cerulean-outline
+
+LAYOUT_WITH_LEGEND()
+
+title Component Diagram - API Service
+
+Container(webDashboard, "Web Dashboard", "React", "User interface")
+Container(authService, "Auth Service", "Python", "Authentication service")
+Container(visionEngine, "Vision Engine", "Python", "AI processing service")
+
+Container_Boundary(apiService, "API Gateway Service") {
+    Component(fastApiApp, "FastAPI Application", "FastAPI", "Main application and routing")
+    Component(middleware, "Middleware Stack", "Python", "CORS, security, logging middleware")
+    Component(dependencies, "Dependency Injection", "Python", "Service dependencies and configuration")
+    
+    Component(authRouter, "Auth Router", "FastAPI", "Authentication endpoints")
+    Component(cameraRouter, "Camera Router", "FastAPI", "Camera management endpoints")
+    Component(analyticsRouter, "Analytics Router", "FastAPI", "Traffic analytics endpoints")
+    Component(modelRouter, "Model Router", "FastAPI", "ML model management endpoints")
+    Component(healthRouter, "Health Router", "FastAPI", "Health check endpoints")
+    Component(sseRouter, "SSE Router", "FastAPI", "Server-sent events for real-time updates")
+    
+    Component(sseBC, "SSE Broadcaster", "Python", "Real-time event broadcasting")
+    Component(apiUtils, "API Utilities", "Python", "Common API helper functions")
+    
+    Component(authSchema, "Auth Schemas", "Pydantic", "Authentication data models")
+    Component(cameraSchema, "Camera Schemas", "Pydantic", "Camera data models")
+    Component(analyticsSchema, "Analytics Schemas", "Pydantic", "Analytics data models")
+    Component(modelSchema, "Model Schemas", "Pydantic", "ML model data models")
+}
+
+System_Ext(database, "PostgreSQL", "Primary database")
+System_Ext(redis, "Redis", "Cache and sessions")
+
+Rel(webDashboard, middleware, "HTTPS requests", "REST/WebSocket")
+Rel(middleware, fastApiApp, "Processed requests", "Internal")
+Rel(fastApiApp, dependencies, "Inject services", "Internal")
+
+Rel(fastApiApp, authRouter, "Route /auth/*", "Internal")
+Rel(fastApiApp, cameraRouter, "Route /cameras/*", "Internal")
+Rel(fastApiApp, analyticsRouter, "Route /analytics/*", "Internal")
+Rel(fastApiApp, modelRouter, "Route /models/*", "Internal")
+Rel(fastApiApp, healthRouter, "Route /health", "Internal")
+Rel(fastApiApp, sseRouter, "Route /events", "Internal")
+
+Rel(authRouter, authService, "Authentication", "HTTP")
+Rel(authRouter, authSchema, "Data validation", "Internal")
+
+Rel(cameraRouter, visionEngine, "Camera control", "gRPC")
+Rel(cameraRouter, cameraSchema, "Data validation", "Internal")
+
+Rel(analyticsRouter, visionEngine, "Analytics queries", "HTTP")
+Rel(analyticsRouter, analyticsSchema, "Data validation", "Internal")
+
+Rel(modelRouter, visionEngine, "Model management", "HTTP")
+Rel(modelRouter, modelSchema, "Data validation", "Internal")
+
+Rel(sseRouter, sseBC, "Event broadcasting", "Internal")
+Rel(sseBC, webDashboard, "Real-time events", "Server-Sent Events")
+
+Rel(dependencies, database, "Database queries", "SQL")
+Rel(dependencies, redis, "Cache operations", "Redis Protocol")
+
+SHOW_LEGEND()
+
+@enduml

@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 class CameraService(BaseAsyncService[Camera]):
     """Async CRUD service for camera registry operations.
-    
+
     Optimized for high-throughput operations with efficient querying,
     batch operations, and real-time status management.
     """
@@ -38,14 +38,14 @@ class CameraService(BaseAsyncService[Camera]):
         self, camera_data: CameraCreateSchema, user_id: str | None = None
     ) -> Camera:
         """Create a new camera with validation and settings initialization.
-        
+
         Args:
             camera_data: Camera creation data
             user_id: Optional user ID for audit logging
-            
+
         Returns:
             Created camera instance
-            
+
         Raises:
             DatabaseError: If camera creation fails
         """
@@ -116,11 +116,11 @@ class CameraService(BaseAsyncService[Camera]):
         self, camera_id: str, include_settings: bool = False
     ) -> Camera | None:
         """Get camera by ID with optional settings loading.
-        
+
         Args:
             camera_id: Camera unique identifier
             include_settings: Whether to load camera settings
-            
+
         Returns:
             Camera instance if found, None otherwise
         """
@@ -134,18 +134,20 @@ class CameraService(BaseAsyncService[Camera]):
             return result.scalar_one_or_none()
 
         except Exception as e:
-            logger.error("Failed to get camera by ID", camera_id=camera_id, error=str(e))
+            logger.error(
+                "Failed to get camera by ID", camera_id=camera_id, error=str(e)
+            )
             raise DatabaseError(f"Failed to retrieve camera: {str(e)}") from e
 
     async def get_cameras_by_zone(
         self, zone_id: str, active_only: bool = True
     ) -> list[Camera]:
         """Get cameras in a specific zone.
-        
+
         Args:
             zone_id: Traffic zone identifier
             active_only: Only return active cameras
-            
+
         Returns:
             List of cameras in the zone
         """
@@ -171,12 +173,12 @@ class CameraService(BaseAsyncService[Camera]):
         include_settings: bool = False,
     ) -> list[Camera]:
         """Get cameras by status.
-        
+
         Args:
             status: Camera status to filter by
             limit: Maximum number of cameras to return
             include_settings: Whether to load camera settings
-            
+
         Returns:
             List of cameras with the specified status
         """
@@ -196,20 +198,22 @@ class CameraService(BaseAsyncService[Camera]):
 
         except Exception as e:
             logger.error("Failed to get cameras by status", status=status, error=str(e))
-            raise DatabaseError(f"Failed to retrieve cameras by status: {str(e)}") from e
+            raise DatabaseError(
+                f"Failed to retrieve cameras by status: {str(e)}"
+            ) from e
 
     async def update_camera(
         self, camera_id: str, update_data: CameraUpdateSchema
     ) -> Camera | None:
         """Update camera information.
-        
+
         Args:
             camera_id: Camera unique identifier
             update_data: Camera update data
-            
+
         Returns:
             Updated camera instance if found, None otherwise
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -262,13 +266,13 @@ class CameraService(BaseAsyncService[Camera]):
         performance_metrics: dict[str, Any] | None = None,
     ) -> bool:
         """Update camera status and related metrics.
-        
+
         Args:
             camera_id: Camera unique identifier
             status: New camera status
             error_message: Optional error message
             performance_metrics: Optional performance metrics
-            
+
         Returns:
             True if update successful, False if camera not found
         """
@@ -286,9 +290,13 @@ class CameraService(BaseAsyncService[Camera]):
             # Handle performance metrics update
             if performance_metrics:
                 if "total_frames_processed" in performance_metrics:
-                    camera.total_frames_processed = performance_metrics["total_frames_processed"]
+                    camera.total_frames_processed = performance_metrics[
+                        "total_frames_processed"
+                    ]
                 if "avg_processing_time" in performance_metrics:
-                    camera.avg_processing_time = performance_metrics["avg_processing_time"]
+                    camera.avg_processing_time = performance_metrics[
+                        "avg_processing_time"
+                    ]
                 if "uptime_percentage" in performance_metrics:
                     camera.uptime_percentage = performance_metrics["uptime_percentage"]
 
@@ -296,11 +304,13 @@ class CameraService(BaseAsyncService[Camera]):
             if error_message:
                 if "errors" not in camera.config:
                     camera.config["errors"] = []
-                camera.config["errors"].append({
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "message": error_message,
-                    "status": status.value,
-                })
+                camera.config["errors"].append(
+                    {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "message": error_message,
+                        "status": status.value,
+                    }
+                )
                 # Keep only last 10 errors
                 camera.config["errors"] = camera.config["errors"][-10:]
 
@@ -317,17 +327,19 @@ class CameraService(BaseAsyncService[Camera]):
 
         except Exception as e:
             await self.session.rollback()
-            logger.error("Camera status update failed", camera_id=camera_id, error=str(e))
+            logger.error(
+                "Camera status update failed", camera_id=camera_id, error=str(e)
+            )
             raise DatabaseError(f"Failed to update camera status: {str(e)}") from e
 
     async def batch_update_camera_status(
         self, status_updates: dict[str, tuple[CameraStatus, dict[str, Any] | None]]
     ) -> dict[str, bool]:
         """Batch update multiple camera statuses.
-        
+
         Args:
             status_updates: Dict mapping camera_id to (status, metrics)
-            
+
         Returns:
             Dict mapping camera_id to success status
         """
@@ -363,14 +375,14 @@ class CameraService(BaseAsyncService[Camera]):
         order_desc: bool = False,
     ) -> tuple[list[Camera], int]:
         """Get cameras with pagination and filtering.
-        
+
         Args:
             page: Page number (1-based)
             size: Page size
             filters: Optional filters dict
             order_by: Field to order by
             order_desc: Order descending if True
-            
+
         Returns:
             Tuple of (cameras, total_count)
         """
@@ -407,9 +419,7 @@ class CameraService(BaseAsyncService[Camera]):
 
                 if "tags" in filters and filters["tags"]:
                     # JSONB contains query for tags
-                    conditions.append(
-                        Camera.tags.contains(filters["tags"])
-                    )
+                    conditions.append(Camera.tags.contains(filters["tags"]))
 
                 if conditions:
                     where_clause = and_(*conditions)
@@ -442,10 +452,10 @@ class CameraService(BaseAsyncService[Camera]):
 
     async def get_camera_health_summary(self, camera_id: str) -> dict[str, Any]:
         """Get comprehensive camera health summary.
-        
+
         Args:
             camera_id: Camera unique identifier
-            
+
         Returns:
             Camera health summary dict
         """
@@ -462,9 +472,12 @@ class CameraService(BaseAsyncService[Camera]):
 
             # Determine health status
             is_healthy = (
-                camera.is_active and
-                camera.status in [CameraStatus.ONLINE.value, CameraStatus.STREAMING.value] and
-                (not last_seen_minutes or last_seen_minutes < 5)  # Seen within 5 minutes
+                camera.is_active
+                and camera.status
+                in [CameraStatus.ONLINE.value, CameraStatus.STREAMING.value]
+                and (
+                    not last_seen_minutes or last_seen_minutes < 5
+                )  # Seen within 5 minutes
             )
 
             return {
@@ -484,32 +497,38 @@ class CameraService(BaseAsyncService[Camera]):
         except NotFoundError:
             raise
         except Exception as e:
-            logger.error("Failed to get camera health summary", camera_id=camera_id, error=str(e))
+            logger.error(
+                "Failed to get camera health summary", camera_id=camera_id, error=str(e)
+            )
             raise DatabaseError(f"Failed to get camera health: {str(e)}") from e
 
     async def get_offline_cameras(self, threshold_minutes: int = 5) -> list[Camera]:
         """Get cameras that are offline or haven't been seen recently.
-        
+
         Args:
             threshold_minutes: Minutes threshold for considering camera offline
-            
+
         Returns:
             List of offline cameras
         """
         try:
             threshold_time = datetime.utcnow() - timedelta(minutes=threshold_minutes)
 
-            query = select(Camera).where(
-                or_(
-                    Camera.status == CameraStatus.OFFLINE.value,
-                    Camera.status == CameraStatus.ERROR.value,
-                    and_(
-                        Camera.last_seen_at.is_not(None),
-                        Camera.last_seen_at < threshold_time,
-                    ),
-                    Camera.last_seen_at.is_(None),
+            query = (
+                select(Camera)
+                .where(
+                    or_(
+                        Camera.status == CameraStatus.OFFLINE.value,
+                        Camera.status == CameraStatus.ERROR.value,
+                        and_(
+                            Camera.last_seen_at.is_not(None),
+                            Camera.last_seen_at < threshold_time,
+                        ),
+                        Camera.last_seen_at.is_(None),
+                    )
                 )
-            ).where(Camera.is_active == True)  # noqa: E712
+                .where(Camera.is_active == True)
+            )  # noqa: E712
 
             result = await self.session.execute(query)
             return list(result.scalars().all())
@@ -520,10 +539,10 @@ class CameraService(BaseAsyncService[Camera]):
 
     async def delete_camera(self, camera_id: str) -> bool:
         """Delete camera and all related data.
-        
+
         Args:
             camera_id: Camera unique identifier
-            
+
         Returns:
             True if camera was deleted, False if not found
         """
@@ -545,25 +564,26 @@ class CameraService(BaseAsyncService[Camera]):
 
     async def get_system_overview(self) -> dict[str, Any]:
         """Get system-wide camera overview statistics.
-        
+
         Returns:
             System overview dict with camera statistics
         """
         try:
             # Count cameras by status
-            status_query = select(
-                Camera.status,
-                func.count(Camera.id).label('count')
-            ).where(
-                Camera.is_active == True  # noqa: E712
-            ).group_by(Camera.status)
+            status_query = (
+                select(Camera.status, func.count(Camera.id).label("count"))
+                .where(Camera.is_active == True)  # noqa: E712
+                .group_by(Camera.status)
+            )
 
             status_result = await self.session.execute(status_query)
             status_counts = {row.status: row.count for row in status_result}
 
             # Count total and active cameras
             total_query = select(func.count(Camera.id))
-            active_query = select(func.count(Camera.id)).where(Camera.is_active == True)  # noqa: E712
+            active_query = select(func.count(Camera.id)).where(
+                Camera.is_active == True
+            )  # noqa: E712
 
             total_result = await self.session.execute(total_query)
             active_result = await self.session.execute(active_query)
@@ -583,12 +603,12 @@ class CameraService(BaseAsyncService[Camera]):
                     "maintenance": status_counts.get(CameraStatus.MAINTENANCE.value, 0),
                 },
                 "healthy_cameras": (
-                    status_counts.get(CameraStatus.ONLINE.value, 0) +
-                    status_counts.get(CameraStatus.STREAMING.value, 0)
+                    status_counts.get(CameraStatus.ONLINE.value, 0)
+                    + status_counts.get(CameraStatus.STREAMING.value, 0)
                 ),
                 "problematic_cameras": (
-                    status_counts.get(CameraStatus.ERROR.value, 0) +
-                    status_counts.get(CameraStatus.OFFLINE.value, 0)
+                    status_counts.get(CameraStatus.ERROR.value, 0)
+                    + status_counts.get(CameraStatus.OFFLINE.value, 0)
                 ),
             }
 

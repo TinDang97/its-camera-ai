@@ -142,7 +142,7 @@ class StreamProcessor:
     def __init__(self):
         self.kafka_streams = KafkaStreams()
         self.redis_cache = RedisCluster()
-        self.time_series_db = InfluxDB()
+        self.time_series_db = TimescaleDB()
         
     async def process_camera_stream(self, camera_id, frame_data):
         # Real-time processing pipeline
@@ -158,7 +158,7 @@ class StreamProcessor:
 **Storage Strategy**:
 
 - **Hot Data**: Redis (< 1 hour) - Real-time queries and dashboards
-- **Warm Data**: InfluxDB (< 30 days) - Analytics and reporting  
+- **Warm Data**: TimescaleDB (< 30 days) - Analytics and reporting  
 - **Cold Data**: S3/MinIO (> 30 days) - Historical analysis and ML training
 - **Metadata**: PostgreSQL - System configuration and user data
 
@@ -189,7 +189,7 @@ Model Registry: MLflow or DVC
 ```yaml
 Message Broker: Apache Kafka + Schema Registry
 Cache: Redis Cluster
-Time Series DB: InfluxDB 2.x
+Time Series DB: TimescaleDB
 Relational DB: PostgreSQL 15+
 Object Storage: MinIO or AWS S3
 ```
@@ -310,8 +310,8 @@ class MemoryOptimizer:
 #### Time Series Optimization
 
 ```python
-# InfluxDB configuration for high throughput
-influxdb_config = {
+# TimescaleDB configuration for high throughput
+timescaledb_config = {
     'batch_size': 10000,
     'flush_interval': 1000,  # ms
     'retention_policy': '30d',

@@ -560,7 +560,7 @@ async def setup_system_monitoring():
     # Initialize monitoring system
     monitoring = await create_production_monitoring_system(
         config=monitoring_config,
-        exporters=['prometheus', 'influxdb', 'grafana']
+        exporters=['prometheus', 'timescaledb', 'grafana']
     )
     
     return monitoring
@@ -703,7 +703,7 @@ async def setup_analytics_dashboards():
     # Initialize dashboard
     dashboard = ProductionDashboard(
         config=dashboard_config,
-        data_sources=['postgresql', 'influxdb', 'redis'],
+        data_sources=['postgresql', 'timescaledb', 'redis'],
         visualization_engine='grafana'
     )
     
@@ -999,7 +999,7 @@ deployment_topology:
       storage_systems:
         object_storage: "S3/GCS/Azure Blob for model and video storage"
         database: "PostgreSQL with read replicas for metadata"
-        time_series: "InfluxDB for metrics and analytics data"
+        time_series: "TimescaleDB for metrics and analytics data"
         cache: "Redis cluster for session and temporary data"
         
       networking:
@@ -1340,7 +1340,7 @@ data_retention_policies:
       real_time_metrics:
         retention: "90 days in high-resolution"
         downsampling: "5-minute intervals after 7 days"
-        storage: "Time-series database (InfluxDB)"
+        storage: "Time-series database (TimescaleDB)"
         
       application_logs:
         retention: "30 days for debug logs"

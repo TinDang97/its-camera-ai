@@ -51,8 +51,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "redis>=6.4.0",
     "minio>=7.2.16",
-    # Time Series & Analytics
-    "influxdb-client[async]>=1.49.0",
+    # Time Series & Analytics (using TimescaleDB via psycopg)
     "prometheus-client>=0.22.1",
     # Security & Authentication
     "passlib[bcrypt]>=1.7.4",
@@ -307,7 +306,6 @@ module = [
     "kafka.*",
     "redis.*",
     "minio.*",
-    "influxdb_client.*",
 ]
 ignore_missing_imports = true
 
