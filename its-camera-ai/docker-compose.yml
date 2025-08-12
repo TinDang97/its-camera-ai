@@ -21,6 +21,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - INFLUXDB_URL=http://influxdb:8086
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_SECURE=false
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
     volumes:
@@ -36,6 +40,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      minio:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -65,6 +71,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - INFLUXDB_URL=http://influxdb:8086
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_SECURE=false
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
     volumes:
@@ -80,6 +90,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      minio:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -232,24 +244,101 @@ services:
 
   # MinIO Object Storage (S3-compatible)
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2024-08-17T01-24-54Z
     container_name: its-camera-ai-minio
     restart: unless-stopped
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-    command: server /data --console-address ":9001"
+      # Authentication
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-its_camera_ai_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ItsCAI2024SecureMinIOPass!}
+      # Performance optimizations
+      MINIO_STORAGE_CLASS_STANDARD: EC:2
+      MINIO_CACHE_DRIVES: "/mnt/cache1,/mnt/cache2"
+      MINIO_CACHE_QUOTA: 80
+      MINIO_CACHE_AFTER: 3
+      MINIO_CACHE_WATERMARK_LOW: 70
+      MINIO_CACHE_WATERMARK_HIGH: 90
+      # Security
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
+      MINIO_SERVER_URL: http://localhost:9000
+      # Logging
+      MINIO_AUDIT_WEBHOOK_ENABLE_target1: "on"
+      MINIO_AUDIT_WEBHOOK_ENDPOINT_target1: "http://app:8000/api/v1/audit/minio"
+    command: >
+      sh -c '
+        mkdir -p /data/camera-streams /data/ml-models /data/analytics /data/backups &&
+        minio server /data --console-address ":9001"
+      '
     volumes:
       - minio_data:/data
+      - minio_cache1:/mnt/cache1
+      - minio_cache2:/mnt/cache2
+      - ${PWD}/infrastructure/minio/policies:/opt/minio/policies:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
       timeout: 10s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '1.0'
+    networks:
+      - its-network
+    profiles:
+      - dev
+      - prod
+      - gpu
+
+  # MinIO Client for bucket initialization
+  minio-init:
+    image: minio/mc:latest
+    container_name: its-camera-ai-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-its_camera_ai_admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-ItsCAI2024SecureMinIOPass!}
+    entrypoint: >
+      sh -c '
+        echo "Configuring MinIO..." &&
+        mc alias set myminio http://$$MINIO_ENDPOINT $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY &&
+        
+        echo "Creating buckets..." &&
+        mc mb myminio/camera-streams --ignore-existing &&
+        mc mb myminio/ml-models --ignore-existing &&
+        mc mb myminio/analytics --ignore-existing &&
+        mc mb myminio/backups --ignore-existing &&
+        mc mb myminio/temp --ignore-existing &&
+        
+        echo "Setting bucket policies..." &&
+        mc policy set download myminio/ml-models &&
+        mc policy set private myminio/camera-streams &&
+        mc policy set private myminio/analytics &&
+        mc policy set private myminio/backups &&
+        mc policy set public myminio/temp &&
+        
+        echo "Configuring lifecycle policies..." &&
+        mc ilm add --expiry-days 7 myminio/temp &&
+        mc ilm add --expiry-days 30 myminio/camera-streams &&
+        mc ilm add --expiry-days 90 myminio/analytics &&
+        
+        echo "Enabling versioning..." &&
+        mc version enable myminio/ml-models &&
+        mc version enable myminio/backups &&
+        
+        echo "MinIO configuration completed successfully!"
+      '
     networks:
       - its-network
     profiles:
@@ -338,6 +427,14 @@ volumes:
   zk_logs:
     driver: local
   minio_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/minio
+  minio_cache1:
+    driver: local
+  minio_cache2:
     driver: local
   prometheus_data:
     driver: local

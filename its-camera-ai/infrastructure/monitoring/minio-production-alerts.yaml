@@ -1,0 +1,348 @@
+# MinIO Production Alerting Rules
+# Comprehensive monitoring and alerting for MinIO cluster health
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: minio-production-alerts
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: its-camera-ai
+    team: its-camera-ai
+    environment: production
+spec:
+  groups:
+  - name: minio.critical
+    interval: 30s
+    rules:
+    - alert: MinIOClusterDown
+      expr: up{job="minio"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-cluster-down"
+      annotations:
+        summary: "MinIO cluster is completely down"
+        description: "MinIO cluster has been completely unavailable for more than 2 minutes. This affects all object storage operations."
+        impact: "HIGH - All video storage and ML model serving is affected"
+        action: "Immediate investigation required. Check pod status and node health."
+
+    - alert: MinIOQuorumLoss
+      expr: count(up{job="minio"} == 1) < ceil(count(up{job="minio"}) / 2)
+      for: 1m
+      labels:
+        severity: critical
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-quorum-loss"
+      annotations:
+        summary: "MinIO cluster has lost quorum"
+        description: "Less than half of MinIO nodes are available. Cluster may become read-only."
+        impact: "HIGH - Write operations may fail"
+        action: "Investigate failed nodes immediately to restore quorum"
+
+    - alert: MinIOHighErrorRate
+      expr: rate(minio_http_requests_total{status_code!~"2.*"}[5m]) / rate(minio_http_requests_total[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: critical
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-high-error-rate"
+      annotations:
+        summary: "MinIO high error rate detected"
+        description: "MinIO error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+        impact: "MEDIUM - Application functionality may be degraded"
+        action: "Check MinIO logs and network connectivity"
+
+    - alert: MinIODiskSpaceCritical
+      expr: (minio_disk_storage_used_bytes / minio_disk_storage_total_bytes) * 100 > 95
+      for: 5m
+      labels:
+        severity: critical
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-disk-space"
+      annotations:
+        summary: "MinIO disk space critically low"
+        description: "MinIO disk usage on {{ $labels.instance }} is {{ $value }}%. Immediate action required."
+        impact: "HIGH - Write operations will fail soon"
+        action: "Add storage capacity or clean up old data immediately"
+
+  - name: minio.warning
+    interval: 60s
+    rules:
+    - alert: MinIONodeDown
+      expr: up{job="minio"} == 0
+      for: 5m
+      labels:
+        severity: warning
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-node-down"
+      annotations:
+        summary: "MinIO node is down"
+        description: "MinIO node {{ $labels.instance }} has been down for more than 5 minutes"
+        impact: "LOW-MEDIUM - Cluster still operational but degraded"
+        action: "Investigate node health and restart if necessary"
+
+    - alert: MinIODiskSpaceHigh
+      expr: (minio_disk_storage_used_bytes / minio_disk_storage_total_bytes) * 100 > 85
+      for: 10m
+      labels:
+        severity: warning
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-disk-space"
+      annotations:
+        summary: "MinIO disk usage is high"
+        description: "MinIO disk usage on {{ $labels.instance }} is {{ $value }}%"
+        impact: "LOW - Plan storage expansion"
+        action: "Plan to add storage capacity or implement data lifecycle policies"
+
+    - alert: MinIOHighRequestLatency
+      expr: histogram_quantile(0.95, rate(minio_http_request_duration_seconds_bucket[5m])) > 1
+      for: 10m
+      labels:
+        severity: warning
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-latency"
+      annotations:
+        summary: "MinIO high request latency"
+        description: "95th percentile latency for MinIO requests is {{ $value }}s"
+        impact: "MEDIUM - Application performance degraded"
+        action: "Check network, disk I/O, and CPU usage"
+
+    - alert: MinIOHighMemoryUsage
+      expr: (minio_node_process_resident_memory_bytes / minio_node_process_memory_limit_bytes) * 100 > 80
+      for: 15m
+      labels:
+        severity: warning
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-memory"
+      annotations:
+        summary: "MinIO high memory usage"
+        description: "MinIO memory usage on {{ $labels.instance }} is {{ $value }}%"
+        impact: "MEDIUM - Performance may be affected"
+        action: "Consider increasing memory limits or optimizing workload"
+
+    - alert: MinIOHealingRequired
+      expr: minio_heal_objects_heal_total > 0
+      for: 30m
+      labels:
+        severity: warning
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-healing"
+      annotations:
+        summary: "MinIO cluster healing required"
+        description: "MinIO cluster has {{ $value }} objects that require healing"
+        impact: "LOW - Data integrity may be at risk"
+        action: "Monitor healing progress and investigate if it persists"
+
+    - alert: MinIOHighConcurrentConnections
+      expr: minio_http_requests_total_current > 1000
+      for: 10m
+      labels:
+        severity: warning
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-connections"
+      annotations:
+        summary: "MinIO high concurrent connections"
+        description: "MinIO has {{ $value }} concurrent connections on {{ $labels.instance }}"
+        impact: "MEDIUM - May indicate high load or connection leaks"
+        action: "Monitor application connection patterns and consider scaling"
+
+  - name: minio.performance
+    interval: 120s
+    rules:
+    - alert: MinIOLowThroughput
+      expr: rate(minio_http_requests_total[5m]) < 10
+      for: 20m
+      labels:
+        severity: info
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-performance"
+      annotations:
+        summary: "MinIO low request throughput"
+        description: "MinIO request rate is {{ $value }} requests/second, which is unusually low"
+        impact: "INFO - May indicate reduced application activity"
+        action: "Verify application health and traffic patterns"
+
+    - alert: MinIOHighBandwidthUsage
+      expr: rate(minio_network_received_bytes_total[5m]) + rate(minio_network_sent_bytes_total[5m]) > 1073741824  # 1GB/s
+      for: 15m
+      labels:
+        severity: info
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-bandwidth"
+      annotations:
+        summary: "MinIO high network bandwidth usage"
+        description: "MinIO network bandwidth usage is {{ $value | humanizeBytes }}/s"
+        impact: "INFO - High data transfer activity"
+        action: "Monitor for sustained high usage and plan capacity accordingly"
+
+    - alert: MinIOCacheEfficiencyLow
+      expr: (minio_cache_hits_total / (minio_cache_hits_total + minio_cache_misses_total)) * 100 < 80
+      for: 30m
+      labels:
+        severity: info
+        service: minio
+        component: object-storage
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-cache"
+      annotations:
+        summary: "MinIO cache efficiency is low"
+        description: "MinIO cache hit ratio is {{ $value }}%"
+        impact: "INFO - Performance could be improved"
+        action: "Consider optimizing cache configuration or increasing cache size"
+
+  - name: minio.security
+    interval: 300s
+    rules:
+    - alert: MinIOUnauthorizedAccess
+      expr: increase(minio_http_requests_total{status_code="403"}[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+        service: minio
+        component: security
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-security"
+      annotations:
+        summary: "MinIO unauthorized access attempts detected"
+        description: "{{ $value }} unauthorized access attempts in the last 5 minutes"
+        impact: "MEDIUM - Potential security issue"
+        action: "Review access logs and check for suspicious activity"
+
+    - alert: MinIOCertificateExpiringSoon
+      expr: (minio_certificate_expiry_time - time()) / 86400 < 30
+      for: 1h
+      labels:
+        severity: warning
+        service: minio
+        component: security
+        runbook_url: "https://docs.its-camera-ai.com/runbooks/minio-certificates"
+      annotations:
+        summary: "MinIO TLS certificate expiring soon"
+        description: "MinIO TLS certificate will expire in {{ $value }} days"
+        impact: "HIGH - Service will become unavailable when certificate expires"
+        action: "Renew TLS certificate before expiration"
+
+---
+# Grafana Dashboard ConfigMap for MinIO Monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-dashboard
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: its-camera-ai
+    grafana_dashboard: "1"
+data:
+  minio-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "MinIO Object Storage - ITS Camera AI",
+        "tags": ["minio", "object-storage", "its-camera-ai"],
+        "style": "dark",
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "MinIO Cluster Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"minio\"}",
+                "legendFormat": "{{instance}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": 0},
+                    {"color": "green", "value": 1}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Storage Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "(minio_disk_storage_used_bytes / minio_disk_storage_total_bytes) * 100",
+                "legendFormat": "{{instance}} - Usage %"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Percentage",
+                "max": 100,
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(minio_http_requests_total[5m])",
+                "legendFormat": "{{instance}} - {{method}}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Requests/sec"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(minio_http_requests_total{status_code!~\"2.*\"}[5m]) / rate(minio_http_requests_total[5m]) * 100",
+                "legendFormat": "{{instance}} - Error %"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Error Percentage",
+                "max": 100,
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }

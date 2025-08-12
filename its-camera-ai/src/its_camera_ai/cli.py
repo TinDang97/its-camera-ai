@@ -28,7 +28,7 @@ def main() -> None:
 @main.command()
 @click.option(
     "--host",
-    default="0.0.0.0",
+    default="0.0.0.0",  # noqa: S104 - Needed for containerized deployment
     help="Host to bind the server to",
     show_default=True,
 )

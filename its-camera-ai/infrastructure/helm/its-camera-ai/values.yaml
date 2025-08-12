@@ -261,6 +261,171 @@ redis:
 # Kafka removed - replaced with Redis Streams
 kafka:
   enabled: false
+
+# MinIO Object Storage Configuration
+minio:
+  enabled: true
+  
+  # Deployment mode
+  mode: distributed
+  
+  # Authentication
+  auth:
+    rootUser: "its_camera_ai_admin"
+    rootPassword: "ItsCAI2024SecureMinIOPass!"
+    
+  # Distributed mode configuration
+  statefulset:
+    replicaCount: 4
+    zones: 1
+    drivesPerNode: 4
+    
+  # Resource allocation
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+      
+  # Persistence
+  persistence:
+    enabled: true
+    storageClass: "fast-ssd"
+    size: "500Gi"
+    
+  # Service configuration
+  service:
+    type: LoadBalancer
+    ports:
+      api: 9000
+      console: 9001
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      
+  # MinIO Console (Web UI)
+  console:
+    enabled: true
+    ingress:
+      enabled: true
+      hostname: "minio-console.its-camera-ai.local"
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-body-size: "0"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+        
+  # API Ingress
+  ingress:
+    enabled: true
+    hostname: "minio-api.its-camera-ai.local"
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        more_set_headers "Access-Control-Allow-Origin: *";
+        more_set_headers "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS";
+        more_set_headers "Access-Control-Allow-Headers: authorization, content-type";
+        
+  # Security
+  networkPolicy:
+    enabled: true
+    allowExternal: true
+    ingressRules:
+      primaryAccessOnlyFrom:
+        enabled: false
+      readAccessOnlyFrom:
+        enabled: false
+        
+  # Metrics and monitoring
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 15s
+      
+  # Default buckets to create
+  defaultBuckets: "camera-streams,ml-models,analytics,backups,temp"
+  
+  # Bucket lifecycle policies
+  bucketLifecycle:
+    enabled: true
+    policies:
+      temp:
+        expirationDays: 7
+      camera-streams:
+        expirationDays: 30
+      analytics:
+        expirationDays: 90
+        
+  # Performance optimizations
+  extraEnvVars:
+    - name: MINIO_STORAGE_CLASS_STANDARD
+      value: "EC:2"
+    - name: MINIO_CACHE_QUOTA
+      value: "80"
+    - name: MINIO_CACHE_AFTER
+      value: "3"
+    - name: MINIO_CACHE_WATERMARK_LOW
+      value: "70"
+    - name: MINIO_CACHE_WATERMARK_HIGH
+      value: "90"
+    - name: MINIO_API_REQUESTS_MAX
+      value: "10000"
+    - name: MINIO_API_REQUESTS_DEADLINE
+      value: "10s"
+    - name: MINIO_AUDIT_WEBHOOK_ENABLE_target1
+      value: "on"
+    - name: MINIO_AUDIT_WEBHOOK_ENDPOINT_target1
+      value: "http://api-service:8000/api/v1/audit/minio"
+      
+  # Pod Disruption Budget
+  pdb:
+    create: true
+    minAvailable: 2
+    
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 12
+    targetCPU: 70
+    targetMemory: 80
+    
+  # Affinity and tolerations
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+            - storage
+          - key: storage-type
+            operator: In
+            values:
+            - ssd
+            - nvme
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: minio
+        topologyKey: kubernetes.io/hostname
+        
+  tolerations:
+  - key: workload-type
+    operator: Equal
+    value: storage
+    effect: NoSchedule
+  - key: storage-tier
+    operator: Equal
+    value: high-performance
+    effect: NoSchedule
   
 # Redis Streams for high-performance queue processing
 redisStreams:
@@ -343,6 +508,9 @@ nodeSelector:
       workload-type: ml-inference
     database:
       workload-type: database
+    storage:
+      workload-type: storage
+      storage-type: ssd
 
 # Tolerations for specialized nodes
 tolerations:

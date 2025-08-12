@@ -182,9 +182,12 @@ class ABTestConfig(BaseModel):
     def model_validate(cls, obj: Any, **kwargs: Any) -> "ABTestConfig":
         """Validate A/B test configuration."""
         instance = super().model_validate(obj, **kwargs)
-        if instance.end_time and instance.start_time:
-            if instance.end_time <= instance.start_time:
-                raise ValueError("end_time must be after start_time")
+        if (
+            instance.end_time
+            and instance.start_time
+            and instance.end_time <= instance.start_time
+        ):
+            raise ValueError("end_time must be after start_time")
         return instance
 
 
@@ -628,3 +631,107 @@ class ModelRegistry(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Model Management API Response Schemas
+class ModelRegistrationResponse(BaseModel):
+    """Response schema for model registration."""
+
+    success: bool = Field(description="Whether registration was successful")
+    model_id: str = Field(description="Generated unique model identifier")
+    model_name: str = Field(description="Model name")
+    version: str = Field(description="Model version")
+    storage_key: str = Field(description="Storage key in MinIO")
+    storage_bucket: str = Field(description="Storage bucket name")
+    size_mb: float = Field(description="Model size in megabytes", ge=0)
+    metrics: dict[str, float] = Field(description="Performance metrics")
+    tags: dict[str, str] = Field(description="Model tags")
+    registration_time: datetime = Field(description="Registration timestamp")
+    message: str = Field(description="Success/error message")
+
+
+class ModelVersionResponse(BaseModel):
+    """Response schema for model version details."""
+
+    model_id: str = Field(description="Model identifier")
+    model_name: str = Field(description="Model name")
+    version: str = Field(description="Model version")
+    description: str | None = Field(None, description="Model description")
+    storage_key: str = Field(description="Storage key in MinIO")
+    storage_bucket: str = Field(description="Storage bucket name")
+    size_mb: float = Field(description="Model size in megabytes", ge=0)
+    created_at: datetime = Field(description="Model creation timestamp")
+    metrics: dict[str, float] = Field(description="Performance metrics")
+    tags: dict[str, str] = Field(description="Model tags")
+    training_config: dict[str, Any] = Field(description="Training configuration")
+    status: str = Field(description="Model status")
+
+    class Config:
+        from_attributes = True
+
+
+class ModelPromotionRequest(BaseModel):
+    """Request schema for model promotion."""
+
+    target_stage: str = Field(
+        description="Target deployment stage (development, staging, canary, production)"
+    )
+    force_promotion: bool = Field(
+        False, description="Force promotion without validation"
+    )
+    min_accuracy: float | None = Field(
+        None, ge=0, le=1, description="Minimum accuracy requirement"
+    )
+    max_latency_ms: float | None = Field(
+        None, gt=0, description="Maximum latency requirement"
+    )
+    notes: str | None = Field(None, description="Promotion notes")
+
+
+class ModelPromotionResponse(BaseModel):
+    """Response schema for model promotion."""
+
+    success: bool = Field(description="Whether promotion was successful")
+    model_id: str = Field(description="Model identifier")
+    model_name: str = Field(description="Model name")
+    version: str = Field(description="Model version")
+    previous_stage: str = Field(description="Previous deployment stage")
+    new_stage: str = Field(description="New deployment stage")
+    promoted_by: str = Field(description="User who promoted the model")
+    promoted_at: datetime = Field(description="Promotion timestamp")
+    notes: str | None = Field(None, description="Promotion notes")
+    message: str = Field(description="Success/error message")
+
+
+class ModelListResponse(BaseModel):
+    """Response schema for model listing."""
+
+    models: list[dict[str, Any]] = Field(description="List of model information")
+    total_count: int = Field(description="Total number of models found", ge=0)
+    page_size: int = Field(description="Page size used for query", gt=0)
+    has_more: bool = Field(description="Whether more results are available")
+    filters: dict[str, Any] = Field(description="Applied filters")
+
+
+class ModelDownloadResponse(BaseModel):
+    """Response schema for model download."""
+
+    success: bool = Field(description="Whether download preparation was successful")
+    download_url: str = Field(description="Presigned download URL")
+    expires_at: datetime = Field(description="URL expiration timestamp")
+    model_id: str = Field(description="Model identifier")
+    format: str = Field(description="Download format (binary, url)")
+    size_mb: float | None = Field(None, ge=0, description="Model size in megabytes")
+    message: str = Field(description="Success/error message")
+
+
+class ModelDeleteResponse(BaseModel):
+    """Response schema for model deletion."""
+
+    success: bool = Field(description="Whether deletion was successful")
+    model_id: str = Field(description="Model identifier")
+    model_name: str = Field(description="Model name")
+    version: str = Field(description="Model version")
+    deleted_by: str = Field(description="User who deleted the model")
+    deleted_at: datetime = Field(description="Deletion timestamp")
+    message: str = Field(description="Success/error message")

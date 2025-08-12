@@ -27,11 +27,12 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 import torch
-from torch.amp import autocast
+from torch.cuda.amp import autocast
 from ultralytics import YOLO
 
 try:
@@ -56,15 +57,15 @@ logger = logging.getLogger(__name__)
 class TensorRTModel:
     """Wrapper for TensorRT inference engine."""
 
-    def __init__(self, engine, context, device: str):
+    def __init__(self, engine: Any, context: Any, device: str) -> None:
         self.engine = engine
         self.context = context
         self.device = device
 
         # Pre-allocate GPU memory for inputs and outputs
-        self.bindings = []
-        self.inputs = []
-        self.outputs = []
+        self.bindings: list[int] = []
+        self.inputs: list[dict[str, Any]] = []
+        self.outputs: list[dict[str, Any]] = []
 
         for i in range(engine.num_bindings):
             binding_name = engine.get_binding_name(i)
@@ -106,10 +107,16 @@ class TensorRTModel:
                     }
                 )
 
-    def __call__(self, input_tensor: torch.Tensor):
+    def __call__(
+        self, input_tensor: torch.Tensor
+    ) -> torch.Tensor | list[torch.Tensor] | None:
         """Run inference using TensorRT engine."""
         if not isinstance(input_tensor, torch.Tensor):
-            input_tensor = torch.from_numpy(input_tensor)
+            input_tensor = (
+                torch.from_numpy(input_tensor)
+                if isinstance(input_tensor, np.ndarray)
+                else input_tensor
+            )
 
         # Copy input to GPU memory
         input_data = input_tensor.contiguous().cpu().numpy()
@@ -180,7 +187,7 @@ class InferenceConfig:
     input_size: tuple[int, int] = (640, 640)
 
     # GPU Settings
-    device_ids: list[int] = None
+    device_ids: list[int] | None = None
     memory_fraction: float = 0.8
     enable_cudnn_benchmark: bool = True
 
@@ -194,7 +201,7 @@ class InferenceConfig:
     target_fps: int = 30
     max_latency_ms: int = 100
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.device_ids is None:
             self.device_ids = [0] if torch.cuda.is_available() else []
 
@@ -204,9 +211,9 @@ class DetectionResult:
     """Structured detection result with performance metrics."""
 
     # Detection Data
-    boxes: np.ndarray  # [N, 4] - xyxy format
-    scores: np.ndarray  # [N] - confidence scores
-    classes: np.ndarray  # [N] - class indices
+    boxes: np.ndarray[Any, np.dtype[np.float32]]  # [N, 4] - xyxy format
+    scores: np.ndarray[Any, np.dtype[np.float32]]  # [N] - confidence scores
+    classes: np.ndarray[Any, np.dtype[np.int32]]  # [N] - class indices
     class_names: list[str]  # Human-readable class names
 
     # Metadata
@@ -229,15 +236,15 @@ class DetectionResult:
 class GPUMemoryManager:
     """Advanced GPU memory management for high-throughput inference."""
 
-    def __init__(self, device_ids: list[int], memory_fraction: float = 0.8):
+    def __init__(self, device_ids: list[int], memory_fraction: float = 0.8) -> None:
         self.device_ids = device_ids
         self.memory_fraction = memory_fraction
-        self.memory_pools = {}
-        self.allocated_tensors = {}
+        self.memory_pools: dict[int, dict[tuple[int, ...], torch.Tensor]] = {}
+        self.allocated_tensors: dict[int, list[torch.Tensor]] = {}
 
         self._initialize_memory_pools()
 
-    def _initialize_memory_pools(self):
+    def _initialize_memory_pools(self) -> None:
         """Initialize memory pools for each GPU device."""
         for device_id in self.device_ids:
             torch.cuda.set_device(device_id)
@@ -270,7 +277,7 @@ class GPUMemoryManager:
 
         return torch.zeros(shape, dtype=torch.float16, device=f"cuda:{device_id}")
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up GPU memory."""
         for device_id in self.device_ids:
             torch.cuda.set_device(device_id)
@@ -282,7 +289,7 @@ class TensorRTOptimizer:
 
     def __init__(self, config: InferenceConfig):
         self.config = config
-        self.trt_engines = {}
+        self.trt_engines: dict[str, Any] = {}
 
         if not TRT_AVAILABLE:
             logger.warning("TensorRT not available, falling back to PyTorch")
@@ -359,7 +366,7 @@ class TensorRTOptimizer:
             return model_path
 
     def quantize_model_int8(
-        self, model_path: Path, calibration_data: list[np.ndarray]
+        self, model_path: Path, calibration_data: list[np.ndarray[Any, np.dtype[Any]]]
     ) -> Path:
         """Quantize model to INT8 for edge deployment."""
         logger.info(f"Quantizing model to INT8: {model_path}")
@@ -405,7 +412,7 @@ class TensorRTOptimizer:
             logger.error(f"INT8 quantization failed: {e}")
             return model_path
 
-    def _compile_onnx_to_tensorrt(self, onnx_path: Path, engine_path: Path):
+    def _compile_onnx_to_tensorrt(self, onnx_path: Path, engine_path: Path) -> None:
         """Compile ONNX model to TensorRT engine."""
         import tensorrt as trt
 
@@ -464,7 +471,7 @@ class TensorRTOptimizer:
 
         logger.info(f"TensorRT engine saved to {engine_path}")
 
-    def _create_int8_calibrator(self):
+    def _create_int8_calibrator(self) -> Any | None:
         """Create INT8 calibrator for quantization."""
         try:
             import tensorrt as trt
@@ -561,20 +568,22 @@ class DynamicBatcher:
 
     def __init__(self, config: InferenceConfig):
         self.config = config
-        self.batch_queue = asyncio.Queue(maxsize=config.max_batch_size * 2)
-        self.result_futures = {}
-        self.batch_processor = None
+        self.batch_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=config.max_batch_size * 2
+        )
+        self.result_futures: dict[str, asyncio.Future[Any]] = {}
+        self.batch_processor: asyncio.Task[None] | None = None
 
         # Batching metrics
-        self.total_requests = 0
-        self.batched_requests = 0
-        self.avg_batch_size = 0
+        self.total_requests: int = 0
+        self.batched_requests: int = 0
+        self.avg_batch_size: float = 0
 
-    async def start(self):
+    async def start(self) -> None:
         """Start the dynamic batching processor."""
         self.batch_processor = asyncio.create_task(self._process_batches())
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the dynamic batching processor."""
         if self.batch_processor:
             self.batch_processor.cancel()
@@ -598,7 +607,7 @@ class DynamicBatcher:
         # Wait for result
         return await future
 
-    async def _process_batches(self):
+    async def _process_batches(self) -> None:
         """Process batches continuously."""
         while True:
             try:
@@ -610,7 +619,7 @@ class DynamicBatcher:
             except Exception as e:
                 logger.error(f"Batch processing error: {e}")
 
-    async def _collect_batch(self) -> list[dict]:
+    async def _collect_batch(self) -> list[dict[str, Any]]:
         """Collect a batch of requests with timeout."""
         batch = []
         deadline = time.time() + (self.config.batch_timeout_ms / 1000.0)
@@ -636,7 +645,7 @@ class DynamicBatcher:
 
         return batch
 
-    async def _process_batch(self, batch: list[dict]):
+    async def _process_batch(self, batch: list[dict[str, Any]]) -> None:
         """Process a batch of requests."""
         # TODO: This will be implemented by the InferenceEngine
         pass
@@ -647,8 +656,8 @@ class OptimizedInferenceEngine:
 
     def __init__(self, config: InferenceConfig):
         self.config = config
-        self.models = {}
-        self.current_device = 0
+        self.models: dict[int, Any] = {}
+        self.current_device: int = 0
 
         # Performance components
         self.memory_manager = GPUMemoryManager(
@@ -660,13 +669,13 @@ class OptimizedInferenceEngine:
             self.optimizer = TensorRTOptimizer(config)
 
         # Performance tracking
-        self.inference_times = []
-        self.throughput_counter = 0
-        self.last_throughput_time = time.time()
+        self.inference_times: list[float] = []
+        self.throughput_counter: int = 0
+        self.last_throughput_time: float = time.time()
 
         self._setup_pytorch_optimizations()
 
-    def _setup_pytorch_optimizations(self):
+    def _setup_pytorch_optimizations(self) -> None:
         """Configure PyTorch for optimal performance."""
         # Enable cuDNN benchmark for consistent input sizes
         if self.config.enable_cudnn_benchmark:
@@ -679,7 +688,7 @@ class OptimizedInferenceEngine:
         # Set thread count to avoid CPU oversubscription
         torch.set_num_threads(4)
 
-    async def initialize(self, model_path: Path):
+    async def initialize(self, model_path: Path) -> None:
         """Initialize the inference engine with optimized models."""
         logger.info("Initializing optimized inference engine...")
 
@@ -692,7 +701,7 @@ class OptimizedInferenceEngine:
 
         logger.info(f"Inference engine initialized with {len(self.models)} models")
 
-    async def _load_model_on_device(self, model_path: Path, device_id: int):
+    async def _load_model_on_device(self, model_path: Path, device_id: int) -> None:
         """Load and optimize model on specific GPU device."""
         device = f"cuda:{device_id}"
         torch.cuda.set_device(device_id)
@@ -718,7 +727,7 @@ class OptimizedInferenceEngine:
         self.models[device_id] = model
         logger.info(f"Model loaded on {device}")
 
-    def _load_tensorrt_model(self, engine_path: Path, device: str):
+    def _load_tensorrt_model(self, engine_path: Path, device: str) -> Any:
         """Load TensorRT engine."""
         if not TRT_AVAILABLE:
             raise RuntimeError("TensorRT not available")
@@ -794,9 +803,9 @@ class OptimizedInferenceEngine:
 
     async def predict_batch(
         self,
-        frames: list[np.ndarray],
+        frames: list[np.ndarray[Any, np.dtype[Any]]],
         frame_ids: list[str],
-        camera_ids: list[str] = None,
+        camera_ids: list[str] | None = None,
     ) -> list[DetectionResult]:
         """Batch prediction for maximum throughput."""
         if not frames:
@@ -868,7 +877,9 @@ class OptimizedInferenceEngine:
 
         return device_id
 
-    def _preprocess_frame(self, frame: np.ndarray, device_id: int) -> torch.Tensor:
+    def _preprocess_frame(
+        self, frame: np.ndarray[Any, np.dtype[Any]], device_id: int
+    ) -> torch.Tensor:
         """Optimized frame preprocessing."""
         # Resize with letterboxing to maintain aspect ratio
         h, w = frame.shape[:2]
@@ -897,7 +908,7 @@ class OptimizedInferenceEngine:
         return tensor
 
     def _preprocess_batch(
-        self, frames: list[np.ndarray], device_id: int
+        self, frames: list[np.ndarray[Any, np.dtype[Any]]], device_id: int
     ) -> torch.Tensor:
         """Optimized batch preprocessing."""
         # Process each frame and stack into batch tensor
@@ -912,7 +923,9 @@ class OptimizedInferenceEngine:
 
         return batch_tensor
 
-    def _extract_single_prediction(self, batch_predictions, index: int):
+    def _extract_single_prediction(
+        self, batch_predictions: Any, index: int
+    ) -> torch.Tensor | None:
         """Extract single prediction from batch results."""
         if batch_predictions is None or len(batch_predictions) == 0:
             return None
@@ -943,7 +956,7 @@ class OptimizedInferenceEngine:
 
     def _postprocess_predictions(
         self,
-        predictions,
+        predictions: Any,
         frame_id: str,
         camera_id: str,
         inference_time: float,
@@ -992,7 +1005,7 @@ class OptimizedInferenceEngine:
             gpu_memory_used_mb=gpu_memory,
         )
 
-    def _apply_nms(self, predictions):
+    def _apply_nms(self, predictions: Any) -> torch.Tensor:
         """Apply Non-Maximum Suppression to filter overlapping detections."""
         if predictions is None or len(predictions) == 0:
             return predictions
@@ -1055,8 +1068,12 @@ class OptimizedInferenceEngine:
             return torch.zeros((0, 85), device=predictions.device)
 
     def _extract_detections(
-        self, predictions
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        self, predictions: Any
+    ) -> tuple[
+        np.ndarray[Any, np.dtype[np.float32]],
+        np.ndarray[Any, np.dtype[np.float32]],
+        np.ndarray[Any, np.dtype[np.int32]],
+    ]:
         """Extract boxes, scores, and classes from predictions."""
         if predictions is None or len(predictions) == 0:
             return np.array([]).reshape(0, 4), np.array([]), np.array([])
@@ -1108,7 +1125,7 @@ class OptimizedInferenceEngine:
             filtered_classes[sort_indices],
         )
 
-    def _update_performance_metrics(self, total_time_ms: float):
+    def _update_performance_metrics(self, total_time_ms: float) -> None:
         """Update running performance metrics."""
         self.inference_times.append(total_time_ms)
 
@@ -1116,7 +1133,7 @@ class OptimizedInferenceEngine:
         if len(self.inference_times) > 1000:
             self.inference_times = self.inference_times[-1000:]
 
-    def get_performance_stats(self) -> dict[str, float]:
+    def get_performance_stats(self) -> dict[str, float | dict[str, float]]:
         """Get current performance statistics."""
         if not self.inference_times:
             return {}
@@ -1166,7 +1183,7 @@ class OptimizedInferenceEngine:
 
         return memory_stats
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Clean up resources."""
         await self.batcher.stop()
         self.memory_manager.cleanup()
@@ -1246,7 +1263,7 @@ def estimate_throughput(
     """
 
     # Base inference times (ms) for batch size 1
-    base_times = {
+    base_times: dict[ModelType, dict[str, float]] = {
         ModelType.NANO: {"T4": 2.5, "V100": 1.8, "A10G": 1.5},
         ModelType.SMALL: {"T4": 6.0, "V100": 4.2, "A10G": 3.5},
         ModelType.MEDIUM: {"T4": 14.0, "V100": 9.8, "A10G": 8.2},
@@ -1257,7 +1274,14 @@ def estimate_throughput(
     base_time = base_times[model_type].get(gpu_type, base_times[model_type]["T4"])
 
     # Batch scaling factor (non-linear due to GPU parallelization)
-    batch_scaling = {1: 1.0, 2: 1.6, 4: 2.8, 8: 4.5, 16: 7.2, 32: 12.0}
+    batch_scaling: dict[int, float] = {
+        1: 1.0,
+        2: 1.6,
+        4: 2.8,
+        8: 4.5,
+        16: 7.2,
+        32: 12.0,
+    }
 
     scaling_factor = batch_scaling.get(batch_size, batch_size * 0.75)
     batch_time = base_time * scaling_factor

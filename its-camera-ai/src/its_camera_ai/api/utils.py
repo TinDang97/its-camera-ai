@@ -174,7 +174,7 @@ def parse_coordinates(coord_str: str) -> tuple[float, float]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid coordinates format: {str(e)}",
-        )
+        ) from e
 
 
 class RateLimitManager:

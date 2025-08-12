@@ -11,14 +11,19 @@ Key Features:
 - Error handling and validation
 """
 
+from __future__ import annotations
+
 import io
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
 from PIL import Image
+
+if TYPE_CHECKING:
+    from .streaming_processor import ProcessedFrame
 
 # Import generated protobuf classes
 # Note: These will be generated from the .proto files
@@ -27,16 +32,18 @@ try:
 except ImportError:
     # Fallback for development - these will be generated
     class MockProto:
-        def __init__(self):
+        def __init__(self) -> None:
             pass
 
-    pb = MockProto()
-    pb.ProcessedFrame = dict
-    pb.ImageData = dict
-    pb.QualityMetrics = dict
-    pb.TrafficFeatures = dict
-    pb.ROIAnalysis = dict
-    pb.ProcessedFrameBatch = dict
+    pb_module = MockProto()
+    pb_module.ProcessedFrame = dict  # type: ignore
+    pb_module.ImageData = dict  # type: ignore
+    pb_module.QualityMetrics = dict  # type: ignore
+    pb_module.TrafficFeatures = dict  # type: ignore
+    pb_module.ROIAnalysis = dict  # type: ignore
+    pb_module.ProcessedFrameBatch = dict  # type: ignore
+
+    pb = pb_module  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -74,7 +81,7 @@ class ImageCompressor:
 
     def compress_image(
         self,
-        image: np.ndarray,
+        image: np.ndarray[Any, Any],
         format_type: str | None = None,
         quality: int | None = None,
     ) -> tuple[bytes, dict[str, Any]]:
@@ -115,7 +122,9 @@ class ImageCompressor:
 
             # Compress to bytes
             buffer = io.BytesIO()
-            pil_image.save(buffer, **settings)
+            # Save with explicit format parameter
+            fmt = str(settings.pop("format", "JPEG"))
+            pil_image.save(buffer, format=fmt, **settings)  # type: ignore
             compressed_data = buffer.getvalue()
 
             # Metadata
@@ -138,7 +147,7 @@ class ImageCompressor:
 
     def decompress_image(
         self, compressed_data: bytes, target_shape: tuple[int, ...] | None = None
-    ) -> np.ndarray:
+    ) -> np.ndarray[Any, Any]:
         """Decompress bytes back to numpy array.
 
         Args:
@@ -176,7 +185,9 @@ class ImageCompressor:
             logger.error(f"Image decompression failed: {e}")
             return np.array([])
 
-    def create_thumbnail(self, image: np.ndarray) -> tuple[bytes, dict[str, Any]]:
+    def create_thumbnail(
+        self, image: np.ndarray[Any, Any]
+    ) -> tuple[bytes, dict[str, Any]]:
         """Create compressed thumbnail from image.
 
         Args:
@@ -227,7 +238,7 @@ class ProcessedFrameSerializer:
         self.serialization_times: list[float] = []
         self.compression_ratios: list[float] = []
 
-    def serialize_processed_frame(self, frame: "ProcessedFrame") -> bytes:
+    def serialize_processed_frame(self, frame: ProcessedFrame) -> bytes:
         """Serialize ProcessedFrame to protobuf bytes.
 
         Args:
@@ -240,7 +251,7 @@ class ProcessedFrameSerializer:
 
         try:
             # Create protobuf message
-            pb_frame = pb.ProcessedFrame()
+            pb_frame = pb.ProcessedFrame()  # type: ignore
 
             # Core identifiers
             pb_frame.frame_id = frame.frame_id
@@ -312,15 +323,15 @@ class ProcessedFrameSerializer:
                 f"Serialized frame {frame.frame_id}: {len(serialized_data)} bytes in {serialization_time:.2f}ms"
             )
 
-            return serialized_data
+            return serialized_data  # type: ignore
 
         except Exception as e:
             logger.error(f"Failed to serialize ProcessedFrame: {e}")
             raise
 
     def _serialize_image_data(
-        self, image: np.ndarray, image_type: str
-    ) -> "pb.ImageData":
+        self, image: np.ndarray[Any, Any], image_type: str
+    ) -> Any:
         """Serialize image data to protobuf ImageData.
 
         Args:
@@ -330,7 +341,7 @@ class ProcessedFrameSerializer:
         Returns:
             pb.ImageData: Protobuf image data
         """
-        image_data = pb.ImageData()
+        image_data = pb.ImageData()  # type: ignore
 
         if image is None or image.size == 0:
             return image_data
@@ -373,7 +384,7 @@ class ProcessedFrameSerializer:
             logger.error(f"Failed to serialize image data: {e}")
             return image_data
 
-    def deserialize_processed_frame(self, serialized_data: bytes) -> "ProcessedFrame":
+    def deserialize_processed_frame(self, serialized_data: bytes) -> ProcessedFrame:
         """Deserialize protobuf bytes to ProcessedFrame.
 
         Args:
@@ -388,9 +399,7 @@ class ProcessedFrameSerializer:
             pb_frame.ParseFromString(serialized_data)
 
             # Import ProcessedFrame here to avoid circular imports
-            from its_camera_ai.data.streaming_processor import (
-                ProcessedFrame,
-            )
+            from .streaming_processor import ProcessedFrame
 
             # Deserialize image data
             original_image = self._deserialize_image_data(pb_frame.original_image)
@@ -402,7 +411,7 @@ class ProcessedFrameSerializer:
                 frame_id=pb_frame.frame_id,
                 camera_id=pb_frame.camera_id,
                 timestamp=pb_frame.timestamp,
-                original_image=original_image,
+                original_image=original_image or np.array([]),
                 processed_image=processed_image,
                 thumbnail=thumbnail,
             )
@@ -447,7 +456,7 @@ class ProcessedFrameSerializer:
             logger.error(f"Failed to deserialize ProcessedFrame: {e}")
             raise
 
-    def _deserialize_image_data(self, image_data: "pb.ImageData") -> np.ndarray | None:
+    def _deserialize_image_data(self, image_data: Any) -> np.ndarray[Any, Any] | None:
         """Deserialize protobuf ImageData to numpy array.
 
         Args:
@@ -462,7 +471,7 @@ class ProcessedFrameSerializer:
         try:
             if image_data.compression_format == "raw":
                 # Raw data - reconstruct array
-                shape = (image_data.height, image_data.width)
+                shape: tuple[int, ...] = (image_data.height, image_data.width)
                 if image_data.channels > 1:
                     shape = shape + (image_data.channels,)
 
@@ -485,7 +494,7 @@ class ProcessedFrameSerializer:
             logger.error(f"Failed to deserialize image data: {e}")
             return None
 
-    def _convert_processing_stage(self, stage) -> int:
+    def _convert_processing_stage(self, stage: Any) -> int:
         """Convert ProcessingStage enum to protobuf enum."""
         # This would map to the actual protobuf enum values
         stage_mapping = {
@@ -503,7 +512,7 @@ class ProcessedFrameSerializer:
         else:
             return 0
 
-    def _convert_processing_stage_from_pb(self, pb_stage: int):
+    def _convert_processing_stage_from_pb(self, pb_stage: int) -> Any:
         """Convert protobuf enum to ProcessingStage."""
         from its_camera_ai.data.streaming_processor import ProcessingStage
 
@@ -518,7 +527,7 @@ class ProcessedFrameSerializer:
         return stage_mapping.get(pb_stage, ProcessingStage.INGESTION)
 
     def serialize_batch(
-        self, frames: list["ProcessedFrame"], batch_id: str | None = None
+        self, frames: list[ProcessedFrame], batch_id: str | None = None
     ) -> bytes:
         """Serialize multiple ProcessedFrames into a batch.
 
@@ -530,7 +539,7 @@ class ProcessedFrameSerializer:
             bytes: Serialized batch data
         """
         try:
-            batch = pb.ProcessedFrameBatch()
+            batch = pb.ProcessedFrameBatch()  # type: ignore
 
             # Set batch metadata
             batch.batch_id = batch_id or f"batch_{int(time.time() * 1000)}"
@@ -542,11 +551,11 @@ class ProcessedFrameSerializer:
                 frame_data = self.serialize_processed_frame(frame)
                 # Note: This would require modification to protobuf to include serialized frames
                 # For now, we'll serialize each frame separately
-                pb_frame = pb.ProcessedFrame()
+                pb_frame = pb.ProcessedFrame()  # type: ignore
                 pb_frame.ParseFromString(frame_data)
                 batch.frames.append(pb_frame)
 
-            return batch.SerializeToString()
+            return batch.SerializeToString()  # type: ignore
 
         except Exception as e:
             logger.error(f"Failed to serialize batch: {e}")
@@ -567,9 +576,10 @@ class ProcessedFrameSerializer:
             "max_serialization_time_ms": max(self.serialization_times),
             "min_serialization_time_ms": min(self.serialization_times),
             "total_serializations": len(self.serialization_times),
-            "avg_compression_ratio": sum(self.compression_ratios)
-            / len(self.compression_ratios)
-            if self.compression_ratios
-            else 0,
+            "avg_compression_ratio": (
+                sum(self.compression_ratios) / len(self.compression_ratios)
+                if self.compression_ratios
+                else 0
+            ),
             "compression_enabled": self.enable_compression,
         }

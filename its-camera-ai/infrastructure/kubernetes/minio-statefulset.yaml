@@ -1,0 +1,378 @@
+# MinIO StatefulSet for ITS Camera AI System
+# High-performance object storage with multi-tenancy and security
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-camera-ai
+  labels:
+    app.kubernetes.io/name: its-camera-ai
+    app.kubernetes.io/managed-by: kubectl
+
+---
+# MinIO ConfigMap for configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+    app.kubernetes.io/version: "RELEASE.2024-08-17T01-24-54Z"
+data:
+  # MinIO configuration
+  MINIO_STORAGE_CLASS_STANDARD: "EC:2"
+  MINIO_CACHE_QUOTA: "80"
+  MINIO_CACHE_AFTER: "3"
+  MINIO_CACHE_WATERMARK_LOW: "70"
+  MINIO_CACHE_WATERMARK_HIGH: "90"
+  MINIO_BROWSER_REDIRECT_URL: "https://minio-console.its-camera-ai.local"
+  MINIO_SERVER_URL: "https://minio-api.its-camera-ai.local"
+  # Performance tuning
+  MINIO_API_REQUESTS_MAX: "10000"
+  MINIO_API_REQUESTS_DEADLINE: "10s"
+  MINIO_API_CLUSTER_DEADLINE: "10s"
+  # Security
+  MINIO_AUDIT_WEBHOOK_ENABLE_target1: "on"
+  MINIO_AUDIT_WEBHOOK_ENDPOINT_target1: "http://api-service:8000/api/v1/audit/minio"
+
+---
+# MinIO Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+type: Opaque
+data:
+  # Base64 encoded credentials (replace with your actual values)
+  # its_camera_ai_admin:ItsCAI2024SecureMinIOPass!
+  MINIO_ROOT_USER: aXRzX2NhbWVyYV9haV9hZG1pbg==
+  MINIO_ROOT_PASSWORD: SXRzQ0FJMjAyNFNlY3VyZU1pbklPUGFzcyE=
+  # Additional service account credentials
+  MINIO_SERVICE_ACCOUNT_ACCESS_KEY: bWluaW9fc2VydmljZV9hY2Nlc3M=
+  MINIO_SERVICE_ACCOUNT_SECRET_KEY: bWluaW9fc2VydmljZV9zZWNyZXRfa2V5X3NlY3VyZQ==
+
+---
+# MinIO StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+    app.kubernetes.io/version: "RELEASE.2024-08-17T01-24-54Z"
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  serviceName: minio-headless
+  replicas: 4  # 4 nodes for distributed mode
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+      app.kubernetes.io/component: object-storage
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+        app.kubernetes.io/part-of: its-camera-ai
+        app.kubernetes.io/version: "RELEASE.2024-08-17T01-24-54Z"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: "/minio/v2/metrics/cluster"
+        config.checksum: "{{ checksum .Values.config }}"
+    spec:
+      serviceAccountName: minio-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:RELEASE.2024-08-17T01-24-54Z
+        imagePullPolicy: IfNotPresent
+        args:
+        - server
+        - /data{1...4}
+        - --console-address
+        - ":9001"
+        - --address
+        - ":9000"
+        ports:
+        - name: http-api
+          containerPort: 9000
+          protocol: TCP
+        - name: http-console
+          containerPort: 9001
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: minio-config
+        - secretRef:
+            name: minio-credentials
+        env:
+        - name: MINIO_DISTRIBUTED_MODE_ENABLED
+          value: "yes"
+        - name: MINIO_DISTRIBUTED_NODES
+          value: "minio-{0...3}.minio-headless.its-camera-ai.svc.cluster.local/data{1...4}"
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+            ephemeral-storage: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+            ephemeral-storage: 10Gi
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        startupProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: data1
+          mountPath: /data1
+        - name: data2
+          mountPath: /data2
+        - name: data3
+          mountPath: /data3
+        - name: data4
+          mountPath: /data4
+        - name: tmp
+          mountPath: /tmp
+        - name: minio-config-dir
+          mountPath: /etc/minio
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: minio-config-dir
+        emptyDir:
+          sizeLimit: 100Mi
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: minio
+                app.kubernetes.io/component: object-storage
+            topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: workload-type
+                operator: In
+                values:
+                - storage
+              - key: storage-type
+                operator: In
+                values:
+                - ssd
+                - nvme
+      tolerations:
+      - key: workload-type
+        operator: Equal
+        value: storage
+        effect: NoSchedule
+      - key: storage-tier
+        operator: Equal
+        value: high-performance
+        effect: NoSchedule
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: minio
+            app.kubernetes.io/component: object-storage
+  volumeClaimTemplates:
+  - metadata:
+      name: data1
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 500Gi
+  - metadata:
+      name: data2
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 500Gi
+  - metadata:
+      name: data3
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 500Gi
+  - metadata:
+      name: data4
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 500Gi
+
+---
+# MinIO Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: minio-service-account
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+automountServiceAccountToken: false
+
+---
+# MinIO Service for API access
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9000"
+    prometheus.io/path: "/minio/v2/metrics/cluster"
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+  ports:
+  - name: http-api
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+  - name: http-console
+    port: 9001
+    targetPort: 9001
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 300
+
+---
+# MinIO Headless Service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+  ports:
+  - name: http-api
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+  - name: http-console
+    port: 9001
+    targetPort: 9001
+    protocol: TCP
+
+---
+# MinIO Pod Disruption Budget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minio-pdb
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+      app.kubernetes.io/component: object-storage

@@ -50,26 +50,26 @@ class BatchRequest:
     """Individual inference request with metadata."""
 
     # Request data
-    frame: np.ndarray
+    frame: np.ndarray[Any, np.dtype[Any]]
     frame_id: str
     camera_id: str
     timestamp: float
 
     # Processing metadata
     priority: RequestPriority = RequestPriority.NORMAL
-    future: asyncio.Future | None = None
+    future: asyncio.Future[Any] | None = None
     retries: int = 0
     max_retries: int = 3
 
     # Performance tracking
-    queue_entry_time: float = None
-    processing_start_time: float = None
+    queue_entry_time: float | None = None
+    processing_start_time: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.queue_entry_time is None:
             self.queue_entry_time = time.time()
 
-    def __lt__(self, other):
+    def __lt__(self, other: "BatchRequest") -> bool:
         """Priority comparison for heapq."""
         return self.priority.value < other.priority.value
 
@@ -453,7 +453,9 @@ class SmartBatchProcessor:
         except TimeoutError:
             # Queue is full, drop request
             self.metrics.requests_dropped += 1
-            raise RuntimeError(f"Request queue full for priority {priority.name}") from None
+            raise RuntimeError(
+                f"Request queue full for priority {priority.name}"
+            ) from None
 
         # Wait for result
         try:

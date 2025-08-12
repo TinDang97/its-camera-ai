@@ -110,8 +110,8 @@ class RedisQueueManager:
         self.retry_on_failure = retry_on_failure
 
         # Connection management
-        self.redis: Redis | None = None
-        self._connection_pool: aioredis.ConnectionPool | None = None
+        self.redis: Redis[bytes] | None = None
+        self._connection_pool: aioredis.ConnectionPool | None = None  # type: ignore
 
         # Queue management
         self.queues: dict[str, QueueConfig] = {}
@@ -119,7 +119,7 @@ class RedisQueueManager:
         self.status: QueueStatus = QueueStatus.STOPPED
 
         # Performance tracking
-        self.processing_times: dict[str, deque] = defaultdict(
+        self.processing_times: dict[str, deque[float]] = defaultdict(
             lambda: deque(maxlen=1000)
         )
         self.last_metrics_update = time.time()
@@ -212,6 +212,9 @@ class RedisQueueManager:
         self, config: QueueConfig, create_consumer_group: bool
     ) -> None:
         """Initialize Redis Stream with consumer group."""
+        if not self.redis:
+            raise ConnectionError("Redis not connected")
+
         try:
             # Create consumer group if it doesn't exist
             if create_consumer_group:
@@ -240,6 +243,9 @@ class RedisQueueManager:
 
     async def _initialize_list(self, config: QueueConfig) -> None:
         """Initialize Redis List queue."""
+        if not self.redis:
+            raise ConnectionError("Redis not connected")
+
         # Lists don't require special initialization
         # Just ensure the key exists
         await self.redis.lpush(config.name, "__init__")
@@ -335,6 +341,9 @@ class RedisQueueManager:
 
         message_ids = []
 
+        if not self.redis:
+            raise ConnectionError("Redis not connected")
+
         # Use Redis pipeline for batch operations
         async with self.redis.pipeline() as pipe:
             for i, data in enumerate(data_batch):
@@ -408,6 +417,9 @@ class RedisQueueManager:
         self, config: QueueConfig, timeout_ms: int | None
     ) -> tuple[str, bytes] | None:
         """Dequeue from Redis Stream."""
+        if not self.redis:
+            raise ConnectionError("Redis not connected")
+
         try:
             timeout = timeout_ms or config.block_time_ms
 
@@ -445,6 +457,9 @@ class RedisQueueManager:
         self, config: QueueConfig, timeout_ms: int | None
     ) -> tuple[str, bytes] | None:
         """Dequeue from Redis List."""
+        if not self.redis:
+            raise ConnectionError("Redis not connected")
+
         try:
             timeout = (timeout_ms or config.block_time_ms) / 1000
 
@@ -455,14 +470,18 @@ class RedisQueueManager:
                 return None
 
             queue_name, message_id = result
-            message_id = message_id.decode()
+            message_id_str = (
+                message_id.decode()
+                if isinstance(message_id, bytes)
+                else str(message_id)
+            )
 
             # Get data
-            data = await self.redis.hget(f"{config.name}:data", message_id)
+            data = await self.redis.hget(f"{config.name}:data", message_id_str)
 
             if data:
                 # Clean up
-                await self.redis.hdel(f"{config.name}:data", message_id)
+                await self.redis.hdel(f"{config.name}:data", message_id_str)
 
                 # Update metrics
                 self.metrics[config.name].pending_count = max(
@@ -470,7 +489,7 @@ class RedisQueueManager:
                 )
                 self.metrics[config.name].processing_count += 1
 
-                return message_id, data
+                return message_id_str, data
 
             return None
 
@@ -564,8 +583,10 @@ class RedisQueueManager:
 
         try:
             if config.queue_type == QueueType.STREAM:
+                if not self.redis:
+                    return False
                 # Acknowledge in consumer group
-                await self.redis.xack(config.name, config.consumer_group, message_id)
+                await self.redis.xack(config.name, config.consumer_group, message_id)  # type: ignore
 
             # Update metrics
             metrics = self.metrics[queue_name]
@@ -627,7 +648,10 @@ class RedisQueueManager:
                     await self.redis.xadd(dlq_name, dlq_data)
 
                 # Acknowledge to remove from pending
-                await self.redis.xack(config.name, config.consumer_group, message_id)
+                if self.redis:
+                    await self.redis.xack(
+                        config.name, config.consumer_group, message_id
+                    )  # type: ignore
 
             return True
 
@@ -647,6 +671,9 @@ class RedisQueueManager:
         if queue_name not in self.queues:
             return None
 
+        if not self.redis:
+            return None
+
         try:
             config = self.queues[queue_name]
             metrics = self.metrics[queue_name]
@@ -658,11 +685,11 @@ class RedisQueueManager:
 
                 # Get consumer group info
                 try:
-                    groups = await self.redis.xinfo_groups(queue_name)
+                    groups = await self.redis.xinfo_groups(queue_name)  # type: ignore
                     for group in groups:
                         if group[b"name"].decode() == config.consumer_group:
-                            metrics.pending_count = group[b"pending"]
-                            metrics.consumer_count = group[b"consumers"]
+                            metrics.pending_count = int(group[b"pending"])
+                            metrics.consumer_count = int(group[b"consumers"])
                             break
                 except ResponseError:
                     # Consumer group might not exist
@@ -790,8 +817,15 @@ class RedisQueueManager:
                 for queue_name in self.queues:
                     metrics = await self.get_queue_metrics(queue_name)
                     if metrics:
-                        health_info["total_pending"] += metrics.pending_count
-                        health_info["total_processing"] += metrics.processing_count
+                        # Handle pending/processing count types
+                        pending = getattr(metrics, "pending_count", 0)
+                        processing = getattr(metrics, "processing_count", 0)
+                        health_info["total_pending"] += (
+                            int(pending) if pending is not None else 0
+                        )  # type: ignore
+                        health_info["total_processing"] += (
+                            int(processing) if processing is not None else 0
+                        )  # type: ignore
 
                 health_info["status"] = "healthy"
 
@@ -817,11 +851,11 @@ class RedisQueueManager:
             self.status = QueueStatus.ACTIVE
             logger.info("Queue processing resumed")
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "RedisQueueManager":
         """Async context manager entry."""
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.disconnect()

@@ -252,7 +252,7 @@ async def validate_model_structure(
                 onnx.checker.check_model(model)
                 validation_result["is_valid"] = True
                 validation_result["metadata"]["onnx_version"] = getattr(
-                    onnx, '__version__', 'unknown'
+                    onnx, "__version__", "unknown"
                 )
                 validation_result["metadata"]["ir_version"] = model.ir_version
                 validation_result["metadata"]["opset_version"] = (
@@ -571,8 +571,12 @@ async def upload_model(
             )
 
         # Validate optional config file
-        if config_file and config_file.filename and not validate_file_extension(
-            config_file.filename, ALLOWED_CONFIG_EXTENSIONS
+        if (
+            config_file
+            and config_file.filename
+            and not validate_file_extension(
+                config_file.filename, ALLOWED_CONFIG_EXTENSIONS
+            )
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -580,8 +584,12 @@ async def upload_model(
             )
 
         # Validate optional requirements file
-        if requirements_file and requirements_file.filename and not validate_file_extension(
-            requirements_file.filename, ALLOWED_REQUIREMENTS_EXTENSIONS
+        if (
+            requirements_file
+            and requirements_file.filename
+            and not validate_file_extension(
+                requirements_file.filename, ALLOWED_REQUIREMENTS_EXTENSIONS
+            )
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

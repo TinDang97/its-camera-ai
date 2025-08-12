@@ -1482,6 +1482,18 @@ wheels = [
 ]
 
 [[package]]
+name = "grpc-stubs"
+version = "1.53.0.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "grpcio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/8d/718393d12346c6ab842a1ad2b1a761c175e919ddce4a28c5dc63e4a5538c/grpc_stubs-1.53.0.6.tar.gz", hash = "sha256:70a0840747bd73c2c82fe819699bbf4fcf6d59bd0ed27a4713a240e0c697e1ff", size = 12954, upload-time = "2025-04-28T11:12:55.407Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/c6/c64257331aa4b7a049bd70124d97278071e78b5d5de09df6a5eae4610bbe/grpc_stubs-1.53.0.6-py3-none-any.whl", hash = "sha256:3ffc5a6b5bd84ac46f3d84e2434e97936c1262b47b71b462bdedc43caaf227e1", size = 15842, upload-time = "2025-04-28T11:12:53.982Z" },
+]
+
+[[package]]
 name = "grpcio"
 version = "1.74.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1839,6 +1851,7 @@ coreml = [
 dev = [
     { name = "bandit" },
     { name = "black" },
+    { name = "grpc-stubs" },
     { name = "hypothesis" },
     { name = "isort" },
     { name = "mypy" },
@@ -1857,6 +1870,8 @@ dev = [
     { name = "sphinx-rtd-theme" },
     { name = "types-passlib" },
     { name = "types-pillow" },
+    { name = "types-protobuf" },
+    { name = "types-pyyaml" },
     { name = "types-redis" },
     { name = "types-setuptools" },
 ]
@@ -1952,6 +1967,7 @@ coreml = [
 dev = [
     { name = "bandit", extras = ["toml"], specifier = ">=1.8.6" },
     { name = "black", specifier = ">=25.1.0" },
+    { name = "grpc-stubs", specifier = ">=1.53.0.6" },
     { name = "hypothesis", specifier = ">=6.137.2" },
     { name = "isort", specifier = ">=6.0.1" },
     { name = "mypy", specifier = ">=1.17.1" },
@@ -1970,6 +1986,8 @@ dev = [
     { name = "sphinx-rtd-theme", specifier = ">=3.0.2" },
     { name = "types-passlib", specifier = ">=1.7.7.20250602" },
     { name = "types-pillow", specifier = ">=10.2.0.20240822" },
+    { name = "types-protobuf", specifier = ">=6.30.2.20250809" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20250809" },
     { name = "types-redis", specifier = ">=4.6.0.20241004" },
     { name = "types-setuptools", specifier = ">=80.9.0.20250809" },
 ]
@@ -5158,6 +5176,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-protobuf"
+version = "6.30.2.20250809"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/9e/8777c578b5b66f6ef99ce9dac4865b51016a52b1d681942fbf75ac35d60f/types_protobuf-6.30.2.20250809.tar.gz", hash = "sha256:b04f2998edf0d81bd8600bbd5db0b2adf547837eef6362ba364925cee21a33b4", size = 62204, upload-time = "2025-08-09T03:14:07.547Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/9a/43daca708592570539888d80d6b708dff0b1795218aaf6b13057cc2e2c18/types_protobuf-6.30.2.20250809-py3-none-any.whl", hash = "sha256:7afc2d3f569d281dd22f339179577243be60bf7d1dfb4bc13d0109859fb1f1be", size = 76389, upload-time = "2025-08-09T03:14:06.531Z" },
+]
+
+[[package]]
 name = "types-pyopenssl"
 version = "24.1.0.20240722"
 source = { registry = "https://pypi.org/simple" }
@@ -5168,6 +5195,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/93/29/47a346550fd2020dac9a7a6d033ea03fccb92fa47c726056618cc889745e/types-pyOpenSSL-24.1.0.20240722.tar.gz", hash = "sha256:47913b4678a01d879f503a12044468221ed8576263c1540dcb0484ca21b08c39", size = 8458, upload-time = "2024-07-22T02:32:22.558Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/98/05/c868a850b6fbb79c26f5f299b768ee0adc1f9816d3461dcf4287916f655b/types_pyOpenSSL-24.1.0.20240722-py3-none-any.whl", hash = "sha256:6a7a5d2ec042537934cfb4c9d4deb0e16c4c6250b09358df1f083682fe6fda54", size = 7499, upload-time = "2024-07-22T02:32:21.232Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20250809"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/21/52ffdbddea3c826bc2758d811ccd7f766912de009c5cf096bd5ebba44680/types_pyyaml-6.0.12.20250809.tar.gz", hash = "sha256:af4a1aca028f18e75297da2ee0da465f799627370d74073e96fee876524f61b5", size = 17385, upload-time = "2025-08-09T03:14:34.867Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/3e/0346d09d6e338401ebf406f12eaf9d0b54b315b86f1ec29e34f1a0aedae9/types_pyyaml-6.0.12.20250809-py3-none-any.whl", hash = "sha256:032b6003b798e7de1a1ddfeefee32fac6486bdfe4845e0ae0e7fb3ee4512b52f", size = 20277, upload-time = "2025-08-09T03:14:34.055Z" },
 ]
 
 [[package]]

@@ -108,8 +108,8 @@ class EdgeDeviceProfile:
 class BandwidthOptimizer:
     """Advanced bandwidth optimization for edge deployments."""
 
-    def __init__(self):
-        self.compression_cache = {}
+    def __init__(self) -> None:
+        self.compression_cache: dict[str, Any] = {}
         self.adaptive_settings = {
             "high_bandwidth": {"quality": 95, "resize_factor": 1.0},
             "medium_bandwidth": {"quality": 80, "resize_factor": 0.9},
@@ -119,7 +119,7 @@ class BandwidthOptimizer:
 
     def compress_inference_data(
         self,
-        frame: np.ndarray,
+        frame: np.ndarray[Any, np.dtype[Any]],
         detection_results: dict[str, Any],
         compression_level: CompressionLevel,
         network_condition: str = "medium_bandwidth",
@@ -153,7 +153,7 @@ class BandwidthOptimizer:
 
     def _compress_frame(
         self,
-        frame: np.ndarray,
+        frame: np.ndarray[Any, np.dtype[Any]],
         settings: dict[str, Any],
         compression_level: CompressionLevel,
     ) -> str | None:
@@ -179,12 +179,12 @@ class BandwidthOptimizer:
             if success:
                 # Additional gzip compression for higher levels
                 if compression_level.value >= CompressionLevel.HIGH.value:
-                    buffer = gzip.compress(buffer.tobytes())
+                    buffer_bytes = gzip.compress(buffer.tobytes())
                 else:
-                    buffer = buffer.tobytes()
+                    buffer_bytes = buffer.tobytes()
 
                 # Base64 encode for JSON transmission
-                return base64.b64encode(buffer).decode("utf-8")
+                return base64.b64encode(buffer_bytes).decode("utf-8")
 
         except ImportError:
             logger.warning("OpenCV not available for frame compression")
@@ -293,8 +293,8 @@ class BandwidthOptimizer:
 class EdgeModelOptimizer:
     """Optimize models specifically for edge deployment."""
 
-    def __init__(self):
-        self.optimization_cache = {}
+    def __init__(self) -> None:
+        self.optimization_cache: dict[str, Any] = {}
 
     def optimize_for_device(
         self, model_path: Path, device_profile: EdgeDeviceProfile, output_dir: Path
@@ -344,7 +344,7 @@ class EdgeModelOptimizer:
     ) -> dict[str, Path]:
         """Optimize for NVIDIA Jetson devices."""
 
-        optimized_models = {}
+        optimized_models: dict[str, Path] = {}
 
         # TensorRT optimization
         if device_profile.enable_gpu_acceleration:
@@ -420,7 +420,7 @@ class EdgeModelOptimizer:
     ) -> dict[str, Path]:
         """Generic optimization for unknown devices."""
 
-        optimized_models = {}
+        optimized_models: dict[str, Path] = {}
 
         # ONNX for broad compatibility
         onnx_path = output_dir / f"{model_path.stem}_generic.onnx"
@@ -475,7 +475,7 @@ class EdgeModelOptimizer:
 class EdgeContainerBuilder:
     """Build Docker containers for edge deployment."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_images = {
             EdgeDeviceType.JETSON_NANO: "nvcr.io/nvidia/l4t-pytorch:r32.6.1-pth1.9-py3",
             EdgeDeviceType.JETSON_XAVIER_NX: "nvcr.io/nvidia/l4t-pytorch:r32.7.1-pth1.10-py3",
@@ -654,7 +654,7 @@ RUN pip install --no-cache-dir \\
 
         compose_path = output_dir / "docker-compose.yml"
 
-        compose_config = {
+        compose_config: dict[str, Any] = {
             "version": "3.8",
             "services": {
                 "its-camera-ai": {
@@ -687,23 +687,21 @@ RUN pip install --no-cache-dir \\
 
         # Add device-specific configurations
         if device_profile.device_type.value.startswith("jetson"):
-            compose_config["services"]["its-camera-ai"]["runtime"] = "nvidia"
-            compose_config["services"]["its-camera-ai"]["environment"][
-                "NVIDIA_VISIBLE_DEVICES"
-            ] = "all"
+            its_service = compose_config["services"]["its-camera-ai"]
+            its_service["runtime"] = "nvidia"
+            its_service["environment"]["NVIDIA_VISIBLE_DEVICES"] = "all"
 
         # Add additional services
         if additional_services:
+            services = compose_config["services"]
             if "prometheus" in additional_services:
-                compose_config["services"]["prometheus"] = (
-                    self._create_prometheus_service()
-                )
+                services["prometheus"] = self._create_prometheus_service()
 
             if "grafana" in additional_services:
-                compose_config["services"]["grafana"] = self._create_grafana_service()
+                services["grafana"] = self._create_grafana_service()
 
             if "redis" in additional_services:
-                compose_config["services"]["redis"] = self._create_redis_service()
+                services["redis"] = self._create_redis_service()
 
         # Write docker-compose.yml
         with open(compose_path, "w") as f:
@@ -754,7 +752,7 @@ RUN pip install --no-cache-dir \\
 class KubernetesManifestGenerator:
     """Generate Kubernetes manifests for edge deployment."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def create_deployment_manifest(
@@ -863,9 +861,8 @@ class KubernetesManifestGenerator:
             device_profile.enable_gpu_acceleration
             and device_profile.device_type.value.startswith("jetson")
         ):
-            manifest["spec"]["template"]["spec"]["containers"][0]["resources"][
-                "limits"
-            ]["nvidia.com/gpu"] = 1
+            container = manifest["spec"]["template"]["spec"]["containers"][0]
+            container["resources"]["limits"]["nvidia.com/gpu"] = 1
 
         return manifest
 

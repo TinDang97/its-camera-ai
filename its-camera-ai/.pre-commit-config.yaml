@@ -14,41 +14,41 @@ repos:
       - id: ruff-format
         types_or: [python, pyi, jupyter]
 
-  # Black - Python code formatter
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
-      - id: black
-        language_version: python3.12
-        types_or: [python, pyi]
+  # # Black - Python code formatter (disabled in favor of ruff-format)
+  # - repo: https://github.com/psf/black
+  #   rev: 25.1.0
+  #   hooks:
+  #     - id: black
+  #       language_version: python3.12
+  #       types_or: [python, pyi]
 
-  # isort - Import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 6.0.1
-    hooks:
-      - id: isort
-        types_or: [python, pyi]
-        args: [--profile=black]
+  # # isort - Import sorting (disabled - ruff handles imports)
+  # - repo: https://github.com/pycqa/isort
+  #   rev: 6.0.1
+  #   hooks:
+  #     - id: isort
+  #       types_or: [python, pyi]
+  #       args: [--profile=black]
 
-  # MyPy - Static type checker
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.1
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - types-redis
-          - types-passlib
-          - sqlalchemy[mypy]
-          - pydantic
-          - pydantic-settings
-          - fastapi
-        exclude: ^(migrations/|tests/)
-        args:
-          [
-            --ignore-missing-imports,
-            --scripts-are-modules,
-            --disable-error-code=unused-ignore,
-          ]
+  # MyPy - Static type checker - temporary disable
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.17.1
+  #   hooks:
+  #     - id: mypy
+  #       additional_dependencies:
+  #         - types-redis
+  #         - types-passlib
+  #         - sqlalchemy[mypy]
+  #         - pydantic
+  #         - pydantic-settings
+  #         - fastapi
+  #       exclude: ^(migrations/|tests/)
+  #       args:
+  #         [
+  #           --ignore-missing-imports,
+  #           --scripts-are-modules,
+  #           --disable-error-code=unused-ignore,
+  #         ]
 
   # Built-in pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

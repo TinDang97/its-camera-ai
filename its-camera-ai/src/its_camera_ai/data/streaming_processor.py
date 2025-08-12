@@ -28,17 +28,94 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 from PIL import Image
 
+
+# Fallback classes for development (defined before use)
+class RedisQueueManagerFallback:
+    """Fallback Redis queue manager when Redis is not available."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def connect(self) -> None:
+        """Connect to Redis (no-op in fallback)."""
+        pass
+
+    async def disconnect(self) -> None:
+        """Disconnect from Redis (no-op in fallback)."""
+        pass
+
+    async def create_queue(self, *_args: Any, **_kwargs: Any) -> None:
+        """Create a queue (no-op in fallback)."""
+        pass
+
+    async def enqueue(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Enqueue a message (always succeeds in fallback)."""
+        return True
+
+    async def dequeue(self, *_args: Any, **_kwargs: Any) -> None:
+        """Dequeue a message (returns None in fallback)."""
+        return None
+
+    async def dequeue_batch(self, *_args: Any, **_kwargs: Any) -> list[Any]:
+        """Dequeue batch of messages (returns empty list in fallback)."""
+        return []
+
+    async def acknowledge(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Acknowledge a message (always succeeds in fallback)."""
+        return True
+
+    async def get_queue_metrics(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        """Get queue metrics (returns empty dict in fallback)."""
+        return {}
+
+    async def health_check(self) -> dict[str, Any]:
+        """Health check (always healthy in fallback)."""
+        return {"status": "healthy", "fallback": True}
+
+    async def __aenter__(self) -> "RedisQueueManagerFallback":
+        """Async context manager entry."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *_args: Any) -> None:
+        """Async context manager exit."""
+        await self.disconnect()
+
+
+@dataclass
+class QueueConfigFallback:
+    """Fallback queue configuration."""
+
+    name: str = "default"
+    queue_type: Any = None
+    batch_size: int = 10
+
+
+class QueueTypeFallback(Enum):
+    """Fallback queue type enum."""
+
+    STREAM = "stream"
+    LIST = "list"
+
+
+class ProcessedFrameSerializerFallback:
+    """Fallback frame serializer."""
+
+    def serialize(self, *_args: Any, **_kwargs: Any) -> bytes:
+        return b""
+
+    def deserialize(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
 # Async messaging and serialization
 try:
-    import redis.asyncio as aioredis
-
     from .grpc_serialization import ProcessedFrameSerializer
     from .redis_queue_manager import QueueConfig, QueueType, RedisQueueManager
 
@@ -46,77 +123,11 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
 
-    # Fallback classes for development
-    class RedisQueueManager:
-        """Fallback Redis queue manager when Redis is not available."""
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def connect(self):
-            """Connect to Redis (no-op in fallback)."""
-            pass
-
-        async def disconnect(self):
-            """Disconnect from Redis (no-op in fallback)."""
-            pass
-
-        async def create_queue(self, *_args, **_kwargs):
-            """Create a queue (no-op in fallback)."""
-            pass
-
-        async def enqueue(self, *_args, **_kwargs):
-            """Enqueue a message (always succeeds in fallback)."""
-            return True
-
-        async def dequeue(self, *_args, **_kwargs):
-            """Dequeue a message (returns None in fallback)."""
-            return None
-
-        async def dequeue_batch(self, *_args, **_kwargs):
-            """Dequeue batch of messages (returns empty list in fallback)."""
-            return []
-
-        async def acknowledge(self, *_args, **_kwargs):
-            """Acknowledge a message (always succeeds in fallback)."""
-            return True
-
-        async def get_queue_metrics(self, *_args, **_kwargs):
-            """Get queue metrics (returns empty dict in fallback)."""
-            return {}
-
-        async def health_check(self):
-            """Health check (always healthy in fallback)."""
-            return {"status": "healthy", "fallback": True}
-
-        async def __aenter__(self):
-            """Async context manager entry."""
-            await self.connect()
-            return self
-
-        async def __aexit__(self, *args):
-            """Async context manager exit."""
-            await self.disconnect()
-
-    class QueueConfig:
-        """Fallback queue configuration."""
-
-        def __init__(self, name: str = "default", queue_type: str = "stream", **_kwargs):
-            self.name = name
-            self.queue_type = queue_type
-
-    class QueueType:
-        STREAM = "stream"
-        LIST = "list"
-
-    class ProcessedFrameSerializer:
-        """Fallback frame serializer."""
-
-        def serialize(self, *_args, **_kwargs):
-            return b""
-
-        def deserialize(self, *_args, **_kwargs):
-            return None
+    # Alias fallback classes
+    RedisQueueManager = RedisQueueManagerFallback  # type: ignore
+    QueueConfig = QueueConfigFallback  # type: ignore
+    QueueType = QueueTypeFallback  # type: ignore
+    ProcessedFrameSerializer = ProcessedFrameSerializerFallback  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -182,9 +193,9 @@ class ProcessedFrame:
     timestamp: float
 
     # Image data
-    original_image: np.ndarray
-    processed_image: np.ndarray | None = None
-    thumbnail: np.ndarray | None = None
+    original_image: np.ndarray[Any, Any]
+    processed_image: np.ndarray[Any, Any] | None = None
+    thumbnail: np.ndarray[Any, Any] | None = None
 
     # Quality metrics
     quality_score: float = 0.0
@@ -215,12 +226,12 @@ class ProcessedFrame:
 class ImageQualityAnalyzer:
     """Analyze image quality metrics for traffic monitoring."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.blur_threshold = 100.0  # Laplacian variance threshold
         self.brightness_range = (30, 220)  # Optimal brightness range
         self.contrast_threshold = 40.0  # Minimum contrast
 
-    def analyze_quality(self, image: np.ndarray) -> dict[str, float]:
+    def analyze_quality(self, image: np.ndarray[Any, Any]) -> dict[str, float]:
         """Comprehensive image quality analysis."""
 
         metrics = {}
@@ -248,15 +259,15 @@ class ImageQualityAnalyzer:
 
         return metrics
 
-    def _calculate_blur_score(self, gray_image: np.ndarray) -> float:
+    def _calculate_blur_score(self, gray_image: np.ndarray[Any, Any]) -> float:
         """Calculate blur score using Laplacian variance."""
-        laplacian_var = cv2.Laplacian(gray_image, cv2.CV_64F).var()
+        laplacian_var = float(cv2.Laplacian(gray_image, cv2.CV_64F).var())
 
         # Normalize to 0-1 score (higher = sharper)
         score = min(1.0, laplacian_var / 1000.0)
         return score
 
-    def _calculate_brightness_score(self, gray_image: np.ndarray) -> float:
+    def _calculate_brightness_score(self, gray_image: np.ndarray[Any, Any]) -> float:
         """Calculate brightness adequacy score."""
         mean_brightness = np.mean(gray_image)
 
@@ -272,27 +283,27 @@ class ImageQualityAnalyzer:
 
         return score
 
-    def _calculate_contrast_score(self, gray_image: np.ndarray) -> float:
+    def _calculate_contrast_score(self, gray_image: np.ndarray[Any, Any]) -> float:
         """Calculate image contrast score."""
         # RMS contrast
         rms_contrast = np.std(gray_image)
 
         # Normalize to 0-1 score
-        score = min(1.0, rms_contrast / 80.0)
+        score = min(1.0, float(rms_contrast) / 80.0)
         return score
 
-    def _estimate_noise_level(self, gray_image: np.ndarray) -> float:
+    def _estimate_noise_level(self, gray_image: np.ndarray[Any, Any]) -> float:
         """Estimate noise level using high-frequency content."""
         # Apply high-pass filter to estimate noise
         kernel = np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]])
         filtered = cv2.filter2D(gray_image, -1, kernel)
 
         # Calculate noise level as std deviation of filtered image
-        noise = np.std(filtered)
+        noise = float(np.std(filtered))  # type: ignore
 
         # Normalize to 0-1 (lower = less noisy)
         score = max(0.0, 1.0 - (noise / 50.0))
-        return score
+        return float(score)
 
     def _calculate_overall_quality(self, metrics: dict[str, float]) -> float:
         """Calculate overall quality score from individual metrics."""
@@ -307,758 +318,599 @@ class ImageQualityAnalyzer:
         return min(1.0, max(0.0, score))
 
 
-class TrafficFeatureExtractor:
-    """Extract traffic-specific features from camera frames."""
+class FeatureExtractor:
+    """Extract traffic-specific features from processed frames."""
 
-    def __init__(self):
-        self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=50, detectShadows=True
-        )
+    def __init__(self) -> None:
+        self.density_calculator = VehicleDensityCalculator()
+        self.weather_detector = WeatherConditionDetector()
+        self.lighting_analyzer = LightingConditionAnalyzer()
 
-        # Traffic density thresholds
-        self.density_thresholds = {"low": 0.1, "medium": 0.3, "high": 0.6}
+    def extract_features(
+        self,
+        frame: np.ndarray[Any, Any],
+        roi_boxes: list[tuple[int, int, int, int]] | None = None,
+    ) -> dict[str, Any]:
+        """Extract comprehensive traffic features from frame."""
 
-    def extract_features(self, frame: ProcessedFrame) -> dict[str, Any]:
-        """Extract traffic and environmental features."""
-
-        image = frame.original_image
         features = {}
 
-        # Vehicle density estimation
-        features["vehicle_density"] = self._estimate_vehicle_density(image)
-        features["congestion_level"] = self._classify_congestion(
+        # Vehicle density analysis
+        features["vehicle_density"] = self.density_calculator.calculate(frame)
+
+        # Weather conditions
+        features["weather_conditions"] = self.weather_detector.detect(frame)
+
+        # Lighting conditions
+        features["lighting_conditions"] = self.lighting_analyzer.analyze(frame)
+
+        # ROI-specific features
+        if roi_boxes:
+            features["roi_features"] = self._extract_roi_features(frame, roi_boxes)
+
+        # Traffic flow metrics
+        features["congestion_level"] = self._estimate_congestion_level(
             features["vehicle_density"]
         )
 
-        # Environmental conditions
-        features["lighting_conditions"] = self._analyze_lighting(image)
-        features["weather_conditions"] = self._estimate_weather(image)
-
-        # Motion analysis
-        features["motion_intensity"] = self._analyze_motion(image)
-
-        # ROI-specific features
-        if hasattr(frame, "roi_boxes") and frame.roi_boxes:
-            features["roi_analysis"] = self._analyze_rois(image, frame.roi_boxes)
-
         return features
 
-    def _estimate_vehicle_density(self, image: np.ndarray) -> float:
-        """Estimate vehicle density using background subtraction."""
+    def _extract_roi_features(
+        self, frame: np.ndarray[Any, Any], roi_boxes: list[tuple[int, int, int, int]]
+    ) -> dict[str, Any]:
+        """Extract features from regions of interest."""
+        roi_features = {}
 
-        # Apply background subtraction
-        fg_mask = self.background_subtractor.apply(image)
+        for i, (x1, y1, x2, y2) in enumerate(roi_boxes):
+            roi = frame[y1:y2, x1:x2]
 
-        # Calculate density as percentage of foreground pixels
-        total_pixels = fg_mask.shape[0] * fg_mask.shape[1]
-        fg_pixels = np.sum(fg_mask > 0)
+            roi_features[f"roi_{i}"] = {
+                "mean_intensity": float(np.mean(roi)),
+                "std_intensity": float(np.std(roi)),
+                "edge_density": self._calculate_edge_density(roi),
+                "motion_score": 0.0,  # Placeholder for motion analysis
+            }
 
-        density = fg_pixels / total_pixels
-        return min(1.0, density)
+        return roi_features
 
-    def _classify_congestion(self, density: float) -> str:
-        """Classify traffic congestion level."""
+    def _calculate_edge_density(self, roi: np.ndarray[Any, Any]) -> float:
+        """Calculate edge density in ROI."""
+        edges = cv2.Canny(roi, 50, 150)
+        density = float(np.mean(edges) / 255.0)
+        return density
 
-        if density >= self.density_thresholds["high"]:
-            return "high"
-        elif density >= self.density_thresholds["medium"]:
-            return "medium"
-        elif density >= self.density_thresholds["low"]:
-            return "low"
-        else:
+    def _estimate_congestion_level(self, vehicle_density: float) -> str:
+        """Estimate traffic congestion level from vehicle density."""
+        if vehicle_density < 0.2:
             return "free_flow"
-
-    def _analyze_lighting(self, image: np.ndarray) -> str:
-        """Analyze lighting conditions."""
-
-        # Convert to HSV for better light analysis
-        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-        brightness = np.mean(hsv[:, :, 2])  # V channel
-
-        if brightness > 180:
-            return "bright"
-        elif brightness > 100:
-            return "normal"
-        elif brightness > 50:
-            return "dim"
+        elif vehicle_density < 0.5:
+            return "moderate"
+        elif vehicle_density < 0.8:
+            return "heavy"
         else:
-            return "dark"
+            return "congested"
 
-    def _estimate_weather(self, image: np.ndarray) -> str:
-        """Estimate weather conditions from image characteristics."""
 
-        # Simple weather estimation based on image properties
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+class VehicleDensityCalculator:
+    """Calculate vehicle density from frame."""
 
-        # Calculate statistics
-        mean_intensity = np.mean(gray)
-        std_intensity = np.std(gray)
+    def calculate(self, frame: np.ndarray[Any, Any]) -> float:
+        """Simple density estimation based on image features."""
+        # This is a placeholder - in production, use YOLO detections
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
 
-        # Basic weather classification
-        if std_intensity < 30 and mean_intensity < 100:
+        # Simple heuristic: edge density correlates with vehicle presence
+        density = float(np.mean(edges) / 255.0)
+        return min(1.0, density * 2.0)
+
+
+class WeatherConditionDetector:
+    """Detect weather conditions from frame."""
+
+    def detect(self, frame: np.ndarray[Any, Any]) -> str:
+        """Detect weather conditions using image analysis."""
+        # Simplified weather detection based on image properties
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+
+        # Check for fog/haze (low saturation, high value)
+        saturation_mean = float(np.mean(hsv[:, :, 1]))
+        value_mean = float(np.mean(hsv[:, :, 2]))
+
+        if saturation_mean < 50 and value_mean > 150:
             return "foggy"
-        elif mean_intensity < 80:
+        elif saturation_mean < 30:
             return "overcast"
-        elif std_intensity > 60:
-            return "clear"
+        elif value_mean < 50:
+            return "dark"
         else:
-            return "partly_cloudy"
+            return "clear"
 
-    def _analyze_motion(self, image: np.ndarray) -> float:
-        """Analyze motion intensity in the scene."""
 
-        # Apply Gaussian blur and calculate optical flow
-        if hasattr(self, "previous_frame"):
-            gray_current = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            gray_previous = self.previous_frame
+class LightingConditionAnalyzer:
+    """Analyze lighting conditions in frame."""
 
-            # Calculate optical flow
-            flow = cv2.calcOpticalFlowPyrLK(
-                gray_previous,
-                gray_current,
-                None,
-                None,
-                winSize=(15, 15),
-                maxLevel=2,
-                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
+    def analyze(self, frame: np.ndarray[Any, Any]) -> str:
+        """Analyze lighting conditions."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        mean_brightness = float(np.mean(gray))
+
+        if mean_brightness < 30:
+            return "night"
+        elif mean_brightness < 80:
+            return "dawn_dusk"
+        elif mean_brightness > 200:
+            return "bright_sunlight"
+        else:
+            return "daylight"
+
+
+class DataValidator:
+    """Validate data quality and compliance."""
+
+    def __init__(
+        self,
+        min_quality_score: float = 0.5,
+        required_resolution: tuple[int, int] | None = None,
+        max_age_seconds: float = 5.0,
+    ):
+        self.min_quality_score = min_quality_score
+        self.required_resolution = required_resolution or (640, 480)
+        self.max_age_seconds = max_age_seconds
+
+    def validate(self, frame: ProcessedFrame) -> tuple[bool, list[str]]:
+        """Validate processed frame data."""
+        errors = []
+
+        # Quality validation
+        if frame.quality_score < self.min_quality_score:
+            errors.append(f"Quality score {frame.quality_score:.2f} below threshold")
+
+        # Resolution validation
+        if frame.original_image.shape[:2] < self.required_resolution:
+            errors.append(
+                f"Resolution {frame.original_image.shape[:2]} below required {self.required_resolution}"
             )
 
-            # Calculate motion intensity
-            if flow[0] is not None:
-                motion_magnitude = np.mean(np.linalg.norm(flow[1], axis=2))
-                self.previous_frame = gray_current
-                return min(1.0, motion_magnitude / 10.0)
+        # Age validation
+        age = time.time() - frame.timestamp
+        if age > self.max_age_seconds:
+            errors.append(
+                f"Frame age {age:.1f}s exceeds maximum {self.max_age_seconds}s"
+            )
 
-        # Store current frame for next analysis
-        self.previous_frame = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        return 0.0
+        # Data completeness
+        if frame.source_hash == "":
+            errors.append("Missing source hash for data lineage")
 
-    def _analyze_rois(
-        self, image: np.ndarray, roi_boxes: list[tuple[int, int, int, int]]
-    ) -> dict[str, Any]:
-        """Analyze specific regions of interest."""
-
-        roi_analysis = {}
-
-        for i, (x, y, w, h) in enumerate(roi_boxes):
-            roi_id = f"roi_{i}"
-
-            # Extract ROI
-            roi = image[y : y + h, x : x + w]
-
-            if roi.size > 0:
-                # Analyze ROI
-                roi_density = self._estimate_vehicle_density(roi)
-                roi_brightness = np.mean(cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY))
-
-                roi_analysis[roi_id] = {
-                    "density": roi_density,
-                    "brightness": roi_brightness,
-                    "congestion": self._classify_congestion(roi_density),
-                }
-
-        return roi_analysis
+        return len(errors) == 0, errors
 
 
 class StreamProcessor:
-    """Main stream processing engine with async pipeline."""
+    """Main stream processing orchestrator."""
 
-    def __init__(self, config: dict[str, Any]):
-        self.config = config
-
-        # Stream management
-        self.active_streams: dict[str, CameraStream] = {}
-        self.processing_queues: dict[str, asyncio.Queue] = {}
+    def __init__(
+        self,
+        redis_url: str = "redis://localhost:6379",
+        enable_quality_analysis: bool = True,
+        enable_feature_extraction: bool = True,
+        batch_size: int = 10,
+        processing_timeout_ms: int = 100,
+    ):
+        self.redis_url = redis_url
+        self.enable_quality_analysis = enable_quality_analysis
+        self.enable_feature_extraction = enable_feature_extraction
+        self.batch_size = batch_size
+        self.processing_timeout_ms = processing_timeout_ms
 
         # Processing components
         self.quality_analyzer = ImageQualityAnalyzer()
-        self.feature_extractor = TrafficFeatureExtractor()
+        self.feature_extractor = FeatureExtractor()
+        self.validator = DataValidator()
 
-        # Data storage
-        self.processed_frames = deque(maxlen=10000)
-        self.quality_stats = defaultdict(lambda: deque(maxlen=1000))
-
-        # Redis Queue configuration
-        self.redis_url = config.get("redis_url", "redis://localhost:6379")
-        self.input_queue = config.get("input_queue", "camera_frames")
-        self.output_queue = config.get("output_queue", "processed_frames")
-        self.queue_pool_size = config.get("queue_pool_size", 20)
-
-        # gRPC serialization
-        self.enable_compression = config.get("enable_compression", True)
-        self.compression_format = config.get("compression_format", "jpeg")
-        self.compression_quality = config.get("compression_quality", 85)
-
-        # Processing settings
-        self.max_concurrent_streams = config.get("max_concurrent_streams", 1000)
-        self.quality_threshold = config.get("quality_threshold", 0.7)
-        self.processing_timeout = config.get("processing_timeout", 5.0)
-
-        # Performance tracking
-        self.performance_metrics = {
-            "frames_processed": 0,
-            "frames_rejected": 0,
-            "avg_processing_time": 0.0,
-            "throughput_fps": 0.0,
-            "error_count": 0,
-        }
-
+        # Queue manager
         self.queue_manager: RedisQueueManager | None = None
-        self.serializer: ProcessedFrameSerializer | None = None
-        self.redis_client = None
-
-        logger.info("Stream processor initialized")
-
-    async def start(self):
-        """Start the stream processing pipeline."""
-
-        # Initialize Redis queue manager
-        if REDIS_AVAILABLE:
-            await self._setup_redis_queues()
-            await self._setup_redis_cache()
-        else:
-            raise RuntimeError("Redis is required for queue management")
-
-        # Initialize gRPC serializer
-        self._setup_serializer()
-
-        # Start processing tasks
-        asyncio.create_task(self._consume_frames())
-        asyncio.create_task(self._monitor_performance())
-
-        logger.info("Stream processor started with Redis queues and gRPC serialization")
-
-    async def _setup_redis_queues(self):
-        """Setup Redis queue manager for high-performance streaming."""
-
-        self.queue_manager = RedisQueueManager(
-            redis_url=self.redis_url,
-            pool_size=self.queue_pool_size,
-            timeout=30,
-            retry_on_failure=True,
+        self.serializer = (
+            ProcessedFrameSerializer()
+            if REDIS_AVAILABLE
+            else ProcessedFrameSerializerFallback()
         )
 
-        await self.queue_manager.connect()
-
-        # Create input and output queues
-        input_config = QueueConfig(
-            name=self.input_queue,
-            queue_type=QueueType.STREAM,
-            max_length=10000,
-            consumer_group="stream_processor",
-            consumer_name="processor_worker",
-            batch_size=20,
-            block_time_ms=1000,
-            enable_compression=self.enable_compression,
+        # Stream registry
+        self.streams: dict[str, CameraStream] = {}
+        self.processing_stats: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=1000)
         )
 
-        output_config = QueueConfig(
-            name=self.output_queue,
-            queue_type=QueueType.STREAM,
-            max_length=50000,
-            consumer_group="output_consumers",
-            consumer_name="output_worker",
-            batch_size=50,
-            enable_compression=self.enable_compression,
-        )
-
-        await self.queue_manager.create_queue(input_config)
-        await self.queue_manager.create_queue(output_config)
-
-        logger.info("Redis queue connections established")
-
-    async def _setup_redis_cache(self):
-        """Setup Redis connection for caching."""
-
-        # Separate Redis connection for caching (different DB)
-        cache_url = self.redis_url
-        if "/0" in cache_url:
-            cache_url = cache_url.replace("/0", "/1")  # Use DB 1 for cache
-        elif not cache_url.endswith(("/1", "/2", "/3")):
-            cache_url += "/1"
-
-        self.redis_client = await aioredis.from_url(cache_url, decode_responses=True)
-
-        logger.info("Redis cache connection established")
-
-    def _setup_serializer(self):
-        """Setup gRPC serializer for efficient data transfer."""
-
-        self.serializer = ProcessedFrameSerializer(
-            compression_format=self.compression_format,
-            compression_quality=self.compression_quality,
-            enable_compression=self.enable_compression,
-        )
+        # Control flags
+        self.is_running = False
+        self.processing_tasks: dict[str, asyncio.Task[Any]] = {}
 
         logger.info(
-            f"gRPC serializer initialized with {self.compression_format} compression"
+            f"Stream processor initialized with batch_size={batch_size}, "
+            f"timeout={processing_timeout_ms}ms"
         )
 
-    async def _consume_frames(self):
-        """Consume and process frames from Redis queues."""
+    async def start(self) -> None:
+        """Start the stream processor."""
+        logger.info("Starting stream processor...")
 
-        if not self.queue_manager:
-            logger.warning("Queue manager not available")
-            return
+        # Connect to Redis
+        if REDIS_AVAILABLE:
+            self.queue_manager = RedisQueueManager(self.redis_url)
+            await self.queue_manager.connect()
 
-        try:
-            while True:
-                try:
-                    # Batch dequeue for better performance
-                    messages = await self.queue_manager.dequeue_batch(
-                        self.input_queue, batch_size=20, timeout_ms=1000
-                    )
+            # Create processing queues
+            await self._setup_queues()
+        else:
+            logger.warning("Redis not available, using fallback mode")
+            self.queue_manager = RedisQueueManagerFallback()
 
-                    if messages:
-                        # Process batch
-                        await self._process_frame_batch(messages)
-                    else:
-                        # Short pause when no messages
-                        await asyncio.sleep(0.01)
+        self.is_running = True
 
-                except Exception as e:
-                    logger.error(f"Frame consumption error: {e}")
-                    self.performance_metrics["error_count"] += 1
-                    await asyncio.sleep(1)  # Longer pause on error
+        # Start processing tasks
+        for i in range(3):  # 3 parallel processors
+            task = asyncio.create_task(self._process_stream_batch(f"processor_{i}"))
+            self.processing_tasks[f"processor_{i}"] = task
 
-        except Exception as e:
-            logger.error(f"Critical frame consumption error: {e}")
+        # Start metrics collection
+        self.metrics_task = asyncio.create_task(self._collect_metrics())
 
-    async def _process_frame_batch(self, messages: list[tuple[str, bytes]]):
-        """Process batch of frame messages for improved performance."""
+        logger.info("Stream processor started")
 
-        start_time = time.time()
-        processed_count = 0
-        rejected_count = 0
+    async def stop(self) -> None:
+        """Stop the stream processor."""
+        logger.info("Stopping stream processor...")
 
-        try:
-            # Process messages in parallel
-            tasks = []
-            for message_id, message_data in messages:
-                task = asyncio.create_task(
-                    self._process_single_message(message_id, message_data)
-                )
-                tasks.append(task)
+        self.is_running = False
 
-            # Wait for all tasks to complete
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Cancel all processing tasks
+        for task in self.processing_tasks.values():
+            task.cancel()
 
-            # Process results and handle acknowledgments
-            for i, result in enumerate(results):
-                message_id = messages[i][0]
+        if hasattr(self, "metrics_task"):
+            self.metrics_task.cancel()
 
-                if isinstance(result, Exception):
-                    logger.error(f"Processing failed for {message_id}: {result}")
-                    await self.queue_manager.reject(
-                        self.input_queue, message_id, reason=str(result)
-                    )
-                    self.performance_metrics["error_count"] += 1
-
-                elif result:
-                    # Successfully processed
-                    processing_time = (time.time() - start_time) * 1000
-                    await self.queue_manager.acknowledge(
-                        self.input_queue, message_id, processing_time_ms=processing_time
-                    )
-                    processed_count += 1
-
-                else:
-                    # Rejected due to validation
-                    await self.queue_manager.acknowledge(self.input_queue, message_id)
-                    rejected_count += 1
-
-            # Update metrics
-            self.performance_metrics["frames_processed"] += processed_count
-            self.performance_metrics["frames_rejected"] += rejected_count
-
-            batch_time = (time.time() - start_time) * 1000
-            logger.debug(
-                f"Processed batch: {processed_count} processed, {rejected_count} rejected, "
-                f"{batch_time:.2f}ms total"
-            )
-
-        except Exception as e:
-            logger.error(f"Batch processing error: {e}")
-            self.performance_metrics["error_count"] += 1
-
-    async def _process_single_message(
-        self, _message_id: str, message_data: bytes
-    ) -> bool:
-        """Process single message and return success status."""
-
-        try:
-            # Check if this is gRPC serialized data or legacy format
-            if self.serializer and self._is_grpc_data(message_data):
-                # Deserialize gRPC data
-                frame = self.serializer.deserialize_processed_frame(message_data)
-            else:
-                # Parse legacy JSON format
-                frame_dict = json.loads(message_data.decode("utf-8"))
-                frame = await self._parse_frame_data(frame_dict)
-
-            if not frame:
-                return False
-
-            # Process the frame through pipeline
-            processed_frame = await self._process_frame_pipeline(frame)
-
-            # Store and emit processed frame
-            if processed_frame.validation_passed:
-                self.processed_frames.append(processed_frame)
-                await self._emit_processed_frame(processed_frame)
-                return True
-            else:
-                return False
-
-        except Exception as e:
-            logger.error(f"Single message processing error: {e}")
-            raise
-
-    def _is_grpc_data(self, data: bytes) -> bool:
-        """Check if data is gRPC serialized (simple heuristic)."""
-        try:
-            # Try to parse as protobuf - this is a simple check
-            # In production, you might want a more robust detection method
-            return len(data) > 10 and not data.startswith(b"{")
-        except Exception:
-            return False
-
-    async def _process_frame_message(self, frame_data: dict[str, Any]):
-        """Process individual frame message."""
-
-        start_time = time.time()
-
-        try:
-            # Parse frame data
-            frame = await self._parse_frame_data(frame_data)
-            if not frame:
-                return
-
-            # Process the frame through pipeline
-            processed_frame = await self._process_frame_pipeline(frame)
-
-            # Store processed frame
-            if processed_frame.validation_passed:
-                self.processed_frames.append(processed_frame)
-                await self._emit_processed_frame(processed_frame)
-
-                self.performance_metrics["frames_processed"] += 1
-            else:
-                self.performance_metrics["frames_rejected"] += 1
-
-            # Update performance metrics
-            processing_time = (time.time() - start_time) * 1000
-            self._update_processing_metrics(processing_time)
-
-        except Exception as e:
-            logger.error(f"Frame pipeline error: {e}")
-            self.performance_metrics["error_count"] += 1
-
-    async def _parse_frame_data(
-        self, frame_data: dict[str, Any]
-    ) -> ProcessedFrame | None:
-        """Parse incoming frame data."""
-
-        try:
-            # Decode image data
-            if "image_base64" in frame_data:
-                image_data = base64.b64decode(frame_data["image_base64"])
-                image = np.array(Image.open(io.BytesIO(image_data)))
-            elif "image_array" in frame_data:
-                image = np.array(frame_data["image_array"], dtype=np.uint8)
-            else:
-                logger.warning("No valid image data found in frame")
-                return None
-
-            # Create processed frame
-            frame = ProcessedFrame(
-                frame_id=frame_data["frame_id"],
-                camera_id=frame_data["camera_id"],
-                timestamp=frame_data.get("timestamp", time.time()),
-                original_image=image,
-                source_hash=hashlib.md5(image.tobytes()).hexdigest()[:16],
-            )
-
-            return frame
-
-        except Exception as e:
-            logger.error(f"Frame parsing error: {e}")
-            return None
-
-    async def _process_frame_pipeline(self, frame: ProcessedFrame) -> ProcessedFrame:
-        """Process frame through the complete pipeline."""
-
-        pipeline_start = time.time()
-
-        # Stage 1: Image quality analysis
-        frame.processing_stage = ProcessingStage.VALIDATION
-        quality_metrics = self.quality_analyzer.analyze_quality(frame.original_image)
-
-        frame.quality_score = quality_metrics["quality_score"]
-        frame.blur_score = quality_metrics["blur_score"]
-        frame.brightness_score = quality_metrics["brightness_score"]
-        frame.contrast_score = quality_metrics["contrast_score"]
-        frame.noise_level = quality_metrics["noise_level"]
-
-        # Stage 2: Quality validation
-        frame.validation_passed = frame.quality_score >= self.quality_threshold
-
-        if not frame.validation_passed:
-            frame.processing_time_ms = (time.time() - pipeline_start) * 1000
-            return frame
-
-        # Stage 3: Feature extraction
-        frame.processing_stage = ProcessingStage.FEATURE_EXTRACTION
-        features = self.feature_extractor.extract_features(frame)
-
-        frame.vehicle_density = features.get("vehicle_density", 0.0)
-        frame.congestion_level = features.get("congestion_level", "unknown")
-        frame.weather_conditions = features.get("weather_conditions", "unknown")
-        frame.lighting_conditions = features.get("lighting_conditions", "unknown")
-        frame.roi_features = features.get("roi_analysis", {})
-
-        # Stage 4: Image preprocessing for ML
-        frame.processing_stage = ProcessingStage.QUALITY_CONTROL
-        frame.processed_image = self._preprocess_for_ml(frame.original_image)
-        frame.thumbnail = self._create_thumbnail(frame.original_image)
-
-        # Final stage
-        frame.processing_stage = ProcessingStage.OUTPUT
-        frame.processing_time_ms = (time.time() - pipeline_start) * 1000
-
-        return frame
-
-    def _preprocess_for_ml(self, image: np.ndarray) -> np.ndarray:
-        """Preprocess image for ML inference."""
-
-        # Resize to standard ML input size
-        target_size = (640, 640)
-
-        # Maintain aspect ratio with padding
-        h, w = image.shape[:2]
-        scale = min(target_size[0] / w, target_size[1] / h)
-
-        new_w, new_h = int(w * scale), int(h * scale)
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-        # Create padded canvas
-        pad_w = (target_size[0] - new_w) // 2
-        pad_h = (target_size[1] - new_h) // 2
-
-        padded = np.full((*target_size, 3), 114, dtype=np.uint8)
-        padded[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
-
-        return padded
-
-    def _create_thumbnail(
-        self, image: np.ndarray, size: tuple[int, int] = (128, 128)
-    ) -> np.ndarray:
-        """Create thumbnail for storage and display."""
-
-        return cv2.resize(image, size, interpolation=cv2.INTER_AREA)
-
-    async def _emit_processed_frame(self, frame: ProcessedFrame):
-        """Emit processed frame to output systems."""
-
-        # Prepare output data
-        output_data = {
-            "frame_id": frame.frame_id,
-            "camera_id": frame.camera_id,
-            "timestamp": frame.timestamp,
-            "quality_score": frame.quality_score,
-            "vehicle_density": frame.vehicle_density,
-            "congestion_level": frame.congestion_level,
-            "weather_conditions": frame.weather_conditions,
-            "lighting_conditions": frame.lighting_conditions,
-            "processing_time_ms": frame.processing_time_ms,
-            "validation_passed": frame.validation_passed,
-            "source_hash": frame.source_hash,
-        }
-
-        # Send to Kafka
-        if self.kafka_producer:
-            await self.kafka_producer.send_and_wait(self.output_topic, output_data)
-
-        # Cache in Redis
-        if self.redis_client:
-            cache_key = f"frame:{frame.camera_id}:{frame.frame_id}"
-            await self.redis_client.setex(
-                cache_key,
-                3600,
-                json.dumps(output_data, default=str),  # 1 hour TTL
-            )
-
-        # Update quality statistics
-        self.quality_stats[frame.camera_id].append(
-            {
-                "timestamp": frame.timestamp,
-                "quality_score": frame.quality_score,
-                "processing_time": frame.processing_time_ms,
-            }
+        # Wait for tasks to complete
+        await asyncio.gather(
+            *self.processing_tasks.values(),
+            return_exceptions=True,
         )
 
-    def _update_processing_metrics(self, processing_time_ms: float):
-        """Update processing performance metrics."""
-
-        # Update average processing time
-        current_avg = self.performance_metrics["avg_processing_time"]
-        total_processed = (
-            self.performance_metrics["frames_processed"]
-            + self.performance_metrics["frames_rejected"]
-        )
-
-        if total_processed > 0:
-            self.performance_metrics["avg_processing_time"] = (
-                current_avg * (total_processed - 1) + processing_time_ms
-            ) / total_processed
-
-    async def _monitor_performance(self):
-        """Monitor and log performance metrics."""
-
-        last_frame_count = 0
-        last_check_time = time.time()
-
-        while True:
-            try:
-                await asyncio.sleep(60)  # Check every minute
-
-                current_time = time.time()
-                current_frame_count = self.performance_metrics["frames_processed"]
-
-                # Calculate throughput
-                time_diff = current_time - last_check_time
-                frame_diff = current_frame_count - last_frame_count
-
-                if time_diff > 0:
-                    throughput = frame_diff / time_diff
-                    self.performance_metrics["throughput_fps"] = throughput
-
-                # Log metrics
-                logger.info(
-                    f"Processing metrics: "
-                    f"throughput={throughput:.1f}fps, "
-                    f"avg_time={self.performance_metrics['avg_processing_time']:.1f}ms, "
-                    f"processed={current_frame_count}, "
-                    f"rejected={self.performance_metrics['frames_rejected']}, "
-                    f"errors={self.performance_metrics['error_count']}"
-                )
-
-                last_frame_count = current_frame_count
-                last_check_time = current_time
-
-            except Exception as e:
-                logger.error(f"Performance monitoring error: {e}")
-
-    async def register_stream(self, stream_config: dict[str, Any]) -> bool:
-        """Register new camera stream."""
-
-        try:
-            stream = CameraStream(
-                camera_id=stream_config["camera_id"],
-                location=stream_config["location"],
-                coordinates=tuple(stream_config["coordinates"]),
-                resolution=tuple(stream_config.get("resolution", [1920, 1080])),
-                fps=stream_config.get("fps", 30),
-                quality_threshold=stream_config.get(
-                    "quality_threshold", self.quality_threshold
-                ),
-            )
-
-            self.active_streams[stream.camera_id] = stream
-            self.processing_queues[stream.camera_id] = asyncio.Queue(maxsize=100)
-
-            logger.info(f"Registered camera stream: {stream.camera_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Stream registration error: {e}")
-            return False
-
-    def get_stream_status(self, camera_id: str) -> dict[str, Any] | None:
-        """Get status of specific camera stream."""
-
-        if camera_id not in self.active_streams:
-            return None
-
-        stream = self.active_streams[camera_id]
-        quality_history = list(self.quality_stats[camera_id])
-
-        return {
-            "camera_id": stream.camera_id,
-            "status": stream.status.value,
-            "location": stream.location,
-            "resolution": stream.resolution,
-            "fps": stream.fps,
-            "total_frames_processed": stream.total_frames_processed,
-            "avg_processing_latency_ms": stream.avg_processing_latency_ms,
-            "quality_score_avg": stream.quality_score_avg,
-            "error_rate": stream.error_rate,
-            "last_frame_time": stream.last_frame_time,
-            "recent_quality_samples": len(quality_history),
-        }
-
-    def get_processing_stats(self) -> dict[str, Any]:
-        """Get overall processing statistics."""
-
-        stats = {
-            "active_streams": len(self.active_streams),
-            "performance_metrics": self.performance_metrics,
-            "processed_frames_buffer": len(self.processed_frames),
-            "quality_stats_cameras": len(self.quality_stats),
-            "queue_manager_available": self.queue_manager is not None,
-            "redis_cache_available": self.redis_client is not None,
-            "serialization_enabled": self.serializer is not None,
-        }
-
-        # Add serialization performance metrics
-        if self.serializer:
-            serialization_metrics = self.serializer.get_performance_metrics()
-            stats["serialization_metrics"] = serialization_metrics
-
-        # Add queue metrics if available
-        if self.queue_manager:
-            try:
-                # Note: This would be async in real usage
-                pass  # asyncio.create_task(self._update_queue_stats(stats))
-            except Exception as e:
-                logger.warning(f"Failed to get queue stats: {e}")
-
-        return stats
-
-    async def stop(self):
-        """Stop stream processing."""
-
-        logger.info("Stopping stream processor")
-
-        if self.queue_manager:
+        # Disconnect from Redis
+        if self.queue_manager and REDIS_AVAILABLE:
             await self.queue_manager.disconnect()
-
-        if self.redis_client:
-            await self.redis_client.close()
 
         logger.info("Stream processor stopped")
 
+    async def _setup_queues(self) -> None:
+        """Setup Redis queues for processing."""
+        if not self.queue_manager or not REDIS_AVAILABLE:
+            return
 
-# Factory function
-async def create_stream_processor(config_path: str | Path = None) -> StreamProcessor:
-    """Create and initialize stream processor."""
+        # Input queue for raw frames
+        await self.queue_manager.create_queue(
+            QueueConfig(
+                name="camera_frames_input",
+                queue_type=QueueType.STREAM,
+                max_length=10000,
+                batch_size=self.batch_size,
+            )
+        )
 
-    if config_path and Path(config_path).exists():
-        with open(config_path) as f:
-            config = json.load(f)
-    else:
-        # Default configuration
-        config = {
-            "kafka_servers": ["localhost:9092"],
-            "input_topic": "camera_frames",
-            "output_topic": "processed_frames",
-            "redis_url": "redis://localhost:6379",
-            "max_concurrent_streams": 1000,
-            "quality_threshold": 0.7,
-            "processing_timeout": 5.0,
+        # Output queue for processed frames
+        await self.queue_manager.create_queue(
+            QueueConfig(
+                name="processed_frames_output",
+                queue_type=QueueType.STREAM,
+                max_length=5000,
+                batch_size=self.batch_size,
+            )
+        )
+
+        # Quality control queue for failed frames
+        await self.queue_manager.create_queue(
+            QueueConfig(
+                name="quality_control_queue",
+                queue_type=QueueType.LIST,
+                max_length=1000,
+            )
+        )
+
+        logger.info("Processing queues created")
+
+    async def register_camera(self, stream: CameraStream) -> bool:
+        """Register a new camera stream."""
+        try:
+            self.streams[stream.camera_id] = stream
+            logger.info(f"Registered camera stream: {stream.camera_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register camera {stream.camera_id}: {e}")
+            return False
+
+    async def process_frame(
+        self,
+        camera_id: str,
+        frame: np.ndarray[Any, Any],
+        timestamp: float | None = None,
+    ) -> ProcessedFrame | None:
+        """Process a single frame from camera."""
+
+        if camera_id not in self.streams:
+            logger.warning(f"Unknown camera ID: {camera_id}")
+            return None
+
+        stream = self.streams[camera_id]
+
+        if not stream.processing_enabled:
+            return None
+
+        timestamp = timestamp or time.time()
+        frame_id = f"{camera_id}_{int(timestamp * 1000)}"
+
+        # Create processed frame object
+        processed = ProcessedFrame(
+            frame_id=frame_id,
+            camera_id=camera_id,
+            timestamp=timestamp,
+            original_image=frame,
+        )
+
+        try:
+            # Stage 1: Quality analysis
+            if self.enable_quality_analysis:
+                quality_metrics = self.quality_analyzer.analyze_quality(frame)
+                processed.quality_score = quality_metrics["quality_score"]
+                processed.blur_score = quality_metrics["blur_score"]
+                processed.brightness_score = quality_metrics["brightness_score"]
+                processed.contrast_score = quality_metrics["contrast_score"]
+                processed.noise_level = quality_metrics["noise_level"]
+                processed.processing_stage = ProcessingStage.QUALITY_CONTROL
+
+            # Stage 2: Feature extraction
+            if self.enable_feature_extraction:
+                features = self.feature_extractor.extract_features(
+                    frame,
+                    stream.roi_boxes,
+                )
+                processed.vehicle_density = features["vehicle_density"]
+                processed.congestion_level = features["congestion_level"]
+                processed.weather_conditions = features["weather_conditions"]
+                processed.lighting_conditions = features["lighting_conditions"]
+                processed.roi_features = features.get("roi_features", {})
+                processed.processing_stage = ProcessingStage.FEATURE_EXTRACTION
+
+            # Stage 3: Validation
+            is_valid, errors = self.validator.validate(processed)
+            processed.validation_passed = is_valid
+
+            if not is_valid:
+                logger.debug(f"Frame {frame_id} validation failed: {errors}")
+                # Send to quality control queue
+                if self.queue_manager and REDIS_AVAILABLE:
+                    await self.queue_manager.enqueue(
+                        "quality_control_queue",
+                        json.dumps({"frame_id": frame_id, "errors": errors}).encode(),
+                    )
+
+            # Calculate processing time
+            processed.processing_time_ms = (time.time() - timestamp) * 1000
+
+            # Generate source hash for lineage
+            processed.source_hash = hashlib.sha256(
+                f"{camera_id}_{timestamp}".encode()
+            ).hexdigest()[:16]
+
+            # Update stream metrics
+            stream.total_frames_processed += 1
+            stream.last_frame_time = time.time()
+            self.processing_stats[camera_id].append(processed.processing_time_ms)
+
+            # Enqueue for downstream processing if valid
+            if is_valid and self.queue_manager and REDIS_AVAILABLE:
+                serialized = self.serializer.serialize(processed)
+                await self.queue_manager.enqueue(
+                    "processed_frames_output",
+                    serialized,
+                    metadata={
+                        "camera_id": camera_id,
+                        "quality_score": processed.quality_score,
+                    },
+                )
+
+            return processed
+
+        except Exception as e:
+            logger.error(f"Error processing frame {frame_id}: {e}")
+            return None
+
+    async def _process_stream_batch(self, processor_id: str) -> None:
+        """Process frames in batches."""
+        logger.info(f"Batch processor {processor_id} started")
+
+        while self.is_running:
+            try:
+                if not self.queue_manager or not REDIS_AVAILABLE:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # Dequeue batch of frames
+                messages = await self.queue_manager.dequeue_batch(
+                    "camera_frames_input",
+                    batch_size=self.batch_size,
+                    timeout_ms=self.processing_timeout_ms,
+                )
+
+                if not messages:
+                    await asyncio.sleep(0.01)  # Short sleep if no messages
+                    continue
+
+                # Process batch in parallel
+                tasks = []
+                for message_id, data in messages:
+                    # Deserialize frame data
+                    try:
+                        frame_data = json.loads(data)
+                        camera_id = frame_data["camera_id"]
+                        timestamp = frame_data["timestamp"]
+
+                        # Decode image
+                        image_bytes = base64.b64decode(frame_data["image"])
+                        image = Image.open(io.BytesIO(image_bytes))
+                        frame = np.array(image)
+
+                        # Process frame
+                        task = self.process_frame(camera_id, frame, timestamp)
+                        tasks.append((message_id, task))
+
+                    except Exception as e:
+                        logger.error(f"Failed to deserialize frame: {e}")
+                        continue
+
+                # Wait for all frames to be processed
+                for message_id, task in tasks:
+                    try:
+                        result = await task
+                        if result and self.queue_manager:
+                            await self.queue_manager.acknowledge(
+                                "camera_frames_input",
+                                message_id,
+                                processing_time_ms=result.processing_time_ms,
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to process frame in batch: {e}")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Batch processing error in {processor_id}: {e}")
+                await asyncio.sleep(1)  # Back off on error
+
+        logger.info(f"Batch processor {processor_id} stopped")
+
+    async def _collect_metrics(self) -> None:
+        """Collect and log processing metrics."""
+        while self.is_running:
+            try:
+                await asyncio.sleep(30)  # Collect metrics every 30 seconds
+
+                total_processed = sum(
+                    s.total_frames_processed for s in self.streams.values()
+                )
+                active_streams = sum(
+                    1 for s in self.streams.values() if s.status == StreamStatus.ACTIVE
+                )
+
+                # Calculate average processing times
+                avg_latencies = {}
+                for camera_id, latencies in self.processing_stats.items():
+                    if latencies:
+                        avg_latencies[camera_id] = np.mean(list(latencies))
+
+                # Get queue metrics if available
+                queue_metrics = {}
+                if self.queue_manager and REDIS_AVAILABLE:
+                    for queue_name in [
+                        "camera_frames_input",
+                        "processed_frames_output",
+                    ]:
+                        metrics = await self.queue_manager.get_queue_metrics(queue_name)
+                        if metrics:
+                            queue_metrics[queue_name] = {
+                                "pending": metrics.pending_count,
+                                "processing": metrics.processing_count,
+                                "completed": metrics.completed_count,
+                            }
+
+                logger.info(
+                    f"Stream Processing Metrics - "
+                    f"Total Processed: {total_processed}, "
+                    f"Active Streams: {active_streams}, "
+                    f"Avg Latency: {np.mean(list(avg_latencies.values())):.1f}ms, "
+                    f"Queue Metrics: {queue_metrics}"
+                )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Metrics collection error: {e}")
+
+    def get_stream_status(self, camera_id: str) -> dict[str, Any] | None:
+        """Get status for a specific camera stream."""
+        if camera_id not in self.streams:
+            return None
+
+        stream = self.streams[camera_id]
+        latencies = list(self.processing_stats[camera_id])
+
+        return {
+            "camera_id": camera_id,
+            "status": stream.status.value,
+            "total_frames": stream.total_frames_processed,
+            "last_frame_time": stream.last_frame_time,
+            "avg_latency_ms": np.mean(latencies) if latencies else 0,
+            "p95_latency_ms": np.percentile(latencies, 95) if latencies else 0,
+            "quality_score_avg": stream.quality_score_avg,
+            "error_rate": stream.error_rate,
         }
 
-    processor = StreamProcessor(config)
-    await processor.start()
+    async def __aenter__(self) -> "StreamProcessor":
+        """Async context manager entry."""
+        await self.start()
+        return self
 
-    return processor
+    async def __aexit__(self, *args: Any) -> None:
+        """Async context manager exit."""
+        await self.stop()
+
+
+# Example usage and testing
+async def test_stream_processor() -> None:
+    """Test the stream processor with simulated data."""
+
+    processor = StreamProcessor(
+        enable_quality_analysis=True,
+        enable_feature_extraction=True,
+        batch_size=5,
+    )
+
+    async with processor:
+        # Register test camera
+        camera = CameraStream(
+            camera_id="test_cam_001",
+            location="Intersection A",
+            coordinates=(37.7749, -122.4194),
+            roi_boxes=[(100, 100, 300, 300), (400, 400, 600, 600)],
+        )
+
+        await processor.register_camera(camera)
+
+        # Process test frames
+        test_frame = np.random.randint(0, 255, (1080, 1920, 3), dtype=np.uint8)
+
+        for i in range(10):
+            result = await processor.process_frame(
+                "test_cam_001",
+                test_frame,
+                time.time(),
+            )
+
+            if result:
+                logger.info(
+                    f"Processed frame {i}: "
+                    f"Quality={result.quality_score:.2f}, "
+                    f"Density={result.vehicle_density:.2f}, "
+                    f"Latency={result.processing_time_ms:.1f}ms"
+                )
+
+            await asyncio.sleep(0.1)
+
+        # Get final status
+        status = processor.get_stream_status("test_cam_001")
+        logger.info(f"Final stream status: {status}")
+
+
+if __name__ == "__main__":
+    # Run test
+    asyncio.run(test_stream_processor())

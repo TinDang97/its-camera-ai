@@ -63,9 +63,9 @@ class HardeningCheck:
     compliance_frameworks: list[ComplianceFramework]
     implemented: bool = False
     verification_command: str | None = None
-    remediation_steps: list[str] = None
+    remediation_steps: list[str] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.remediation_steps is None:
             self.remediation_steps = []
 
@@ -73,7 +73,7 @@ class HardeningCheck:
 class SystemHardening:
     """System-level security hardening implementation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.hardening_checks = self._initialize_system_checks()
         logger.info("System hardening module initialized")
 
@@ -169,7 +169,7 @@ class SystemHardening:
         self, level: HardeningLevel = HardeningLevel.ENHANCED
     ) -> dict[str, Any]:
         """Perform comprehensive system hardening."""
-        results = {
+        results: dict[str, Any] = {
             "hardening_level": level.value,
             "started_at": datetime.now().isoformat(),
             "checks_performed": [],
@@ -183,7 +183,7 @@ class SystemHardening:
                 "CRITICAL",
                 "HIGH",
             ]:
-                results["skipped_checks"] += 1
+                results["skipped_checks"] = results["skipped_checks"] + 1
                 continue
 
             try:
@@ -200,7 +200,7 @@ class SystemHardening:
                 results["checks_performed"].append(check_result)
 
                 if success:
-                    results["successful_checks"] += 1
+                    results["successful_checks"] = results["successful_checks"] + 1
                     check.implemented = True
                     logger.info(
                         "Hardening check completed",
@@ -208,7 +208,7 @@ class SystemHardening:
                         title=check.title,
                     )
                 else:
-                    results["failed_checks"] += 1
+                    results["failed_checks"] = results["failed_checks"] + 1
                     logger.warning(
                         "Hardening check failed",
                         check_id=check.check_id,
@@ -216,7 +216,7 @@ class SystemHardening:
                     )
 
             except Exception as e:
-                results["failed_checks"] += 1
+                results["failed_checks"] = results["failed_checks"] + 1
                 logger.error(
                     "Hardening check error", check_id=check.check_id, error=str(e)
                 )
@@ -309,7 +309,7 @@ class SystemHardening:
 class ContainerHardening:
     """Container security hardening implementation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.container_checks = self._initialize_container_checks()
         logger.info("Container hardening module initialized")
 
@@ -394,7 +394,7 @@ class ContainerHardening:
 
     async def harden_container_images(self) -> dict[str, Any]:
         """Perform container image hardening."""
-        results = {
+        results: dict[str, Any] = {
             "started_at": datetime.now().isoformat(),
             "hardened_images": [],
             "successful_hardenings": 0,
@@ -414,13 +414,15 @@ class ContainerHardening:
                 results["hardened_images"].append(hardening_result)
 
                 if hardening_result["success"]:
-                    results["successful_hardenings"] += 1
+                    results["successful_hardenings"] = (
+                        results["successful_hardenings"] + 1
+                    )
                 else:
-                    results["failed_hardenings"] += 1
+                    results["failed_hardenings"] = results["failed_hardenings"] + 1
 
             except Exception as e:
                 logger.error("Container hardening failed", image=image, error=str(e))
-                results["failed_hardenings"] += 1
+                results["failed_hardenings"] = results["failed_hardenings"] + 1
 
         results["completed_at"] = datetime.now().isoformat()
         logger.info(
@@ -433,7 +435,7 @@ class ContainerHardening:
 
     async def _harden_single_image(self, image: str) -> dict[str, Any]:
         """Harden a single container image."""
-        result = {
+        result: dict[str, Any] = {
             "image": image,
             "success": False,
             "checks_applied": [],
@@ -477,7 +479,7 @@ class ContainerHardening:
         logger.info("Applying container check", image=image, check_id=check.check_id)
         return True
 
-    async def _rebuild_hardened_image(self, image: str):
+    async def _rebuild_hardened_image(self, image: str) -> None:
         """Rebuild container image with hardening applied."""
         logger.info("Rebuilding hardened image", image=image)
 
@@ -490,7 +492,7 @@ class ContainerHardening:
 class KubernetesHardening:
     """Kubernetes security hardening implementation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.k8s_checks = self._initialize_kubernetes_checks()
         logger.info("Kubernetes hardening module initialized")
 
@@ -576,7 +578,7 @@ class KubernetesHardening:
 
     async def harden_kubernetes_cluster(self, manifest_dir: Path) -> dict[str, Any]:
         """Perform comprehensive Kubernetes hardening."""
-        results = {
+        results: dict[str, Any] = {
             "started_at": datetime.now().isoformat(),
             "manifest_directory": str(manifest_dir),
             "hardening_applied": [],
@@ -599,16 +601,16 @@ class KubernetesHardening:
                 results["hardening_applied"].append(hardening_result)
 
                 if success:
-                    results["successful_checks"] += 1
+                    results["successful_checks"] = results["successful_checks"] + 1
                     logger.info("Kubernetes hardening applied", check_id=check.check_id)
                 else:
-                    results["failed_checks"] += 1
+                    results["failed_checks"] = results["failed_checks"] + 1
                     logger.warning(
                         "Kubernetes hardening failed", check_id=check.check_id
                     )
 
             except Exception as e:
-                results["failed_checks"] += 1
+                results["failed_checks"] = results["failed_checks"] + 1
                 logger.error(
                     "Kubernetes hardening error", check_id=check.check_id, error=str(e)
                 )
@@ -753,7 +755,7 @@ class KubernetesHardening:
 class NetworkHardening:
     """Network security hardening implementation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.network_checks = self._initialize_network_checks()
         logger.info("Network hardening module initialized")
 
@@ -826,7 +828,7 @@ class NetworkHardening:
 
     async def harden_network_security(self) -> dict[str, Any]:
         """Perform network security hardening."""
-        results = {
+        results: dict[str, Any] = {
             "started_at": datetime.now().isoformat(),
             "network_hardening": [],
             "successful_checks": 0,
@@ -847,12 +849,12 @@ class NetworkHardening:
                 results["network_hardening"].append(hardening_result)
 
                 if success:
-                    results["successful_checks"] += 1
+                    results["successful_checks"] = results["successful_checks"] + 1
                 else:
-                    results["failed_checks"] += 1
+                    results["failed_checks"] = results["failed_checks"] + 1
 
             except Exception as e:
-                results["failed_checks"] += 1
+                results["failed_checks"] = results["failed_checks"] + 1
                 logger.error(
                     "Network hardening error", check_id=check.check_id, error=str(e)
                 )
@@ -903,7 +905,7 @@ class NetworkHardening:
 class ProductionHardeningOrchestrator:
     """Orchestrates complete production security hardening."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.system_hardening = SystemHardening()
         self.container_hardening = ContainerHardening()
         self.kubernetes_hardening = KubernetesHardening()
@@ -919,7 +921,7 @@ class ProductionHardeningOrchestrator:
 
         start_time = datetime.now()
 
-        results = {
+        results: dict[str, Any] = {
             "hardening_session_id": f"HARDENING-{int(time.time())}",
             "started_at": start_time.isoformat(),
             "hardening_level": hardening_level.value,
@@ -1157,7 +1159,7 @@ async def run_production_hardening(
 
 if __name__ == "__main__":
 
-    async def main():
+    async def main() -> None:
         # Run production hardening
         results = await run_production_hardening()
 

@@ -1,0 +1,240 @@
+# MinIO Horizontal Pod Autoscaler and Monitoring
+# Scales based on CPU, memory, and custom object storage metrics
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: minio-hpa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: minio
+  minReplicas: 4
+  maxReplicas: 12
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  # Custom metrics for object storage workload
+  - type: Pods
+    pods:
+      metric:
+        name: minio_http_requests_total_rate
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  - type: Pods
+    pods:
+      metric:
+        name: minio_disk_storage_used_percent
+      target:
+        type: AverageValue
+        averageValue: "75"
+
+---
+# ServiceMonitor for Prometheus monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio-metrics
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+    team: its-camera-ai
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+      app.kubernetes.io/component: object-storage
+  endpoints:
+  - port: http-api
+    path: /minio/v2/metrics/cluster
+    interval: 30s
+    scrapeTimeout: 15s
+    scheme: http
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'minio_.*'
+      action: keep
+    - sourceLabels: [instance]
+      targetLabel: minio_instance
+    - sourceLabels: [__name__]
+      targetLabel: __name__
+      replacement: ${1}
+
+---
+# PrometheusRule for MinIO alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: minio-alerts
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+    team: its-camera-ai
+spec:
+  groups:
+  - name: minio.rules
+    interval: 30s
+    rules:
+    - alert: MinIONodeDown
+      expr: up{job="minio"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: object-storage
+      annotations:
+        summary: "MinIO node is down"
+        description: "MinIO node {{ $labels.instance }} has been down for more than 5 minutes"
+        
+    - alert: MinIODiskUsageHigh
+      expr: (minio_disk_storage_used_bytes / minio_disk_storage_total_bytes) * 100 > 85
+      for: 10m
+      labels:
+        severity: warning
+        component: object-storage
+      annotations:
+        summary: "MinIO disk usage is high"
+        description: "MinIO disk usage on {{ $labels.instance }} is {{ $value }}%"
+        
+    - alert: MinIOHighRequestLatency
+      expr: histogram_quantile(0.95, rate(minio_http_request_duration_seconds_bucket[5m])) > 1
+      for: 10m
+      labels:
+        severity: warning
+        component: object-storage
+      annotations:
+        summary: "MinIO high request latency"
+        description: "95th percentile latency for MinIO requests is {{ $value }}s"
+        
+    - alert: MinIOHighErrorRate
+      expr: rate(minio_http_requests_total{status_code!~"2.*"}[5m]) / rate(minio_http_requests_total[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: critical
+        component: object-storage
+      annotations:
+        summary: "MinIO high error rate"
+        description: "MinIO error rate is {{ $value | humanizePercentage }}"
+        
+    - alert: MinIOClusterHealingRequired
+      expr: minio_heal_objects_heal_total > 0
+      for: 15m
+      labels:
+        severity: warning
+        component: object-storage
+      annotations:
+        summary: "MinIO cluster healing required"
+        description: "MinIO cluster has {{ $value }} objects that require healing"
+
+---
+# NetworkPolicy for MinIO security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-network-policy
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: its-camera-ai
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+      app.kubernetes.io/component: object-storage
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from application pods
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: its-camera-ai
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: its-camera-ai
+    ports:
+    - protocol: TCP
+      port: 9000
+    - protocol: TCP
+      port: 9001
+  # Allow monitoring traffic
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9000
+  # Allow inter-cluster communication for distributed mode
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: minio
+          app.kubernetes.io/component: object-storage
+    ports:
+    - protocol: TCP
+      port: 9000
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow inter-cluster communication
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: minio
+          app.kubernetes.io/component: object-storage
+    ports:
+    - protocol: TCP
+      port: 9000
+  # Allow webhook notifications to application
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: api
+    ports:
+    - protocol: TCP
+      port: 8000

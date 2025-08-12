@@ -222,7 +222,7 @@ async def list_cameras(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve cameras",
-        )
+        ) from e
 
 
 @router.post(
@@ -332,7 +332,7 @@ async def create_camera(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Camera creation failed",
-        )
+        ) from e
 
 
 @router.get(
@@ -480,7 +480,7 @@ async def update_camera(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Camera update failed",
-        )
+        ) from e
 
 
 @router.delete(
@@ -556,7 +556,7 @@ async def delete_camera(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Camera deletion failed",
-        )
+        ) from e
 
 
 @router.post(
@@ -645,7 +645,7 @@ async def control_stream(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Stream control failed",
-        )
+        ) from e
 
 
 @router.get(

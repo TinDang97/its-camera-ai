@@ -1,0 +1,349 @@
+# MinIO Integration Tests Job
+# Comprehensive testing of MinIO functionality and performance
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-integration-test
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio-test
+    app.kubernetes.io/component: integration-test
+    app.kubernetes.io/part-of: its-camera-ai
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio-test
+        app.kubernetes.io/component: integration-test
+    spec:
+      serviceAccountName: minio-test-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      restartPolicy: Never
+      containers:
+      - name: minio-integration-test
+        image: minio/mc:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MINIO_ENDPOINT
+          value: "minio-service:9000"
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-password
+        - name: TEST_DATA_SIZE_MB
+          value: "100"
+        - name: CONCURRENT_UPLOADS
+          value: "10"
+        - name: TEST_DURATION_SECONDS
+          value: "300"
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          
+          echo "=== MinIO Integration Tests Started ==="
+          echo "Target: $MINIO_ENDPOINT"
+          echo "Test Data Size: ${TEST_DATA_SIZE_MB}MB"
+          echo "Concurrent Uploads: $CONCURRENT_UPLOADS"
+          echo "Test Duration: ${TEST_DURATION_SECONDS}s"
+          echo "=================================="
+          
+          # Configure MinIO client
+          echo "Configuring MinIO client..."
+          mc alias set testminio http://$MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY --insecure
+          
+          # Wait for MinIO to be ready
+          echo "Waiting for MinIO to be ready..."
+          timeout 120 bash -c 'until mc ready testminio --insecure; do echo "Waiting..."; sleep 5; done'
+          
+          # Test 1: Basic connectivity and health
+          echo "=== Test 1: Basic Connectivity ==="
+          mc admin info testminio --insecure
+          if [ $? -eq 0 ]; then
+            echo "✓ MinIO cluster is accessible"
+          else
+            echo "✗ MinIO cluster is not accessible"
+            exit 1
+          fi
+          
+          # Test 2: Bucket operations
+          echo "=== Test 2: Bucket Operations ==="
+          TEST_BUCKET="integration-test-$(date +%s)"
+          
+          # Create bucket
+          mc mb testminio/$TEST_BUCKET --insecure
+          if [ $? -eq 0 ]; then
+            echo "✓ Bucket creation successful"
+          else
+            echo "✗ Bucket creation failed"
+            exit 1
+          fi
+          
+          # List buckets
+          mc ls testminio --insecure | grep $TEST_BUCKET
+          if [ $? -eq 0 ]; then
+            echo "✓ Bucket listing successful"
+          else
+            echo "✗ Bucket not found in listing"
+            exit 1
+          fi
+          
+          # Test 3: Object operations
+          echo "=== Test 3: Object Operations ==="
+          
+          # Create test data
+          TEST_FILE="/tmp/test-data-${TEST_DATA_SIZE_MB}mb"
+          dd if=/dev/urandom of=$TEST_FILE bs=1M count=$TEST_DATA_SIZE_MB 2>/dev/null
+          TEST_FILE_HASH=$(sha256sum $TEST_FILE | cut -d' ' -f1)
+          
+          # Upload object
+          echo "Uploading ${TEST_DATA_SIZE_MB}MB test file..."
+          UPLOAD_START=$(date +%s)
+          mc cp $TEST_FILE testminio/$TEST_BUCKET/test-object --insecure
+          UPLOAD_END=$(date +%s)
+          UPLOAD_TIME=$((UPLOAD_END - UPLOAD_START))
+          UPLOAD_SPEED=$(echo "scale=2; $TEST_DATA_SIZE_MB / $UPLOAD_TIME" | bc -l)
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ Object upload successful (${UPLOAD_TIME}s, ${UPLOAD_SPEED}MB/s)"
+          else
+            echo "✗ Object upload failed"
+            exit 1
+          fi
+          
+          # Download object
+          echo "Downloading test file..."
+          DOWNLOAD_START=$(date +%s)
+          mc cp testminio/$TEST_BUCKET/test-object /tmp/downloaded-test-data --insecure
+          DOWNLOAD_END=$(date +%s)
+          DOWNLOAD_TIME=$((DOWNLOAD_END - DOWNLOAD_START))
+          DOWNLOAD_SPEED=$(echo "scale=2; $TEST_DATA_SIZE_MB / $DOWNLOAD_TIME" | bc -l)
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ Object download successful (${DOWNLOAD_TIME}s, ${DOWNLOAD_SPEED}MB/s)"
+          else
+            echo "✗ Object download failed"
+            exit 1
+          fi
+          
+          # Verify data integrity
+          DOWNLOAD_HASH=$(sha256sum /tmp/downloaded-test-data | cut -d' ' -f1)
+          if [ "$TEST_FILE_HASH" = "$DOWNLOAD_HASH" ]; then
+            echo "✓ Data integrity verified"
+          else
+            echo "✗ Data integrity check failed"
+            echo "Original: $TEST_FILE_HASH"
+            echo "Downloaded: $DOWNLOAD_HASH"
+            exit 1
+          fi
+          
+          # Test 4: Concurrent operations
+          echo "=== Test 4: Concurrent Operations ==="
+          
+          # Create multiple small files for concurrent testing
+          mkdir -p /tmp/concurrent-test
+          for i in $(seq 1 $CONCURRENT_UPLOADS); do
+            dd if=/dev/urandom of=/tmp/concurrent-test/file-$i bs=1M count=10 2>/dev/null &
+          done
+          wait
+          
+          # Concurrent uploads
+          echo "Starting $CONCURRENT_UPLOADS concurrent uploads..."
+          CONCURRENT_START=$(date +%s)
+          
+          for i in $(seq 1 $CONCURRENT_UPLOADS); do
+            mc cp /tmp/concurrent-test/file-$i testminio/$TEST_BUCKET/concurrent-file-$i --insecure &
+          done
+          wait
+          
+          CONCURRENT_END=$(date +%s)
+          CONCURRENT_TIME=$((CONCURRENT_END - CONCURRENT_START))
+          CONCURRENT_THROUGHPUT=$(echo "scale=2; ($CONCURRENT_UPLOADS * 10) / $CONCURRENT_TIME" | bc -l)
+          
+          echo "✓ Concurrent uploads completed (${CONCURRENT_TIME}s, ${CONCURRENT_THROUGHPUT}MB/s total)"
+          
+          # Verify all files uploaded
+          UPLOADED_COUNT=$(mc ls testminio/$TEST_BUCKET --insecure | grep concurrent-file | wc -l)
+          if [ "$UPLOADED_COUNT" -eq "$CONCURRENT_UPLOADS" ]; then
+            echo "✓ All concurrent uploads verified"
+          else
+            echo "✗ Some concurrent uploads missing ($UPLOADED_COUNT/$CONCURRENT_UPLOADS)"
+            exit 1
+          fi
+          
+          # Test 5: Bucket policies and versioning
+          echo "=== Test 5: Bucket Policies and Versioning ==="
+          
+          # Test versioning
+          mc version enable testminio/$TEST_BUCKET --insecure
+          if [ $? -eq 0 ]; then
+            echo "✓ Versioning enabled"
+          else
+            echo "✗ Failed to enable versioning"
+            exit 1
+          fi
+          
+          # Upload multiple versions
+          echo "version 1" > /tmp/versioned-file
+          mc cp /tmp/versioned-file testminio/$TEST_BUCKET/versioned-object --insecure
+          
+          echo "version 2" > /tmp/versioned-file
+          mc cp /tmp/versioned-file testminio/$TEST_BUCKET/versioned-object --insecure
+          
+          # Check versions
+          VERSIONS=$(mc ls --versions testminio/$TEST_BUCKET/versioned-object --insecure | wc -l)
+          if [ "$VERSIONS" -ge 2 ]; then
+            echo "✓ Object versioning working ($VERSIONS versions)"
+          else
+            echo "✗ Object versioning not working"
+            exit 1
+          fi
+          
+          # Test 6: Performance under load
+          echo "=== Test 6: Performance Under Load ==="
+          
+          # Create load test script
+          cat > /tmp/load-test.sh << 'EOF'
+          #!/bin/bash
+          TEST_BUCKET=$1
+          DURATION=$2
+          THREAD_ID=$3
+          
+          END_TIME=$(($(date +%s) + DURATION))
+          OPERATIONS=0
+          
+          while [ $(date +%s) -lt $END_TIME ]; do
+            # Generate random data
+            dd if=/dev/urandom of=/tmp/load-test-$THREAD_ID bs=1M count=1 2>/dev/null
+            
+            # Upload
+            mc cp /tmp/load-test-$THREAD_ID testminio/$TEST_BUCKET/load-test-$THREAD_ID-$OPERATIONS --insecure >/dev/null 2>&1
+            
+            # Download
+            mc cp testminio/$TEST_BUCKET/load-test-$THREAD_ID-$OPERATIONS /tmp/load-download-$THREAD_ID --insecure >/dev/null 2>&1
+            
+            # Delete
+            mc rm testminio/$TEST_BUCKET/load-test-$THREAD_ID-$OPERATIONS --insecure >/dev/null 2>&1
+            
+            OPERATIONS=$((OPERATIONS + 1))
+          done
+          
+          echo "Thread $THREAD_ID completed $OPERATIONS operations"
+          EOF
+          
+          chmod +x /tmp/load-test.sh
+          
+          echo "Starting load test with 5 concurrent threads for ${TEST_DURATION_SECONDS}s..."
+          LOAD_START=$(date +%s)
+          
+          for i in $(seq 1 5); do
+            /tmp/load-test.sh $TEST_BUCKET $TEST_DURATION_SECONDS $i &
+          done
+          wait
+          
+          LOAD_END=$(date +%s)
+          LOAD_DURATION=$((LOAD_END - LOAD_START))
+          
+          echo "✓ Load test completed in ${LOAD_DURATION}s"
+          
+          # Test 7: Failure scenarios
+          echo "=== Test 7: Failure Scenarios ==="
+          
+          # Test invalid credentials
+          mc alias set badminio http://$MINIO_ENDPOINT invalid_user invalid_pass --insecure 2>/dev/null
+          mc ls badminio --insecure 2>/dev/null
+          if [ $? -ne 0 ]; then
+            echo "✓ Invalid credentials properly rejected"
+          else
+            echo "✗ Invalid credentials accepted (security issue)"
+            exit 1
+          fi
+          
+          # Test non-existent bucket
+          mc ls testminio/non-existent-bucket --insecure 2>/dev/null
+          if [ $? -ne 0 ]; then
+            echo "✓ Non-existent bucket properly handled"
+          else
+            echo "✗ Non-existent bucket not handled correctly"
+          fi
+          
+          # Test 8: Cleanup
+          echo "=== Test 8: Cleanup ==="
+          
+          # Remove test objects
+          mc rm --recursive --force testminio/$TEST_BUCKET --insecure
+          
+          # Remove test bucket
+          mc rb testminio/$TEST_BUCKET --insecure
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ Cleanup successful"
+          else
+            echo "✗ Cleanup failed"
+            exit 1
+          fi
+          
+          # Test Summary
+          echo "=================================="
+          echo "=== MinIO Integration Tests Summary ==="
+          echo "✓ Basic connectivity"
+          echo "✓ Bucket operations"
+          echo "✓ Object operations (Upload: ${UPLOAD_SPEED}MB/s, Download: ${DOWNLOAD_SPEED}MB/s)"
+          echo "✓ Concurrent operations (${CONCURRENT_THROUGHPUT}MB/s total)"
+          echo "✓ Versioning and policies"
+          echo "✓ Performance under load"
+          echo "✓ Failure scenario handling"
+          echo "✓ Cleanup operations"
+          echo ""
+          echo "All tests passed successfully!"
+          echo "=================================="
+          
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+            ephemeral-storage: 2Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+            ephemeral-storage: 5Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 5Gi
+
+---
+# Service Account for MinIO tests
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: minio-test-sa
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: minio-test
+    app.kubernetes.io/component: integration-test
+    app.kubernetes.io/part-of: its-camera-ai
+automountServiceAccountToken: false

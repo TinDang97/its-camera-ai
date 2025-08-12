@@ -17,6 +17,8 @@ keywords:
   - inference
   - pytorch
   - kubernetes
+  - object-storage
+  - minio
 annotations:
   category: Analytics
   licenses: MIT
@@ -33,3 +35,7 @@ dependencies:
     version: "24.0.1"
     repository: "https://charts.bitnami.com/bitnami"
     condition: kafka.enabled
+  - name: minio
+    version: "12.8.12"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: minio.enabled

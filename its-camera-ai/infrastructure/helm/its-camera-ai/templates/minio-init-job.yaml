@@ -1,0 +1,211 @@
+{{- if .Values.minio.enabled }}
+# MinIO Initialization Job
+# Creates buckets, sets policies, and configures lifecycle rules
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "its-camera-ai.fullname" . }}-minio-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "its-camera-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "its-camera-ai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio-init
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/minio-config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "its-camera-ai.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      restartPolicy: OnFailure
+      containers:
+      - name: minio-init
+        image: minio/mc:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MINIO_ENDPOINT
+          value: "{{ include "its-camera-ai.fullname" . }}-minio:9000"
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "its-camera-ai.fullname" . }}-minio
+              key: root-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "its-camera-ai.fullname" . }}-minio
+              key: root-password
+        - name: BUCKETS
+          value: {{ .Values.minio.defaultBuckets | quote }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Waiting for MinIO to be ready..."
+          until mc ready myminio --insecure; do
+            echo "Configuring MinIO client..."
+            mc alias set myminio http://$MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY --insecure || true
+            echo "Waiting for MinIO service..."
+            sleep 5
+          done
+          
+          echo "MinIO is ready. Creating buckets..."
+          
+          # Create buckets
+          IFS=',' read -ra BUCKET_ARRAY <<< "$BUCKETS"
+          for bucket in "${BUCKET_ARRAY[@]}"; do
+            echo "Creating bucket: $bucket"
+            mc mb myminio/$bucket --ignore-existing --insecure
+          done
+          
+          echo "Setting bucket policies..."
+          
+          # Set bucket policies based on bucket type
+          mc policy set download myminio/ml-models --insecure
+          mc policy set private myminio/camera-streams --insecure
+          mc policy set private myminio/analytics --insecure
+          mc policy set private myminio/backups --insecure
+          mc policy set public myminio/temp --insecure
+          
+          {{- if .Values.minio.bucketLifecycle.enabled }}
+          echo "Configuring lifecycle policies..."
+          
+          # Lifecycle policies
+          {{- range $bucket, $policy := .Values.minio.bucketLifecycle.policies }}
+          echo "Setting lifecycle policy for {{ $bucket }}: {{ $policy.expirationDays }} days"
+          mc ilm add --expiry-days {{ $policy.expirationDays }} myminio/{{ $bucket }} --insecure
+          {{- end }}
+          {{- end }}
+          
+          echo "Enabling versioning for critical buckets..."
+          mc version enable myminio/ml-models --insecure
+          mc version enable myminio/backups --insecure
+          
+          echo "Creating service accounts..."
+          
+          # Create service accounts for different services
+          mc admin user add myminio stream-processor $(openssl rand -hex 32) --insecure || true
+          mc admin user add myminio ml-service $(openssl rand -hex 32) --insecure || true
+          mc admin user add myminio analytics-service $(openssl rand -hex 32) --insecure || true
+          
+          # Create policies
+          cat > /tmp/stream-processor-policy.json << EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "s3:DeleteObject"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::camera-streams/*",
+                  "arn:aws:s3:::temp/*"
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:ListBucket"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::camera-streams",
+                  "arn:aws:s3:::temp"
+                ]
+              }
+            ]
+          }
+          EOF
+          
+          cat > /tmp/ml-service-policy.json << EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "s3:DeleteObject",
+                  "s3:ListBucket"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::ml-models",
+                  "arn:aws:s3:::ml-models/*"
+                ]
+              }
+            ]
+          }
+          EOF
+          
+          cat > /tmp/analytics-policy.json << EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "s3:DeleteObject",
+                  "s3:ListBucket"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::analytics",
+                  "arn:aws:s3:::analytics/*",
+                  "arn:aws:s3:::camera-streams/*"
+                ]
+              }
+            ]
+          }
+          EOF
+          
+          # Apply policies
+          mc admin policy add myminio stream-processor-policy /tmp/stream-processor-policy.json --insecure || true
+          mc admin policy add myminio ml-service-policy /tmp/ml-service-policy.json --insecure || true
+          mc admin policy add myminio analytics-policy /tmp/analytics-policy.json --insecure || true
+          
+          # Attach policies to users
+          mc admin policy set myminio stream-processor-policy user=stream-processor --insecure || true
+          mc admin policy set myminio ml-service-policy user=ml-service --insecure || true
+          mc admin policy set myminio analytics-policy user=analytics-service --insecure || true
+          
+          echo "MinIO initialization completed successfully!"
+          
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
+{{- end }}

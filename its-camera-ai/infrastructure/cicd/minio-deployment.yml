@@ -1,0 +1,341 @@
+# MinIO Deployment Pipeline for ITS Camera AI
+# Automated deployment, testing, and monitoring setup
+
+name: MinIO Infrastructure Deployment
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'infrastructure/minio/**'
+      - 'infrastructure/terraform/minio-infrastructure.tf'
+      - 'infrastructure/kubernetes/minio-*.yaml'
+      - 'infrastructure/helm/its-camera-ai/templates/minio-*.yaml'
+      - 'docker-compose.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infrastructure/minio/**'
+      - 'infrastructure/terraform/minio-infrastructure.tf'
+      - 'infrastructure/kubernetes/minio-*.yaml'
+      - 'infrastructure/helm/its-camera-ai/templates/minio-*.yaml'
+
+env:
+  TERRAFORM_VERSION: "1.6.0"
+  HELM_VERSION: "3.13.0"
+  KUBECTL_VERSION: "1.28.0"
+
+jobs:
+  validate:
+    name: Validate MinIO Configuration
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: ${{ env.HELM_VERSION }}
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: ${{ env.KUBECTL_VERSION }}
+
+    - name: Validate Terraform configuration
+      run: |
+        cd infrastructure/terraform
+        terraform init -backend=false
+        terraform validate
+        terraform fmt -check
+
+    - name: Validate Kubernetes manifests
+      run: |
+        # Validate YAML syntax
+        find infrastructure/kubernetes -name "minio-*.yaml" -exec kubectl --dry-run=client apply -f {} \;
+
+    - name: Validate Helm templates
+      run: |
+        cd infrastructure/helm/its-camera-ai
+        helm dependency update
+        helm template . --values values.yaml --set minio.enabled=true --validate
+
+    - name: Lint MinIO configuration
+      run: |
+        # Check for security best practices
+        if grep -r "minioadmin" infrastructure/ --exclude-dir=.git; then
+          echo "Error: Default MinIO credentials found!"
+          exit 1
+        fi
+        
+        # Validate storage sizes
+        if ! grep -q "fast-ssd\|gp3\|premium-ssd" infrastructure/; then
+          echo "Warning: Consider using high-performance storage class"
+        fi
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy security scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        scan-ref: 'infrastructure/'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Check for hardcoded secrets
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./infrastructure/
+        base: main
+        head: HEAD
+
+  test-docker-compose:
+    name: Test Docker Compose Setup
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create test directories
+      run: |
+        mkdir -p data/minio
+        mkdir -p infrastructure/minio/policies
+
+    - name: Start MinIO with Docker Compose
+      run: |
+        # Set environment variables for testing
+        export MINIO_ROOT_USER=test_admin
+        export MINIO_ROOT_PASSWORD=TestSecurePassword123!
+        
+        # Start services
+        docker-compose up -d minio
+        
+        # Wait for MinIO to be ready
+        timeout 60 bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
+
+    - name: Test MinIO functionality
+      run: |
+        # Install MinIO client
+        curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+        chmod +x mc
+        
+        # Configure client
+        ./mc alias set testminio http://localhost:9000 test_admin TestSecurePassword123!
+        
+        # Test bucket operations
+        ./mc mb testminio/test-bucket
+        echo "Hello MinIO" | ./mc pipe testminio/test-bucket/test-object
+        ./mc cat testminio/test-bucket/test-object
+        ./mc rm testminio/test-bucket/test-object
+        ./mc rb testminio/test-bucket
+
+    - name: Test MinIO initialization
+      run: |
+        # Start init container
+        docker-compose up -d minio-init
+        
+        # Wait for initialization to complete
+        docker-compose logs minio-init
+        
+        # Verify buckets were created
+        ./mc ls testminio/ | grep -E "(camera-streams|ml-models|analytics|backups|temp)"
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker-compose down -v
+        docker system prune -f
+
+  deploy-development:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan, test-docker-compose]
+    if: github.ref == 'refs/heads/develop'
+    environment: development
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > ~/.kube/config
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+    - name: Deploy with Terraform
+      env:
+        TF_VAR_environment: "development"
+        TF_VAR_replica_count: 4
+        TF_VAR_storage_size_per_node: "100Gi"
+        TF_VAR_minio_root_password: ${{ secrets.MINIO_ROOT_PASSWORD_DEV }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        cd infrastructure/terraform
+        terraform init
+        terraform plan -var-file="environments/development.tfvars"
+        terraform apply -auto-approve -var-file="environments/development.tfvars"
+
+    - name: Verify deployment
+      run: |
+        # Wait for pods to be ready
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=minio -n its-camera-ai --timeout=300s
+        
+        # Check service endpoints
+        kubectl get svc -n its-camera-ai minio-service
+        
+        # Test connectivity
+        kubectl run test-pod --image=curlimages/curl --rm -i --restart=Never -- \
+          curl -f http://minio-service.its-camera-ai.svc.cluster.local:9000/minio/health/live
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: deploy-development
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+    - name: Deploy with Terraform
+      env:
+        TF_VAR_environment: "staging"
+        TF_VAR_replica_count: 6
+        TF_VAR_storage_size_per_node: "250Gi"
+        TF_VAR_minio_root_password: ${{ secrets.MINIO_ROOT_PASSWORD_STAGING }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        cd infrastructure/terraform
+        terraform init
+        terraform plan -var-file="environments/staging.tfvars"
+        terraform apply -auto-approve -var-file="environments/staging.tfvars"
+
+    - name: Run integration tests
+      run: |
+        # Wait for MinIO to be ready
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=minio -n its-camera-ai --timeout=600s
+        
+        # Run comprehensive tests
+        kubectl apply -f infrastructure/testing/minio-integration-tests.yaml
+        kubectl wait --for=condition=complete job/minio-integration-test -n its-camera-ai --timeout=300s
+        kubectl logs job/minio-integration-test -n its-camera-ai
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+    - name: Deploy with Terraform
+      env:
+        TF_VAR_environment: "production"
+        TF_VAR_replica_count: 8
+        TF_VAR_storage_size_per_node: "500Gi"
+        TF_VAR_minio_root_password: ${{ secrets.MINIO_ROOT_PASSWORD_PROD }}
+        TF_VAR_enable_backup: true
+        TF_VAR_enable_monitoring: true
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        cd infrastructure/terraform
+        terraform init
+        terraform plan -var-file="environments/production.tfvars"
+        terraform apply -auto-approve -var-file="environments/production.tfvars"
+
+    - name: Verify production deployment
+      run: |
+        # Wait for all pods to be ready
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=minio -n its-camera-ai --timeout=900s
+        
+        # Check cluster health
+        kubectl get pods -n its-camera-ai -l app.kubernetes.io/name=minio
+        kubectl get pvc -n its-camera-ai
+        
+        # Verify distributed mode
+        kubectl exec -n its-camera-ai minio-0 -- mc admin info myminio
+        
+        # Check monitoring setup
+        kubectl get servicemonitor -n its-camera-ai minio-metrics
+
+    - name: Setup monitoring alerts
+      run: |
+        # Apply production alerting rules
+        kubectl apply -f infrastructure/monitoring/minio-production-alerts.yaml
+        
+        # Verify Prometheus is scraping metrics
+        kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+        sleep 10
+        curl -s "http://localhost:9090/api/v1/query?query=up{job='minio'}" | jq '.data.result | length'
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-development, deploy-staging, deploy-production]
+    if: always()
+    steps:
+    - name: Notify Slack
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#its-camera-ai-deployments'
+        text: |
+          MinIO Infrastructure Deployment: ${{ job.status }}
+          
+          Environment: ${{ github.ref == 'refs/heads/develop' && 'Development' || 'Production' }}
+          Commit: ${{ github.sha }}
+          Actor: ${{ github.actor }}
+          
+          View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      if: always()

@@ -107,8 +107,7 @@ class MutualTLSManager:
         """Initialize Certificate Authority for internal services."""
         # Generate CA private key
         self.ca_private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=4096
+            public_exponent=65537, key_size=4096
         )
 
         # Create CA certificate
@@ -151,14 +150,14 @@ class MutualTLSManager:
         ca_cert_path.chmod(0o644)
 
     def generate_service_certificate(
-        self, service_name: str, dns_names: list[str] = None, ip_addresses: list[str] = None
+        self,
+        service_name: str,
+        dns_names: list[str] = None,
+        ip_addresses: list[str] = None,
     ) -> dict[str, str]:
         """Generate certificate for service with mutual TLS."""
         # Generate service private key
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
-        )
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
         # Create subject alternative names
         san_list = []
@@ -166,6 +165,7 @@ class MutualTLSManager:
             san_list.extend([DNSName(name) for name in dns_names])
         if ip_addresses:
             from ipaddress import ip_address
+
             san_list.extend([ip_address(ip) for ip in ip_addresses])
 
         # Create service certificate
@@ -356,10 +356,14 @@ class EncryptionManager:
             return True
         return False
 
-    def encrypt_at_rest(self, data: bytes, classification: SecurityLevel) -> dict[str, Any]:
+    def encrypt_at_rest(
+        self, data: bytes, classification: SecurityLevel
+    ) -> dict[str, Any]:
         """Encrypt data for storage with metadata."""
         key_id = f"key_{int(time.time())}"
-        encrypted_data = self.encrypt_data(data.decode() if isinstance(data, bytes) else data, classification)
+        encrypted_data = self.encrypt_data(
+            data.decode() if isinstance(data, bytes) else data, classification
+        )
 
         return {
             **encrypted_data,
@@ -1018,7 +1022,9 @@ def create_security_middleware(_security_system: dict[str, Any]):
             logger.error("Security middleware error", error=str(e))
             from fastapi import HTTPException
 
-            raise HTTPException(status_code=500, detail="Internal security error") from e
+            raise HTTPException(
+                status_code=500, detail="Internal security error"
+            ) from e
 
     return security_middleware
 
