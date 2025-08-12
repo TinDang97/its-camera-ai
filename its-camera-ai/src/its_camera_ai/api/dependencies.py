@@ -24,6 +24,9 @@ from ..core.logging import get_logger
 from ..models.user import User
 from ..services.auth import AuthService
 from ..services.cache import CacheService
+from ..services.camera_service import CameraService
+from ..services.frame_service import DetectionService, FrameService
+from ..services.metrics_service import MetricsService
 
 logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
@@ -637,8 +640,135 @@ def get_task_manager() -> BackgroundTaskManager:
     return _task_manager
 
 
+# Database Service Dependencies
+async def get_camera_service(db: AsyncSession = Depends(get_db)) -> CameraService:
+    """Get camera service dependency."""
+    return CameraService(db)
+
+
+async def get_frame_service(db: AsyncSession = Depends(get_db)) -> FrameService:
+    """Get frame service dependency."""
+    return FrameService(db)
+
+
+async def get_detection_service(db: AsyncSession = Depends(get_db)) -> DetectionService:
+    """Get detection service dependency."""
+    return DetectionService(db)
+
+
+async def get_metrics_service(db: AsyncSession = Depends(get_db)) -> MetricsService:
+    """Get metrics service dependency."""
+    return MetricsService(db)
+
+
+# Service Factory for complex operations
+class ServiceFactory:
+    """Factory for creating multiple services with shared session."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self._camera_service: CameraService | None = None
+        self._frame_service: FrameService | None = None
+        self._detection_service: DetectionService | None = None
+        self._metrics_service: MetricsService | None = None
+
+    @property
+    def camera_service(self) -> CameraService:
+        """Get camera service instance."""
+        if self._camera_service is None:
+            self._camera_service = CameraService(self.session)
+        return self._camera_service
+
+    @property
+    def frame_service(self) -> FrameService:
+        """Get frame service instance."""
+        if self._frame_service is None:
+            self._frame_service = FrameService(self.session)
+        return self._frame_service
+
+    @property
+    def detection_service(self) -> DetectionService:
+        """Get detection service instance."""
+        if self._detection_service is None:
+            self._detection_service = DetectionService(self.session)
+        return self._detection_service
+
+    @property
+    def metrics_service(self) -> MetricsService:
+        """Get metrics service instance."""
+        if self._metrics_service is None:
+            self._metrics_service = MetricsService(self.session)
+        return self._metrics_service
+
+
+async def get_service_factory(db: AsyncSession = Depends(get_db)) -> ServiceFactory:
+    """Get service factory dependency for complex operations."""
+    return ServiceFactory(db)
+
+
+# Pagination helpers
+class PaginationParams:
+    """Pagination parameters for list endpoints."""
+
+    def __init__(
+        self,
+        page: int = 1,
+        size: int = 20,
+        order_by: str = "created_at",
+        order_desc: bool = True,
+    ):
+        if page < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Page number must be >= 1"
+            )
+        if size < 1 or size > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Page size must be between 1 and 100"
+            )
+
+        self.page = page
+        self.size = size
+        self.order_by = order_by
+        self.order_desc = order_desc
+
+    @property
+    def offset(self) -> int:
+        """Calculate offset from page and size."""
+        return (self.page - 1) * self.size
+
+
+def get_pagination_params(
+    page: int = 1,
+    size: int = 20,
+    order_by: str = "created_at",
+    order_desc: bool = True,
+) -> PaginationParams:
+    """Get pagination parameters dependency."""
+    return PaginationParams(page, size, order_by, order_desc)
+
+
+# Error handling helpers
+def handle_database_error(error: Exception) -> HTTPException:
+    """Convert database errors to HTTP exceptions."""
+    if isinstance(error, DatabaseError):
+        logger.error("Database operation error", error=str(error))
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database operation failed"
+        )
+    else:
+        logger.error("Unexpected service error", error=str(error))
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
 # Common rate limiters
 rate_limit_strict = RateLimiter(calls=10, period=60)  # 10 calls per minute
 rate_limit_normal = RateLimiter(calls=100, period=60)  # 100 calls per minute
 rate_limit_relaxed = RateLimiter(calls=1000, period=60)  # 1000 calls per minute
 rate_limit_upload = RateLimiter(calls=5, period=3600)  # 5 uploads per hour
+rate_limit_batch = RateLimiter(calls=50, period=60)  # 50 batch operations per minute

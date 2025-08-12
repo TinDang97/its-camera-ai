@@ -1,6 +1,47 @@
-"""Data models for ITS Camera AI system."""
+"""Database models for ITS Camera AI system.
+
+Provides SQLAlchemy 2.0 models for high-throughput camera registry,
+frame metadata processing, detection results, and system monitoring.
+"""
 
 from .base import BaseModel
-from .database import get_database_session
+from .camera import Camera, CameraSettings, CameraStatus, CameraType, StreamProtocol
+from .database import DatabaseManager, create_database_engine, get_database_session
+from .detection_result import DetectionClass, DetectionResult, VehicleType
+from .frame_metadata import FrameMetadata, FrameQuality, ProcessingStatus
+from .system_metrics import AggregatedMetrics, MetricType, MetricUnit, SystemMetrics
+from .user import User
 
-__all__ = ["BaseModel", "get_database_session"]
+__all__ = [
+    # Base infrastructure
+    "BaseModel",
+    "DatabaseManager",
+    "create_database_engine",
+    "get_database_session",
+
+    # User management
+    "User",
+
+    # Camera registry
+    "Camera",
+    "CameraSettings",
+    "CameraStatus",
+    "CameraType",
+    "StreamProtocol",
+
+    # Frame processing
+    "FrameMetadata",
+    "FrameQuality",
+    "ProcessingStatus",
+
+    # Detection results
+    "DetectionResult",
+    "DetectionClass",
+    "VehicleType",
+
+    # System monitoring
+    "SystemMetrics",
+    "AggregatedMetrics",
+    "MetricType",
+    "MetricUnit",
+]

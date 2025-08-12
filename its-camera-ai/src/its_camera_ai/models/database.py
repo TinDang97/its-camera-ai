@@ -31,16 +31,40 @@ class DatabaseManager:
         self.session_factory: async_sessionmaker[AsyncSession] | None = None
 
     async def initialize(self) -> None:
-        """Initialize database engine and session factory."""
+        """Initialize database engine and session factory with high-throughput optimizations."""
         try:
+            # High-throughput engine configuration
+            engine_kwargs = {
+                "echo": self.settings.database.echo,
+                "pool_size": self.settings.database.pool_size,
+                "max_overflow": self.settings.database.max_overflow,
+                "pool_timeout": self.settings.database.pool_timeout,
+                "pool_recycle": 3600,  # Recycle connections every hour
+                "pool_pre_ping": True,  # Validate connections before use
+            }
+
+            # Production optimizations
+            if self.settings.is_production():
+                engine_kwargs.update({
+                    # Increase connection limits for high throughput
+                    "pool_size": min(self.settings.database.pool_size * 2, 50),
+                    "max_overflow": min(self.settings.database.max_overflow * 2, 100),
+                    # Optimize for bulk operations
+                    "connect_args": {
+                        "server_settings": {
+                            "jit": "off",  # Disable JIT for consistent performance
+                            "application_name": "ITS-Camera-AI",
+                        }
+                    },
+                })
+            else:
+                # Development configuration
+                engine_kwargs["poolclass"] = NullPool
+
             # Create async engine
             self.engine = create_async_engine(
                 self.settings.get_database_url(async_driver=True),
-                echo=self.settings.database.echo,
-                pool_size=self.settings.database.pool_size,
-                max_overflow=self.settings.database.max_overflow,
-                pool_timeout=self.settings.database.pool_timeout,
-                poolclass=NullPool if self.settings.is_development() else None,
+                **engine_kwargs
             )
 
             # Create session factory

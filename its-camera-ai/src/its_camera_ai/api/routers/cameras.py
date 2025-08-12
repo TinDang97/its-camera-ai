@@ -5,7 +5,6 @@ health monitoring, and batch operations.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -14,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...core.logging import get_logger
 from ...models.user import User
 from ...services.cache import CacheService
+from ...services.camera_service import CameraService
 from ..dependencies import (
     RateLimiter,
     get_cache_service,
@@ -42,8 +42,14 @@ router = APIRouter()
 batch_operation_rate_limit = RateLimiter(calls=5, period=300)  # 5 batch ops per 5 min
 stream_control_rate_limit = RateLimiter(calls=20, period=60)  # 20 stream ops per min
 
-# Simulated camera database (in real implementation, use proper SQLAlchemy models)
-cameras_db: dict[str, dict[str, Any]] = {}
+# Database service dependency
+async def get_camera_service(db: AsyncSession = Depends(get_db)) -> CameraService:
+    """Get camera service instance."""
+    return CameraService(db)
+
+
+# Remove simulated database - now using real database service
+# cameras_db: dict[str, dict[str, Any]] = {}
 stream_health_db: dict[str, StreamHealth] = {}
 
 
@@ -111,7 +117,7 @@ async def list_cameras(
     tags: list[str] | None = Query(None, description="Filter by tags"),
     search: str | None = Query(None, description="Search in name and description"),
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
 ) -> PaginatedResponse[CameraResponse]:
     """List cameras with pagination and filtering.

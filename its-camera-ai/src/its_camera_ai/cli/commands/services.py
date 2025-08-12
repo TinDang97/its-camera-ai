@@ -13,6 +13,9 @@ from rich.table import Table
 
 from ...core.config import get_settings
 from ...core.logging import setup_logging
+
+# from ..backend.orchestrator import ServiceOrchestrator  # Avoid circular import
+from ..backend.service_discovery import ServiceDiscovery
 from ..utils import (
     console,
     create_progress,
@@ -341,6 +344,252 @@ async def _get_service_status() -> list[dict]:
     ]
 
     return services
+
+
+@app.command()
+@handle_async_command
+async def discover(
+    register: bool = typer.Option(
+        False, "--register", "-r", help="Register discovered services"
+    ),
+    monitor: bool = typer.Option(
+        False, "--monitor", "-m", help="Start continuous monitoring"
+    ),
+) -> None:
+    """🔍 Discover backend services.
+    
+    Discover available backend services and optionally register them
+    for monitoring and health checks.
+    """
+    try:
+        async with ServiceDiscovery() as service_discovery:
+            print_info("Discovering backend services...")
+
+            discovered_count = await service_discovery.discover_services()
+            print_success(f"Discovered {discovered_count} services")
+
+            # Get service status
+            services_status = await service_discovery.get_all_services_status()
+
+            # Display discovered services
+            table = Table(title="🔍 Discovered Services")
+            table.add_column("Service", style="cyan")
+            table.add_column("Type", style="blue")
+            table.add_column("URL", style="green")
+            table.add_column("Status", style="bold")
+            table.add_column("Response Time", style="yellow")
+
+            for service_name, status_data in services_status.items():
+                service_type = status_data.get("type", "unknown")
+                url = status_data.get("url", "N/A")
+                is_healthy = status_data.get("is_healthy", False)
+                response_time = status_data.get("response_time_ms")
+
+                status_text = "Healthy" if is_healthy else "Unhealthy"
+                status_color = "green" if is_healthy else "red"
+                response_time_text = f"{response_time:.2f}ms" if response_time else "N/A"
+
+                table.add_row(
+                    service_name,
+                    service_type,
+                    url[:50] + "..." if len(url) > 50 else url,
+                    f"[{status_color}]{status_text}[/{status_color}]",
+                    response_time_text
+                )
+
+            console.print(table)
+
+            if monitor:
+                print_info("Starting continuous service monitoring...")
+                await service_discovery.start_monitoring()
+
+                try:
+                    # Keep monitoring until interrupted
+                    while True:
+                        await asyncio.sleep(30)
+                        print_info("Monitoring services... (Ctrl+C to stop)")
+                except KeyboardInterrupt:
+                    print_info("Stopping service monitoring")
+                finally:
+                    await service_discovery.stop_monitoring()
+
+    except Exception as e:
+        print_error(f"Service discovery failed: {e}")
+
+
+@app.command()
+@handle_async_command
+async def orchestrate(
+    operation: str = typer.Argument(
+        help="Operation to orchestrate (health-check, start-monitoring, maintenance)"
+    ),
+    detailed: bool = typer.Option(
+        False, "--detailed", "-d", help="Show detailed output"
+    ),
+) -> None:
+    """🎭 Orchestrate complex backend operations.
+    
+    Coordinate complex multi-service operations using the service orchestrator.
+    Available operations: health-check, start-monitoring, stop-monitoring, maintenance
+    """
+    try:
+        async with ServiceOrchestrator() as orchestrator:
+            if operation == "health-check":
+                print_info("Running comprehensive system health check...")
+
+                with create_progress() as progress:
+                    task = progress.add_task("Health check in progress...", total=100)
+
+                    health_result = await orchestrator.full_system_health_check()
+                    progress.update(task, completed=100)
+
+                # Display results
+                overall_status = health_result["overall_status"]
+                if overall_status == "healthy":
+                    print_success(f"✅ System health check completed: {overall_status}")
+                elif overall_status == "degraded":
+                    console.print(f"[yellow]⚠️ System health check completed: {overall_status}[/yellow]")
+                else:
+                    print_error(f"❌ System health check completed: {overall_status}")
+
+                if detailed:
+                    # Show component details
+                    console.print("\n[bold]Component Details:[/bold]")
+                    for component, result in health_result["components"].items():
+                        status_color = "green" if result["status"] == "healthy" else "red"
+                        console.print(f"  • {component}: [{status_color}]{result['status']}[/{status_color}] - {result['message']}")
+
+                    # Show summary
+                    summary = health_result["summary"]
+                    console.print("\n[bold]Summary:[/bold]")
+                    console.print(f"  • Health Score: {summary['health_score']}%")
+                    console.print(f"  • Components: {summary['total_components']} total, {summary['healthy_count']} healthy")
+
+            elif operation == "start-monitoring":
+                print_info("Starting all monitoring services...")
+
+                result = await orchestrator.start_monitoring_services()
+
+                if result["status"] == "success":
+                    print_success("✅ All monitoring services started")
+                    if detailed:
+                        for service, status in result["services"].items():
+                            console.print(f"  • {service}: {status}")
+                else:
+                    print_error("❌ Failed to start monitoring services")
+
+            elif operation == "stop-monitoring":
+                print_info("Stopping all monitoring services...")
+
+                result = await orchestrator.stop_monitoring_services()
+
+                if result["status"] == "success":
+                    print_success("✅ All monitoring services stopped")
+                    if detailed:
+                        for service, status in result["services"].items():
+                            console.print(f"  • {service}: {status}")
+                else:
+                    print_error("❌ Failed to stop monitoring services")
+
+            elif operation == "maintenance":
+                print_info("Running system maintenance...")
+
+                maintenance_ops = [
+                    "cleanup_database",
+                    "vacuum_database",
+                    "clear_caches",
+                    "health_check"
+                ]
+
+                with create_progress() as progress:
+                    task = progress.add_task("Maintenance in progress...", total=100)
+
+                    result = await orchestrator.perform_system_maintenance(maintenance_ops)
+                    progress.update(task, completed=100)
+
+                if result["status"] == "success":
+                    print_success(f"✅ Maintenance completed: {result['operations_completed']} operations")
+
+                    if detailed:
+                        console.print("\n[bold]Maintenance Results:[/bold]")
+                        for operation, op_result in result["results"].items():
+                            console.print(f"  • {operation}: {op_result}")
+                else:
+                    print_error("❌ Maintenance failed")
+
+            else:
+                print_error(f"Unknown operation: {operation}")
+                console.print("Available operations: health-check, start-monitoring, stop-monitoring, maintenance")
+
+    except Exception as e:
+        print_error(f"Operation failed: {e}")
+
+
+@app.command()
+@handle_async_command
+async def overview() -> None:
+    """📊 Show comprehensive system overview.
+    
+    Display a comprehensive overview of all backend services,
+    their status, and key metrics.
+    """
+    try:
+        async with ServiceOrchestrator() as orchestrator:
+            print_info("Gathering system overview...")
+
+            # Get system overview
+            overview = orchestrator.get_system_overview()
+
+            # Display orchestrator status
+            console.print("\n[bold]🎭 Orchestrator Status[/bold]")
+            console.print(f"  • Initialized: {'✅' if overview['orchestrator']['initialized'] else '❌'}")
+            console.print(f"  • Services Started: {len(overview['orchestrator']['services_started'])}")
+            console.print(f"  • Active Operations: {overview['orchestrator']['active_operations']}")
+
+            # Display API client status
+            api_stats = overview['api_client']
+            console.print("\n[bold]🌐 API Client Status[/bold]")
+            console.print(f"  • Connected: {'✅' if api_stats['connected'] else '❌'}")
+            console.print(f"  • Base URL: {api_stats['base_url']}")
+            console.print(f"  • Circuit Open: {'⚠️' if api_stats['circuit_open'] else '✅'}")
+            console.print(f"  • Cache Entries: {api_stats['cache_entries']}")
+
+            # Display authentication status
+            auth_info = overview['auth_manager']
+            console.print("\n[bold]🔐 Authentication Status[/bold]")
+            console.print(f"  • Authenticated: {'✅' if auth_info['authenticated'] else '❌'}")
+            if auth_info.get('current_user'):
+                console.print(f"  • Current User: {auth_info['current_user'].get('username', 'Unknown')}")
+
+            # Display database status
+            db_info = overview['database']
+            console.print("\n[bold]🗄️ Database Status[/bold]")
+            console.print(f"  • Connected: {'✅' if db_info['connected'] else '❌'}")
+
+            # Display service discovery status
+            discovery_info = overview['service_discovery']
+            console.print("\n[bold]🔍 Service Discovery Status[/bold]")
+            console.print(f"  • Connected: {'✅' if discovery_info['connected'] else '❌'}")
+            console.print(f"  • Event Handlers: {sum(discovery_info['event_handlers'].values())}")
+            console.print(f"  • Buffer Size: {discovery_info['buffer_size']}")
+
+            # Display queue manager status
+            queue_info = overview['queue_manager']
+            console.print("\n[bold]📋 Queue Manager Status[/bold]")
+            console.print(f"  • Initialized: {'✅' if queue_info['initialized'] else '❌'}")
+            console.print(f"  • Configured Queues: {len(queue_info['configured_queues'])}")
+            console.print(f"  • Registered Handlers: {len(queue_info['registered_handlers'])}")
+
+            # Display metrics collector status
+            metrics_info = overview['metrics_collector']
+            console.print("\n[bold]📈 Metrics Collector Status[/bold]")
+            console.print(f"  • Collecting: {'✅' if metrics_info['collecting'] else '❌'}")
+            console.print(f"  • Total Series: {metrics_info['total_series']}")
+            console.print(f"  • Total Points: {metrics_info['total_points']}")
+            console.print(f"  • Memory Usage: {metrics_info['memory_usage_mb']:.2f} MB")
+
+    except Exception as e:
+        print_error(f"Failed to get system overview: {e}")
 
 
 @app.command()
