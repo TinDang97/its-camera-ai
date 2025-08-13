@@ -26,6 +26,8 @@ from typing import Any
 
 import cv2
 import numpy as np
+import psutil
+import torch
 
 # Internal imports
 from ..core.exceptions import (
@@ -388,8 +390,16 @@ class StreamingDataProcessor(StreamingServiceInterface):
         self.is_running = False
         self.shutdown_event = asyncio.Event()
 
+        # Memory tracking
+        self._memory_tracking_enabled = True
+        self._memory_baseline_mb = self._get_current_memory_usage()
+        self._peak_memory_mb = self._memory_baseline_mb
+        self._frame_buffer_memory_mb = 0.0
+        self._last_memory_check = time.time()
+        self._memory_leak_threshold_mb = 100.0  # Alert if memory grows by >100MB
+
         logger.info(
-            f"StreamingDataProcessor initialized with max_concurrent_streams={max_concurrent_streams}"
+            f"StreamingDataProcessor initialized with max_concurrent_streams={max_concurrent_streams}, baseline_memory={self._memory_baseline_mb:.1f}MB"
         )
 
     async def start(self) -> None:
@@ -734,6 +744,188 @@ class StreamingDataProcessor(StreamingServiceInterface):
             "active_streams": len(self.active_streams),
         }
 
+    def _get_current_memory_usage(self) -> float:
+        """
+        Get current memory usage in MB.
+        
+        Returns comprehensive memory usage including:
+        - Process RSS (Resident Set Size)
+        - GPU memory if available
+        - Frame buffer estimates
+        """
+        try:
+            # Get process memory usage
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            rss_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
+
+            return rss_mb
+
+        except Exception as e:
+            logger.warning(f"Failed to get memory usage: {e}")
+            return 0.0
+
+    def _get_gpu_memory_usage(self) -> dict[str, float]:
+        """Get GPU memory usage if CUDA is available."""
+        gpu_memory = {
+            "allocated_mb": 0.0,
+            "reserved_mb": 0.0,
+            "total_mb": 0.0,
+            "free_mb": 0.0,
+        }
+
+        try:
+            if torch.cuda.is_available():
+                device_count = torch.cuda.device_count()
+                total_allocated = 0.0
+                total_reserved = 0.0
+                total_memory = 0.0
+
+                for i in range(device_count):
+                    allocated = torch.cuda.memory_allocated(i) / (1024 * 1024)
+                    reserved = torch.cuda.memory_reserved(i) / (1024 * 1024)
+                    properties = torch.cuda.get_device_properties(i)
+                    total = properties.total_memory / (1024 * 1024)
+
+                    total_allocated += allocated
+                    total_reserved += reserved
+                    total_memory += total
+
+                gpu_memory.update({
+                    "allocated_mb": total_allocated,
+                    "reserved_mb": total_reserved,
+                    "total_mb": total_memory,
+                    "free_mb": total_memory - total_reserved,
+                })
+
+        except Exception as e:
+            logger.debug(f"GPU memory check failed: {e}")
+
+        return gpu_memory
+
+    def _estimate_frame_buffer_memory(self) -> float:
+        """Estimate memory usage of frame buffers."""
+        try:
+            total_buffer_memory = 0.0
+
+            # Estimate based on registered cameras and their configurations
+            for camera_config in self.registered_cameras.values():
+                # Estimate memory per frame: width * height * channels * bytes_per_pixel
+                width, height = camera_config.resolution
+                bytes_per_frame = width * height * 3 * 1  # RGB, 1 byte per channel
+
+                # Assume we keep ~10 frames in memory per camera (processing pipeline)
+                estimated_buffer_frames = 10
+                buffer_memory_mb = (bytes_per_frame * estimated_buffer_frames) / (1024 * 1024)
+
+                total_buffer_memory += buffer_memory_mb
+
+            # Add Redis queue memory estimation
+            frames_in_queues = self.processing_metrics.get("frames_processed", 0) % 1000  # Rough estimate
+            avg_frame_size_mb = 1.0  # Conservative estimate: 1MB per frame
+            queue_memory_mb = frames_in_queues * avg_frame_size_mb
+
+            total_buffer_memory += queue_memory_mb
+            return total_buffer_memory
+
+        except Exception as e:
+            logger.warning(f"Frame buffer memory estimation failed: {e}")
+            return 0.0
+
+    def _check_memory_leak(self) -> dict[str, Any]:
+        """Check for potential memory leaks."""
+        current_time = time.time()
+        current_memory = self._get_current_memory_usage()
+
+        # Update peak memory
+        if current_memory > self._peak_memory_mb:
+            self._peak_memory_mb = current_memory
+
+        # Calculate memory growth since baseline
+        memory_growth = current_memory - self._memory_baseline_mb
+
+        # Determine if there's a potential leak
+        potential_leak = memory_growth > self._memory_leak_threshold_mb
+
+        # Calculate memory growth rate (MB per hour)
+        time_elapsed_hours = (current_time - self._last_memory_check) / 3600.0
+        growth_rate_mb_per_hour = (memory_growth / max(0.01, time_elapsed_hours))
+
+        leak_status = {
+            "current_memory_mb": current_memory,
+            "baseline_memory_mb": self._memory_baseline_mb,
+            "peak_memory_mb": self._peak_memory_mb,
+            "memory_growth_mb": memory_growth,
+            "growth_rate_mb_per_hour": growth_rate_mb_per_hour,
+            "potential_leak_detected": potential_leak,
+            "leak_threshold_mb": self._memory_leak_threshold_mb,
+            "time_since_start_hours": time_elapsed_hours,
+        }
+
+        if potential_leak:
+            logger.warning(
+                f"Potential memory leak detected: {memory_growth:.1f}MB growth "
+                f"(rate: {growth_rate_mb_per_hour:.1f}MB/hour)"
+            )
+
+        return leak_status
+
+    def get_comprehensive_memory_status(self) -> dict[str, Any]:
+        """Get comprehensive memory status including leak detection."""
+        if not self._memory_tracking_enabled:
+            return {"tracking_enabled": False}
+
+        try:
+            # Get current memory metrics
+            current_memory = self._get_current_memory_usage()
+            gpu_memory = self._get_gpu_memory_usage()
+            frame_buffer_memory = self._estimate_frame_buffer_memory()
+            leak_status = self._check_memory_leak()
+
+            # System memory information
+            system_memory = psutil.virtual_memory()
+
+            # Memory efficiency metrics
+            active_cameras = len(self.active_streams)
+            memory_per_camera = current_memory / max(1, active_cameras)
+
+            memory_status = {
+                "tracking_enabled": True,
+                "timestamp": time.time(),
+                "process_memory": {
+                    "current_mb": current_memory,
+                    "peak_mb": self._peak_memory_mb,
+                    "baseline_mb": self._memory_baseline_mb,
+                },
+                "gpu_memory": gpu_memory,
+                "frame_buffers": {
+                    "estimated_mb": frame_buffer_memory,
+                    "active_cameras": active_cameras,
+                    "memory_per_camera_mb": memory_per_camera,
+                },
+                "system_memory": {
+                    "total_mb": system_memory.total / (1024 * 1024),
+                    "available_mb": system_memory.available / (1024 * 1024),
+                    "used_percent": system_memory.percent,
+                },
+                "leak_detection": leak_status,
+                "efficiency_metrics": {
+                    "memory_per_camera_mb": memory_per_camera,
+                    "frames_per_mb": self.processing_metrics.get("frames_processed", 0) / max(1, current_memory),
+                    "memory_efficiency_score": min(1.0, 100.0 / max(1, current_memory)),  # Higher is better
+                },
+            }
+
+            return memory_status
+
+        except Exception as e:
+            logger.error(f"Memory status check failed: {e}")
+            return {
+                "tracking_enabled": True,
+                "error": str(e),
+                "timestamp": time.time(),
+            }
+
     async def get_health_status(self) -> dict[str, Any]:
         """Get comprehensive health status."""
         redis_health = (
@@ -742,13 +934,52 @@ class StreamingDataProcessor(StreamingServiceInterface):
             else {"status": "unavailable"}
         )
 
+        # Get comprehensive memory status
+        memory_status = self.get_comprehensive_memory_status()
+
+        # Extract key memory metrics for backward compatibility
+        memory_usage_mb = memory_status.get("process_memory", {}).get("current_mb", 0.0)
+
+        # Determine overall service health based on memory and other factors
+        service_health = "healthy"
+        health_issues = []
+
+        if not self.is_running:
+            service_health = "stopped"
+        else:
+            # Check memory health
+            if memory_status.get("leak_detection", {}).get("potential_leak_detected", False):
+                service_health = "degraded"
+                health_issues.append("Memory leak detected")
+
+            # Check GPU memory if available
+            gpu_memory = memory_status.get("gpu_memory", {})
+            if gpu_memory.get("total_mb", 0) > 0:
+                gpu_utilization = (gpu_memory.get("reserved_mb", 0) / gpu_memory.get("total_mb", 1)) * 100
+                if gpu_utilization > 95:
+                    service_health = "degraded"
+                    health_issues.append("High GPU memory usage")
+
+            # Check system memory
+            system_memory = memory_status.get("system_memory", {})
+            if system_memory.get("used_percent", 0) > 90:
+                service_health = "degraded"
+                health_issues.append("High system memory usage")
+
+            # Check Redis health
+            if redis_health.get("status") not in ["healthy", "available"]:
+                service_health = "degraded"
+                health_issues.append("Redis connectivity issues")
+
         return {
-            "service_status": "healthy" if self.is_running else "stopped",
+            "service_status": service_health,
+            "health_issues": health_issues,
             "redis_status": redis_health.get("status", "unknown"),
             "processing_metrics": self.get_processing_metrics(),
             "registered_cameras": len(self.registered_cameras),
             "active_streams": len(self.active_streams),
-            "memory_usage_mb": 0,  # TODO: Implement memory tracking
+            "memory_usage_mb": round(memory_usage_mb, 2),
+            "comprehensive_memory_status": memory_status,
             "timestamp": time.time(),
         }
 

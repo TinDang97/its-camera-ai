@@ -34,6 +34,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import psutil
 import torch
 from ultralytics import YOLO
 
@@ -905,10 +906,16 @@ class PostProcessor:
             VehicleClass.TRUCK: (80, 600),
         }
 
+        # CPU monitoring state (thread-safe)
+        self._cpu_monitor_interval = 0.1  # 100ms sampling
+        self._last_cpu_check = 0.0
+        self._cached_cpu_utilization = 0.0
+
     def process_detections(
         self,
         detection_result: DetectionResult,
         preprocessing_metadata: dict[str, Any],
+        batch_size_used: int = 1,
     ) -> VisionResult:
         """
         Process raw detections into structured traffic analysis result.
@@ -936,6 +943,9 @@ class PostProcessor:
 
         processing_time = (time.time() - start_time) * 1000
 
+        # Get current CPU utilization
+        cpu_utilization = self._get_cpu_utilization()
+
         # Create comprehensive result
         vision_result = VisionResult(
             detections=structured_detections,
@@ -953,8 +963,8 @@ class PostProcessor:
             detection_density=quality_metrics["detection_density"],
             processing_quality_score=quality_metrics["processing_quality"],
             gpu_memory_used_mb=detection_result.gpu_memory_used_mb,
-            cpu_utilization=0.0,  # TODO: Implement CPU monitoring
-            batch_size_used=1,  # TODO: Track actual batch size
+            cpu_utilization=cpu_utilization,
+            batch_size_used=batch_size_used,
         )
 
         return vision_result
@@ -1175,6 +1185,34 @@ class PostProcessor:
             "processing_quality": float(processing_quality),
         }
 
+    def _get_cpu_utilization(self) -> float:
+        """
+        Get current CPU utilization with caching for performance.
+        
+        Uses a cached value to avoid frequent system calls during high-throughput processing.
+        Thread-safe implementation for concurrent access.
+        """
+        current_time = time.time()
+
+        # Use cached value if within sampling interval (performance optimization)
+        if current_time - self._last_cpu_check < self._cpu_monitor_interval:
+            return self._cached_cpu_utilization
+
+        try:
+            # Get CPU utilization (non-blocking, interval=None for immediate reading)
+            cpu_percent = psutil.cpu_percent(interval=None)
+
+            # Update cache
+            self._cached_cpu_utilization = cpu_percent
+            self._last_cpu_check = current_time
+
+            return cpu_percent
+
+        except Exception as e:
+            logger.warning(f"Failed to get CPU utilization: {e}")
+            # Return cached value or default on error
+            return self._cached_cpu_utilization if self._cached_cpu_utilization > 0 else 0.0
+
 
 class PerformanceMonitor:
     """Real-time performance monitoring and alerting system."""
@@ -1188,6 +1226,8 @@ class PerformanceMonitor:
         self.throughput_history: list[float] = []
         self.accuracy_history: list[float] = []
         self.memory_usage_history: list[float] = []
+        self.cpu_utilization_history: list[float] = []
+        self.batch_size_history: list[int] = []
 
         # Alert thresholds
         self.latency_threshold = config.target_latency_ms * 1.2  # 20% tolerance
@@ -1215,6 +1255,10 @@ class PerformanceMonitor:
         # Record memory usage
         self.memory_usage_history.append(vision_result.gpu_memory_used_mb)
 
+        # Record CPU utilization and batch size
+        self.cpu_utilization_history.append(vision_result.cpu_utilization)
+        self.batch_size_history.append(vision_result.batch_size_used)
+
         # Update counters
         self.total_processed_frames += 1
 
@@ -1224,6 +1268,8 @@ class PerformanceMonitor:
             self.latency_history = self.latency_history[-max_history // 2 :]
             self.accuracy_history = self.accuracy_history[-max_history // 2 :]
             self.memory_usage_history = self.memory_usage_history[-max_history // 2 :]
+            self.cpu_utilization_history = self.cpu_utilization_history[-max_history // 2 :]
+            self.batch_size_history = self.batch_size_history[-max_history // 2 :]
 
     def calculate_throughput(self) -> float:
         """Calculate current throughput in FPS."""
@@ -1279,6 +1325,17 @@ class PerformanceMonitor:
                 "avg_usage_mb": np.mean(self.memory_usage_history),
                 "max_usage_mb": np.max(self.memory_usage_history),
                 "threshold_mb": self.memory_threshold,
+            },
+            "cpu": {
+                "avg_utilization_percent": np.mean(self.cpu_utilization_history) if self.cpu_utilization_history else 0.0,
+                "max_utilization_percent": np.max(self.cpu_utilization_history) if self.cpu_utilization_history else 0.0,
+                "p95_utilization_percent": np.percentile(self.cpu_utilization_history, 95) if self.cpu_utilization_history else 0.0,
+            },
+            "batch_processing": {
+                "avg_batch_size": np.mean(self.batch_size_history) if self.batch_size_history else 0.0,
+                "max_batch_size": np.max(self.batch_size_history) if self.batch_size_history else 0,
+                "batch_efficiency": np.mean([bs for bs in self.batch_size_history if bs > 1]) if any(bs > 1 for bs in self.batch_size_history) else 0.0,
+                "single_frame_ratio": sum(1 for bs in self.batch_size_history if bs == 1) / max(1, len(self.batch_size_history)) if self.batch_size_history else 1.0,
             },
             "system": {
                 "total_frames_processed": self.total_processed_frames,
@@ -1355,6 +1412,8 @@ class PerformanceMonitor:
         self.throughput_history.clear()
         self.accuracy_history.clear()
         self.memory_usage_history.clear()
+        self.cpu_utilization_history.clear()
+        self.batch_size_history.clear()
         self.total_processed_frames = 0
         self.alerts_generated = 0
         self.last_metrics_time = time.time()
@@ -1462,7 +1521,7 @@ class CoreVisionEngine:
 
             # Stage 3: Post-processing
             vision_result = self.post_processor.process_detections(
-                detection_result, preprocessing_metadata
+                detection_result, preprocessing_metadata, batch_size_used=1
             )
 
             # Record performance metrics
@@ -1528,9 +1587,10 @@ class CoreVisionEngine:
 
             # Post-process each result
             vision_results = []
+            actual_batch_size = len(frames)
             for i, detection_result in enumerate(detection_results):
                 vision_result = self.post_processor.process_detections(
-                    detection_result, preprocessing_metadata[i]
+                    detection_result, preprocessing_metadata[i], batch_size_used=actual_batch_size
                 )
                 vision_results.append(vision_result)
 

@@ -48,37 +48,176 @@ async def get_camera_service(db: AsyncSession = Depends(get_db)) -> CameraServic
     return CameraService(db)
 
 
-# In-memory stream health cache (TODO: move to Redis)
-stream_health_db: dict[str, StreamHealth] = {}
-
-
-async def check_stream_health(_camera_id: str, _stream_url: str) -> StreamHealth:
-    """Check the health of a camera stream.
+async def check_stream_health(camera_id: str, stream_url: str, cache: CacheService) -> StreamHealth:
+    """Check the health of a camera stream with Redis caching.
 
     Args:
         camera_id: Camera identifier
         stream_url: Stream URL to check
+        cache: Redis cache service
 
     Returns:
-        StreamHealth: Stream health metrics
+        StreamHealth: Stream health status and metrics
     """
-    # TODO: Implement actual stream health checking
-    # This would involve connecting to the stream and measuring metrics
-    import random
+    # Build cache key for stream health
+    cache_key = f"stream_health:{camera_id}"
 
-    # Simulate health check
-    is_connected = random.choice([True, True, True, False])  # 75% uptime
+    try:
+        # Try to get cached health status
+        cached_health = await cache.get_json(cache_key)
+        if cached_health:
+            # Check if cached data is recent enough (within 30 seconds)
+            cached_time = datetime.fromisoformat(cached_health["last_checked"].replace("Z", "+00:00"))
+            if (datetime.now(UTC) - cached_time).total_seconds() < 30:
+                return StreamHealth(**cached_health)
+    except Exception as e:
+        logger.warning(f"Failed to retrieve cached stream health for {camera_id}: {e}")
 
-    return StreamHealth(
-        is_connected=is_connected,
-        bitrate=random.uniform(2000, 8000) if is_connected else None,
-        fps=random.uniform(25, 30) if is_connected else None,
-        packet_loss=random.uniform(0, 2) if is_connected else None,
-        latency=random.uniform(50, 200) if is_connected else None,
-        last_frame_time=datetime.now(UTC) if is_connected else None,
-        error_message=None if is_connected else "Connection timeout",
-        uptime=random.uniform(3600, 86400) if is_connected else 0,
+    # Perform actual stream health check
+    start_time = datetime.now(UTC)
+
+    try:
+        # Simulate stream connectivity check (in production, this would be actual stream validation)
+
+        import aiohttp
+
+        # Quick HTTP HEAD request to check if stream endpoint is reachable
+        timeout = aiohttp.ClientTimeout(total=5.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.head(stream_url) as response:
+                    is_healthy = response.status < 400
+                    response_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
+
+                    if is_healthy:
+                        status = "healthy"
+                        error_message = None
+                    else:
+                        status = "error"
+                        error_message = f"HTTP {response.status}"
+
+            except TimeoutError:
+                is_healthy = False
+                status = "timeout"
+                error_message = "Connection timeout"
+                response_time = 5000.0
+
+            except Exception as e:
+                is_healthy = False
+                status = "error"
+                error_message = str(e)
+                response_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
+
+    except Exception as e:
+        # Fallback for any connection issues
+        is_healthy = False
+        status = "error"
+        error_message = f"Connection failed: {str(e)}"
+        response_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
+
+    # Create stream health object
+    stream_health = StreamHealth(
+        camera_id=camera_id,
+        is_healthy=is_healthy,
+        status=status,
+        last_checked=datetime.now(UTC),
+        response_time_ms=response_time,
+        error_message=error_message,
+        stream_url=stream_url,
+        bitrate_kbps=None,  # Would need actual stream analysis
+        frame_rate=None,    # Would need actual stream analysis
+        resolution=None,    # Would need actual stream analysis
     )
+
+    # Cache the health status for 30 seconds
+    try:
+        await cache.set_json(cache_key, stream_health.model_dump(mode="json"), ttl=30)
+    except Exception as e:
+        logger.warning(f"Failed to cache stream health for {camera_id}: {e}")
+
+    return stream_health
+
+
+async def get_stream_health_from_cache(camera_id: str, cache: CacheService) -> StreamHealth | None:
+    """Get stream health from Redis cache only.
+
+    Args:
+        camera_id: Camera identifier
+        cache: Redis cache service
+
+    Returns:
+        StreamHealth or None if not cached or expired
+    """
+    cache_key = f"stream_health:{camera_id}"
+
+    try:
+        cached_health = await cache.get_json(cache_key)
+        if cached_health:
+            return StreamHealth(**cached_health)
+    except Exception as e:
+        logger.warning(f"Failed to retrieve cached stream health for {camera_id}: {e}")
+
+    return None
+
+
+async def update_stream_health_cache(camera_id: str, health_data: dict, cache: CacheService, ttl: int = 30) -> bool:
+    """Update stream health in Redis cache.
+
+    Args:
+        camera_id: Camera identifier
+        health_data: Stream health data to cache
+        cache: Redis cache service
+        ttl: Time to live in seconds
+
+    Returns:
+        bool: True if successfully cached
+    """
+    cache_key = f"stream_health:{camera_id}"
+
+    try:
+        return await cache.set_json(cache_key, health_data, ttl=ttl)
+    except Exception as e:
+        logger.error(f"Failed to update stream health cache for {camera_id}: {e}")
+        return False
+
+
+async def clear_stream_health_cache(camera_id: str, cache: CacheService) -> bool:
+    """Clear stream health from Redis cache.
+
+    Args:
+        camera_id: Camera identifier
+        cache: Redis cache service
+
+    Returns:
+        bool: True if successfully cleared
+    """
+    cache_key = f"stream_health:{camera_id}"
+
+    try:
+        return await cache.delete(cache_key)
+    except Exception as e:
+        logger.error(f"Failed to clear stream health cache for {camera_id}: {e}")
+        return False
+
+
+async def get_multiple_stream_health(camera_ids: list[str], cache: CacheService) -> dict[str, StreamHealth]:
+    """Get stream health for multiple cameras from cache.
+
+    Args:
+        camera_ids: List of camera identifiers
+        cache: Redis cache service
+
+    Returns:
+        dict: Camera ID to StreamHealth mapping
+    """
+    health_data = {}
+
+    for camera_id in camera_ids:
+        health = await get_stream_health_from_cache(camera_id, cache)
+        if health:
+            health_data[camera_id] = health
+
+    return health_data
 
 
 async def start_stream_monitoring(camera_id: str) -> None:
@@ -183,7 +322,7 @@ async def list_cameras(
                 backup_stream_url=camera.backup_stream_url,
                 status=CameraStatus(camera.status),
                 config=camera.config,
-                health=stream_health_db.get(camera.id),
+                health=await get_stream_health_from_cache(camera.id, cache),
                 zone_id=camera.zone_id,
                 tags=camera.tags,
                 is_active=camera.is_active,
@@ -361,11 +500,10 @@ async def get_camera(
             detail=f"Camera {camera_id} not found",
         )
 
-    # Get current health status
-    health = stream_health_db.get(camera_id)
+    # Get current health status from cache or check stream
+    health = await get_stream_health_from_cache(camera_id, cache)
     if not health:
-        health = await check_stream_health(camera_id, camera.stream_url)
-        stream_health_db[camera_id] = health
+        health = await check_stream_health(camera_id, camera.stream_url, cache)
 
     camera_response = CameraResponse(
         id=camera.id,
@@ -530,8 +668,8 @@ async def delete_camera(
             )
 
         # Remove from stream health cache
-        if camera_id in stream_health_db:
-            del stream_health_db[camera_id]
+        # Clear stream health cache
+        await clear_stream_health_cache(camera_id, cache)
 
         # Invalidate caches
         await cache.delete(f"camera:{camera_id}")
@@ -691,11 +829,10 @@ async def get_stream_health(
             detail=f"Camera {camera_id} not found",
         )
 
-    # Get or refresh health data
-    health = stream_health_db.get(camera_id)
+    # Get or refresh health data from cache
+    health = await get_stream_health_from_cache(camera_id, cache)
     if not health:
-        health = await check_stream_health(camera_id, camera.stream_url)
-        stream_health_db[camera_id] = health
+        health = await check_stream_health(camera_id, camera.stream_url, cache)
 
     logger.debug(
         "Stream health retrieved", camera_id=camera_id, user_id=current_user.id
@@ -801,8 +938,8 @@ async def batch_operations(
                     )
                     continue
 
-                if camera_id in stream_health_db:
-                    del stream_health_db[camera_id]
+                # Clear stream health cache
+                await clear_stream_health_cache(camera_id, cache)
                 background_tasks.add_task(stop_stream_monitoring, camera_id)
                 message = "Camera deleted"
 
@@ -898,29 +1035,127 @@ async def get_camera_stats(
     if cached_stats:
         return CameraStats(**cached_stats)
 
-    # TODO: Calculate real statistics from database
-    import random
+    # Calculate real statistics from database
+    from sqlalchemy import and_, func, select
 
-    # Generate mock statistics
-    now = datetime.now(UTC)
-    period_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
-        days=days
-    )
+    from ...models.analytics import RuleViolation, TrafficAnomaly, TrafficMetrics
+    from ...models.frame_metadata import FrameMetadata
 
-    # Generate hourly activity for last 24 hours
-    last_24h_activity = {f"{i:02d}:00": random.randint(50, 500) for i in range(24)}
+    try:
+        now = datetime.now(UTC)
+        period_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
 
-    stats = CameraStats(
-        camera_id=camera_id,
-        frames_processed=random.randint(50000, 200000) * days,
-        vehicles_detected=random.randint(5000, 20000) * days,
-        incidents_detected=random.randint(10, 50) * days,
-        uptime_percentage=random.uniform(95, 99.9),
-        avg_processing_time=random.uniform(50, 150),
-        last_24h_activity=last_24h_activity,
-        period_start=period_start,
-        period_end=now,
-    )
+        # Query frame processing statistics
+        frame_query = select(
+            func.count(FrameMetadata.id).label("total_frames"),
+            func.avg(FrameMetadata.processing_time_ms).label("avg_processing_time"),
+            func.sum(FrameMetadata.vehicle_count).label("total_vehicles")
+        ).where(
+            and_(
+                FrameMetadata.camera_id == camera_id,
+                FrameMetadata.created_at >= period_start,
+                FrameMetadata.created_at <= now
+            )
+        )
+
+        frame_result = await db.execute(frame_query)
+        frame_stats = frame_result.first()
+
+        # Query violation statistics
+        violation_query = select(
+            func.count(RuleViolation.id).label("violation_count")
+        ).where(
+            and_(
+                RuleViolation.camera_id == camera_id,
+                RuleViolation.detection_time >= period_start,
+                RuleViolation.detection_time <= now
+            )
+        )
+
+        violation_result = await db.execute(violation_query)
+        violation_stats = violation_result.scalar()
+
+        # Query anomaly statistics
+        anomaly_query = select(
+            func.count(TrafficAnomaly.id).label("anomaly_count")
+        ).where(
+            and_(
+                TrafficAnomaly.camera_id == camera_id,
+                TrafficAnomaly.detection_time >= period_start,
+                TrafficAnomaly.detection_time <= now
+            )
+        )
+
+        anomaly_result = await db.execute(anomaly_query)
+        anomaly_stats = anomaly_result.scalar()
+
+        # Query hourly activity for last 24 hours
+        last_24h_start = now - timedelta(hours=24)
+        hourly_query = select(
+            func.extract('hour', TrafficMetrics.timestamp).label("hour"),
+            func.sum(TrafficMetrics.total_vehicles).label("vehicle_count")
+        ).where(
+            and_(
+                TrafficMetrics.camera_id == camera_id,
+                TrafficMetrics.timestamp >= last_24h_start,
+                TrafficMetrics.timestamp <= now,
+                TrafficMetrics.aggregation_period == "1hour"
+            )
+        ).group_by(func.extract('hour', TrafficMetrics.timestamp))
+
+        hourly_result = await db.execute(hourly_query)
+        hourly_data = {f"{int(row.hour):02d}:00": int(row.vehicle_count or 0) for row in hourly_result}
+
+        # Fill missing hours with 0
+        last_24h_activity = {}
+        for i in range(24):
+            hour_key = f"{i:02d}:00"
+            last_24h_activity[hour_key] = hourly_data.get(hour_key, 0)
+
+        # Calculate uptime percentage
+        uptime_query = select(
+            func.count(FrameMetadata.id).label("active_periods")
+        ).where(
+            and_(
+                FrameMetadata.camera_id == camera_id,
+                FrameMetadata.created_at >= period_start,
+                FrameMetadata.created_at <= now
+            )
+        )
+
+        uptime_result = await db.execute(uptime_query)
+        active_periods = uptime_result.scalar() or 0
+
+        # Calculate uptime as percentage of expected frames (assuming 1 frame per minute)
+        expected_frames = int((now - period_start).total_seconds() / 60)
+        uptime_percentage = min(100.0, (active_periods / max(1, expected_frames)) * 100) if expected_frames > 0 else 0.0
+
+        stats = CameraStats(
+            camera_id=camera_id,
+            frames_processed=int(frame_stats.total_frames or 0),
+            vehicles_detected=int(frame_stats.total_vehicles or 0),
+            incidents_detected=int((violation_stats or 0) + (anomaly_stats or 0)),
+            uptime_percentage=uptime_percentage,
+            avg_processing_time=float(frame_stats.avg_processing_time or 0.0),
+            last_24h_activity=last_24h_activity,
+            period_start=period_start,
+            period_end=now,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to calculate camera statistics from database: {e}")
+        # Fallback to basic stats from camera record
+        stats = CameraStats(
+            camera_id=camera_id,
+            frames_processed=camera.total_frames_processed,
+            vehicles_detected=0,  # Not available without DB query
+            incidents_detected=0,  # Not available without DB query
+            uptime_percentage=camera.uptime_percentage or 0.0,
+            avg_processing_time=camera.avg_processing_time or 0.0,
+            last_24h_activity={f"{i:02d}:00": 0 for i in range(24)},
+            period_start=period_start,
+            period_end=now,
+        )
 
     # Cache for 5 minutes
     await cache.set_json(cache_key, stats.model_dump(), ttl=300)

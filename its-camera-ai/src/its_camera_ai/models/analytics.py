@@ -781,6 +781,182 @@ class TrafficAnomaly(BaseModel):
     )
 
 
+class SpeedLimit(BaseModel):
+    """Speed limit configuration by zone and vehicle type.
+    
+    Stores dynamic speed limits that can be looked up by traffic zone
+    and vehicle classification for accurate violation detection.
+    """
+
+    __tablename__ = "speed_limits"
+
+    # Zone and location information
+    zone_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True, comment="Traffic zone identifier"
+    )
+    zone_name: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, comment="Human-readable zone name"
+    )
+    location_description: Mapped[str | None] = mapped_column(
+        String(300), nullable=True, comment="Detailed location description"
+    )
+
+    # Vehicle type classification
+    vehicle_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        default="general",
+        comment="Vehicle type (general/car/truck/motorcycle/bus/emergency)"
+    )
+
+    # Speed limit values (km/h)
+    speed_limit_kmh: Mapped[float] = mapped_column(
+        Float, nullable=False, comment="Speed limit in kilometers per hour"
+    )
+    tolerance_kmh: Mapped[float] = mapped_column(
+        Float, nullable=False, default=5.0, comment="Tolerance threshold in km/h"
+    )
+
+    # Time-based restrictions
+    effective_start_time: Mapped[str | None] = mapped_column(
+        String(8), nullable=True, comment="Daily start time (HH:MM:SS format)"
+    )
+    effective_end_time: Mapped[str | None] = mapped_column(
+        String(8), nullable=True, comment="Daily end time (HH:MM:SS format)"
+    )
+    days_of_week: Mapped[list[int] | None] = mapped_column(
+        JSONB, nullable=True, comment="Days of week (0=Monday to 6=Sunday), null=all days"
+    )
+
+    # Environmental conditions
+    weather_conditions: Mapped[list[str] | None] = mapped_column(
+        JSONB, nullable=True, comment="Weather conditions when limit applies (null=all conditions)"
+    )
+    minimum_visibility: Mapped[float | None] = mapped_column(
+        Float, nullable=True, comment="Minimum visibility in meters for this limit"
+    )
+
+    # Enforcement configuration
+    enforcement_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, comment="Whether to enforce this speed limit"
+    )
+    warning_threshold: Mapped[float | None] = mapped_column(
+        Float, nullable=True, comment="Speed threshold for warnings (km/h over limit)"
+    )
+    violation_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=10.0, comment="Speed threshold for violations (km/h over limit)"
+    )
+
+    # Priority and validity
+    priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, comment="Priority when multiple limits apply (lower=higher priority)"
+    )
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="Speed limit validity start date"
+    )
+    valid_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Speed limit validity end date (null=permanent)"
+    )
+
+    # Geographic boundaries (optional)
+    geographic_bounds: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True, comment="Geographic boundaries for the speed limit zone"
+    )
+
+    # Administrative information
+    authority: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Authority that set this speed limit"
+    )
+    regulation_reference: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, comment="Legal regulation reference"
+    )
+    last_updated_by: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="User who last updated this limit"
+    )
+
+    # Performance optimization indexes
+    __table_args__ = (
+        # Primary lookup indexes
+        Index("idx_speed_limit_zone_vehicle", "zone_id", "vehicle_type"),
+        Index("idx_speed_limit_zone_active", "zone_id", "enforcement_enabled"),
+        Index("idx_speed_limit_vehicle_type", "vehicle_type"),
+        # Time-based filtering
+        Index("idx_speed_limit_validity", "valid_from", "valid_until"),
+        Index("idx_speed_limit_priority", "priority"),
+        # Composite index for efficient lookups
+        Index("idx_speed_limit_lookup", "zone_id", "vehicle_type", "enforcement_enabled", "valid_from"),
+        # Partial index for active limits
+        Index(
+            "idx_speed_limit_active",
+            "zone_id",
+            "vehicle_type",
+            "priority",
+            postgresql_where=text("enforcement_enabled = true AND (valid_until IS NULL OR valid_until > NOW())")
+        ),
+        {"comment": "Dynamic speed limits by zone and vehicle type with time-based restrictions"}
+    )
+
+    def is_valid_at(self, check_time: datetime) -> bool:
+        """Check if speed limit is valid at given time.
+        
+        Args:
+            check_time: Time to check validity
+            
+        Returns:
+            True if speed limit is valid at the given time
+        """
+        # Check date validity
+        if check_time < self.valid_from:
+            return False
+        if self.valid_until and check_time > self.valid_until:
+            return False
+
+        # Check day of week if specified
+        if self.days_of_week:
+            current_day = check_time.weekday()  # 0=Monday, 6=Sunday
+            if current_day not in self.days_of_week:
+                return False
+
+        # Check time of day if specified
+        if self.effective_start_time and self.effective_end_time:
+            current_time = check_time.strftime("%H:%M:%S")
+            if not (self.effective_start_time <= current_time <= self.effective_end_time):
+                return False
+
+        return True
+
+    def applies_to_conditions(self, weather: str | None = None, visibility: float | None = None) -> bool:
+        """Check if speed limit applies to current environmental conditions.
+        
+        Args:
+            weather: Current weather condition
+            visibility: Current visibility in meters
+            
+        Returns:
+            True if speed limit applies to the conditions
+        """
+        # Check weather conditions if specified
+        if self.weather_conditions and weather:
+            if weather.lower() not in [w.lower() for w in self.weather_conditions]:
+                return False
+
+        # Check visibility if specified
+        if self.minimum_visibility and visibility:
+            if visibility < self.minimum_visibility:
+                return False
+
+        return True
+
+    @property
+    def effective_limit_with_tolerance(self) -> float:
+        """Get effective speed limit including tolerance."""
+        return self.speed_limit_kmh + self.tolerance_kmh
+
+    def __repr__(self) -> str:
+        return f"<SpeedLimit(zone={self.zone_id}, vehicle={self.vehicle_type}, limit={self.speed_limit_kmh})>"
+
+
 class AlertNotification(BaseModel):
     """Alert notification tracking for rule violations and anomalies.
 

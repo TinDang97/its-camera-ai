@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
+from ...core.database import get_database_session
 from ...core.logging import get_logger
 from ...models.user import User
 from ...services.cache import CacheService
@@ -63,7 +64,6 @@ async def generate_mock_vehicle_counts(
     Returns:
         list[VehicleCount]: Mock vehicle count data
     """
-    import random
 
     counts = []
     current_time = start_time
@@ -104,7 +104,6 @@ async def generate_mock_incidents(
     Returns:
         list[IncidentAlert]: Mock incident data
     """
-    import random
 
     incidents = []
     current_time = start_time
@@ -285,6 +284,7 @@ async def list_incidents(
     current_user: User = Depends(get_current_user),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(rate_limit_normal),
+    db: Any = Depends(get_database_session),
 ) -> PaginatedResponse[IncidentAlert]:
     """List incidents with pagination and filtering.
 
@@ -313,68 +313,161 @@ async def list_incidents(
         if cached_result:
             return PaginatedResponse[IncidentAlert](**cached_result)
 
-        # TODO: Replace with actual database queries
-        # For now, generate mock data
-        all_incidents = list(incidents_db.values())
+        # Query database for violations and anomalies to create incident alerts
+        from sqlalchemy import and_, select
 
-        # If no incidents exist, generate some mock data
-        if not all_incidents and camera_id:
-            mock_start = start_time or (datetime.now(UTC) - timedelta(days=7))
-            mock_end = end_time or datetime.now(UTC)
-            mock_incidents = await generate_mock_incidents(
-                camera_id, mock_start, mock_end
-            )
-            all_incidents.extend([inc.model_dump() for inc in mock_incidents])
+        from ...models.analytics import RuleViolation, TrafficAnomaly
 
-        # Apply filters
-        filtered_incidents = all_incidents.copy()
+        incidents = []
 
+        # Query rule violations
+        violation_query = select(RuleViolation)
+
+        # Apply filters to violation query
+        filters = []
         if camera_id:
-            filtered_incidents = [
-                inc for inc in filtered_incidents if inc.get("camera_id") == camera_id
-            ]
-        if incident_type:
-            filtered_incidents = [
-                inc
-                for inc in filtered_incidents
-                if inc.get("incident_type") == incident_type
-            ]
-        if severity:
-            filtered_incidents = [
-                inc for inc in filtered_incidents if inc.get("severity") == severity
-            ]
-        if status:
-            filtered_incidents = [
-                inc for inc in filtered_incidents if inc.get("status") == status
-            ]
+            filters.append(RuleViolation.camera_id == camera_id)
         if start_time:
-            filtered_incidents = [
-                inc
-                for inc in filtered_incidents
-                if datetime.fromisoformat(
-                    inc.get("timestamp", "").replace("Z", "+00:00")
-                )
-                >= start_time
-            ]
+            filters.append(RuleViolation.detection_time >= start_time)
         if end_time:
-            filtered_incidents = [
-                inc
-                for inc in filtered_incidents
-                if datetime.fromisoformat(
-                    inc.get("timestamp", "").replace("Z", "+00:00")
+            filters.append(RuleViolation.detection_time <= end_time)
+        if status:
+            filters.append(RuleViolation.status == status)
+
+        if filters:
+            violation_query = violation_query.where(and_(*filters))
+
+        # Add severity filter if specified
+        if severity:
+            violation_query = violation_query.where(RuleViolation.severity == severity)
+
+        # Add incident type filter for violations
+        if incident_type and incident_type in ["speeding", "red_light", "wrong_way", "illegal_parking"]:
+            violation_query = violation_query.where(RuleViolation.violation_type == incident_type)
+        elif incident_type and incident_type not in ["traffic_anomaly"]:
+            # If specific violation type requested but not matching, skip violations
+            violation_query = violation_query.where(False)
+
+        violation_query = violation_query.order_by(RuleViolation.detection_time.desc())
+
+        # Query traffic anomalies
+        anomaly_query = select(TrafficAnomaly)
+
+        # Apply filters to anomaly query
+        anomaly_filters = []
+        if camera_id:
+            anomaly_filters.append(TrafficAnomaly.camera_id == camera_id)
+        if start_time:
+            anomaly_filters.append(TrafficAnomaly.detection_time >= start_time)
+        if end_time:
+            anomaly_filters.append(TrafficAnomaly.detection_time <= end_time)
+        if status:
+            # Map status to anomaly status
+            status_map = {"active": "detected", "resolved": "resolved", "dismissed": "resolved"}
+            anomaly_status = status_map.get(status, status)
+            anomaly_filters.append(TrafficAnomaly.status == anomaly_status)
+
+        if anomaly_filters:
+            anomaly_query = anomaly_query.where(and_(*anomaly_filters))
+
+        # Add severity filter if specified
+        if severity:
+            anomaly_query = anomaly_query.where(TrafficAnomaly.severity == severity)
+
+        # Add incident type filter for anomalies
+        if incident_type == "traffic_anomaly":
+            pass  # Include all anomalies
+        elif incident_type and incident_type not in ["speeding", "red_light", "wrong_way", "illegal_parking"]:
+            anomaly_query = anomaly_query.where(TrafficAnomaly.anomaly_type == incident_type)
+        elif incident_type:
+            # If specific violation type requested, skip anomalies
+            anomaly_query = anomaly_query.where(False)
+
+        anomaly_query = anomaly_query.order_by(TrafficAnomaly.detection_time.desc())
+
+        # Execute queries
+        try:
+            violation_result = await db.execute(violation_query.limit(size * 2))  # Get more for mixing
+            violations = violation_result.scalars().all()
+
+            anomaly_result = await db.execute(anomaly_query.limit(size * 2))  # Get more for mixing
+            anomalies = anomaly_result.scalars().all()
+
+            # Convert violations to incident alerts
+            for violation in violations:
+                incident = IncidentAlert(
+                    id=f"violation_{violation.id}",
+                    incident_type=violation.violation_type,
+                    severity=violation.severity,
+                    timestamp=violation.detection_time,
+                    camera_id=violation.camera_id,
+                    location=violation.location_description or f"Zone {violation.zone_id or 'Unknown'}",
+                    description=f"{violation.violation_type.replace('_', ' ').title()} violation detected",
+                    status=violation.status,
+                    confidence_score=violation.detection_confidence,
+                    vehicle_info={
+                        "license_plate": violation.license_plate,
+                        "vehicle_type": violation.vehicle_type,
+                        "track_id": violation.vehicle_track_id,
+                    } if any([violation.license_plate, violation.vehicle_type, violation.vehicle_track_id]) else None,
+                    evidence_urls=violation.evidence_images or [],
+                    detection_details={
+                        "rule_definition": violation.rule_definition,
+                        "measured_value": violation.measured_value,
+                        "threshold_value": violation.threshold_value,
+                        "violation_duration": violation.violation_duration,
+                    },
+                    alert_sent=True,  # Assume alerts are sent for all violations
+                    acknowledged_by=None,
+                    resolved_at=violation.resolution_time,
+                    resolution_notes=violation.resolution_action,
                 )
-                <= end_time
-            ]
+                incidents.append(incident)
 
-        # Pagination
-        total = len(filtered_incidents)
+            # Convert anomalies to incident alerts
+            for anomaly in anomalies:
+                incident = IncidentAlert(
+                    id=f"anomaly_{anomaly.id}",
+                    incident_type="traffic_anomaly",
+                    severity=anomaly.severity,
+                    timestamp=anomaly.detection_time,
+                    camera_id=anomaly.camera_id,
+                    location=f"Zone {anomaly.zone_id or 'Unknown'}",
+                    description=f"{anomaly.anomaly_type.replace('_', ' ').title()} anomaly detected",
+                    status="active" if anomaly.status == "detected" else anomaly.status,
+                    confidence_score=anomaly.confidence,
+                    vehicle_info=None,
+                    evidence_urls=[],
+                    detection_details={
+                        "anomaly_type": anomaly.anomaly_type,
+                        "anomaly_score": anomaly.anomaly_score,
+                        "detection_method": anomaly.detection_method,
+                        "probable_cause": anomaly.probable_cause,
+                        "baseline_value": anomaly.baseline_value,
+                        "observed_value": anomaly.observed_value,
+                        "affected_metrics": anomaly.affected_metrics,
+                    },
+                    alert_sent=True,  # Assume alerts are sent for high-score anomalies
+                    acknowledged_by=None,
+                    resolved_at=anomaly.resolution_time,
+                    resolution_notes=anomaly.resolution_action,
+                )
+                incidents.append(incident)
+
+        except Exception as e:
+            logger.error(f"Failed to query incidents from database: {e}")
+            # Fallback to empty list
+            incidents = []
+
+        # Sort incidents by timestamp (most recent first)
+        incidents.sort(key=lambda x: x.timestamp, reverse=True)
+
+        # Apply pagination
+        total = len(incidents)
         offset = (page - 1) * size
-        paginated_incidents = filtered_incidents[offset : offset + size]
+        paginated_incidents = incidents[offset : offset + size]
 
-        # Convert to response models
-        incident_responses = [
-            IncidentAlert(**incident) for incident in paginated_incidents
-        ]
+        incident_responses = paginated_incidents
 
         result = PaginatedResponse.create(
             items=incident_responses,
@@ -769,6 +862,7 @@ async def query_historical_data(
     current_user: User = Depends(get_current_user),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(query_rate_limit),
+    db: Any = Depends(get_database_session),
 ) -> PaginatedResponse[HistoricalData]:
     """Query historical analytics data.
 
@@ -790,43 +884,98 @@ async def query_historical_data(
         if cached_result:
             return PaginatedResponse[HistoricalData](**cached_result)
 
-        # TODO: Replace with actual database queries
-        # For now, generate mock historical data
+        # Query real historical data from TrafficMetrics table
+        from sqlalchemy import and_, select
+
+        from ...models.analytics import TrafficMetrics
+
         historical_data = []
 
-        current_time = query.time_range.start_time
-        while current_time < query.time_range.end_time:
-            for camera_id in query.camera_ids or ["camera_1", "camera_2"]:
+        try:
+            # Build query for traffic metrics
+            traffic_query = select(TrafficMetrics)
+
+            # Apply filters
+            filters = [
+                TrafficMetrics.timestamp >= query.time_range.start_time,
+                TrafficMetrics.timestamp <= query.time_range.end_time
+            ]
+
+            if query.camera_ids:
+                filters.append(TrafficMetrics.camera_id.in_(query.camera_ids))
+
+            # Map aggregation to database aggregation period
+            aggregation_map = {
+                "minute": "1min",
+                "hourly": "1hour",
+                "daily": "1day",
+                "raw": "1min"  # Use 1min as finest granularity
+            }
+
+            db_aggregation = aggregation_map.get(query.aggregation, "1hour")
+            filters.append(TrafficMetrics.aggregation_period == db_aggregation)
+
+            traffic_query = traffic_query.where(and_(*filters))
+            traffic_query = traffic_query.order_by(TrafficMetrics.timestamp)
+
+            # Execute query
+            result = await db.execute(traffic_query)
+            metrics = result.scalars().all()
+
+            # Convert to HistoricalData format
+            for metric in metrics:
                 for metric_type in query.metric_types:
-                    # Generate mock data based on metric type
+                    value = None
+
                     if metric_type == "vehicle_counts":
-                        value = random.randint(10, 100)
+                        value = metric.total_vehicles
                     elif metric_type == "speed_data":
-                        value = random.uniform(30, 80)
+                        value = metric.average_speed
                     elif metric_type == "occupancy":
-                        value = random.uniform(0, 100)
-                    else:
-                        value = random.uniform(0, 1)
+                        value = (metric.occupancy_rate or 0.0) * 100  # Convert to percentage
+                    elif metric_type == "traffic_density":
+                        value = metric.traffic_density
+                    elif metric_type == "flow_rate":
+                        value = metric.flow_rate
+                    elif metric_type == "congestion_level":
+                        # Convert congestion level to numeric value
+                        congestion_map = {
+                            "free_flow": 0,
+                            "light": 1,
+                            "moderate": 2,
+                            "heavy": 3,
+                            "severe": 4
+                        }
+                        value = congestion_map.get(metric.congestion_level, 0)
 
-                    historical_data.append(
-                        HistoricalData(
-                            timestamp=current_time,
-                            camera_id=camera_id,
-                            metric_type=metric_type,
-                            value=value,
-                            metadata={"aggregation": query.aggregation},
+                    if value is not None:
+                        historical_data.append(
+                            HistoricalData(
+                                timestamp=metric.timestamp,
+                                camera_id=metric.camera_id,
+                                metric_type=metric_type,
+                                value=value,
+                                metadata={
+                                    "aggregation": query.aggregation,
+                                    "sample_count": metric.sample_count,
+                                    "zone_id": metric.zone_id,
+                                    "lane_id": metric.lane_id,
+                                    "data_completeness": metric.data_completeness,
+                                },
+                            )
                         )
-                    )
 
-            # Increment time based on aggregation
-            if query.aggregation == "minute":
-                current_time += timedelta(minutes=1)
-            elif query.aggregation == "hourly":
-                current_time += timedelta(hours=1)
-            elif query.aggregation == "daily":
-                current_time += timedelta(days=1)
-            else:  # raw
-                current_time += timedelta(seconds=30)
+            # If no data found and specific cameras requested, add placeholder entries
+            if not historical_data and query.camera_ids:
+                logger.warning(
+                    f"No historical data found for cameras {query.camera_ids} "
+                    f"in time range {query.time_range.start_time} to {query.time_range.end_time}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to query historical data from database: {e}")
+            # Return empty list on error
+            historical_data = []
 
         # Apply pagination
         total = len(historical_data)

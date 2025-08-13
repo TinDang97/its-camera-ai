@@ -38,15 +38,26 @@ pytest -m gpu                 # GPU-dependent tests
 pytest -m unit                # Unit tests only
 pytest -m e2e                 # End-to-end tests
 pytest -m benchmark           # Performance benchmark tests
+pytest -m performance         # Performance tests
+pytest -m asyncio             # Async tests
+
+# Run a single test file
+pytest tests/test_streaming_service.py -v
+
+# Run tests matching a pattern
+pytest -k "test_stream" -v
 
 # Type checking
 mypy src/
 
-# Code formatting and linting
+# Code formatting and linting (run in order)
 black src/ tests/
-ruff check src/ tests/
-ruff format src/ tests/        # Additional ruff formatting
 isort src/ tests/
+ruff check src/ tests/
+ruff format src/ tests/
+
+# Auto-fix linting issues
+ruff check --fix src/ tests/
 
 # Security scanning
 bandit -r src/
@@ -141,7 +152,7 @@ The system follows an **event-driven microservices architecture** with the follo
 - Use type hints and Pydantic v2 models for all data structures
 - Implement async/await patterns for I/O operations with proper resource cleanup
 - Follow the security-first approach with comprehensive error handling
-- Use dependency injection patterns with `dependency-injector`
+- **ALWAYS use dependency injection patterns with `dependency-injector` for CLI and API components**
 - Maintain strict type checking with MyPy configuration
 - Follow consistent import organization with isort and black formatting
 
@@ -197,10 +208,30 @@ its-camera-ai security audit
 its-camera-ai monitoring metrics --service inference-engine
 ```
 
-# important-instruction-reminders
-Do what has been asked; nothing more, nothing less.
-NEVER create files unless they're absolutely necessary for achieving your goal.
-ALWAYS prefer editing an existing file to creating a new one.
-NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+## Important Implementation Notes
 
-- always use dependency injector for cli and api
+### Dependency Injection
+
+- **ALWAYS use `dependency-injector` for CLI and API components** - this is a critical architectural requirement
+- Configure containers properly for service dependencies
+- Use proper async context managers for resource lifecycle
+
+### File Management
+
+- NEVER create files unless absolutely necessary for achieving the goal
+- ALWAYS prefer editing existing files to creating new ones
+- NEVER proactively create documentation files (*.md) or README files unless explicitly requested
+
+### Testing Best Practices
+
+- Write tests for all new functionality
+- Use appropriate pytest markers (@pytest.mark.asyncio, @pytest.mark.unit, etc.)
+- Maintain >90% test coverage requirement
+- Mock external dependencies properly in unit tests
+
+### Error Handling
+
+- Implement comprehensive error handling with proper logging
+- Use structured logging with `structlog`
+- Return appropriate HTTP status codes in API endpoints
+- Provide clear error messages for CLI commands

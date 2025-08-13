@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
 from ..models.analytics import (
     RuleViolation,
+    SpeedLimit,
     TrafficAnomaly,
     TrafficMetrics,
     VehicleTrajectory,
@@ -31,6 +32,7 @@ from ..models.analytics import (
 )
 from ..models.detection_result import DetectionResult
 from .base_service import BaseAsyncService
+from .cache import CacheService
 
 logger = get_logger(__name__)
 
@@ -44,8 +46,10 @@ class AnalyticsServiceError(Exception):
 class RuleEngine:
     """Traffic rule evaluation engine with configurable rules."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, session: AsyncSession | None = None, cache_service: CacheService | None = None):
         self.settings = settings
+        self.session = session
+        self.cache_service = cache_service
         self._rules = self._load_default_rules()
 
     def _load_default_rules(self) -> dict[str, dict[str, Any]]:
@@ -85,12 +89,13 @@ class RuleEngine:
             },
         }
 
-    def evaluate_speed_rule(
-        self, speed: float, zone_id: str | None = None, vehicle_type: str | None = None
+    async def evaluate_speed_rule(
+        self, speed: float, zone_id: str | None = None, vehicle_type: str | None = None,
+        check_time: datetime | None = None, weather: str | None = None, visibility: float | None = None
     ) -> dict[str, Any] | None:
-        """Evaluate speed limit violation."""
+        """Evaluate speed limit violation with dynamic database lookup."""
         rule = self._rules["speed_limit"]
-        speed_limit = self._get_speed_limit(zone_id, vehicle_type)
+        speed_limit = await self._get_speed_limit(zone_id, vehicle_type, check_time, weather, visibility)
 
         if speed <= speed_limit + rule["tolerance"]:
             return None
@@ -112,6 +117,8 @@ class RuleEngine:
                 "speed_limit": speed_limit,
                 "tolerance": rule["tolerance"],
                 "zone_id": zone_id,
+                "vehicle_type": vehicle_type,
+                "check_time": check_time.isoformat() if check_time else None,
             },
         }
 
@@ -175,18 +182,198 @@ class RuleEngine:
             },
         }
 
-    def _get_speed_limit(self, zone_id: str | None, vehicle_type: str | None) -> float:
-        """Get speed limit for zone and vehicle type."""
-        # TODO: Implement dynamic speed limit lookup from database
-        # For now, return default limit with vehicle type adjustments
+    async def _get_speed_limit(self, zone_id: str | None, vehicle_type: str | None,
+                              check_time: datetime | None = None,
+                              weather: str | None = None,
+                              visibility: float | None = None) -> float:
+        """Get dynamic speed limit for zone and vehicle type with Redis caching.
+        
+        Args:
+            zone_id: Traffic zone identifier
+            vehicle_type: Vehicle classification
+            check_time: Time to check validity (defaults to current time)
+            weather: Current weather condition
+            visibility: Current visibility in meters
+            
+        Returns:
+            Speed limit in km/h
+        """
+        if check_time is None:
+            check_time = datetime.utcnow()
+
+        # Normalize vehicle type
+        normalized_vehicle_type = self._normalize_vehicle_type(vehicle_type)
+
+        # Build cache key for Redis
+        cache_key = f"speed_limit:{zone_id or 'default'}:{normalized_vehicle_type}:{check_time.strftime('%Y%m%d%H')}"
+
+        # Try to get from cache first
+        if self.cache_service:
+            try:
+                cached_limit = await self.cache_service.get_json(cache_key)
+                if cached_limit is not None:
+                    return float(cached_limit)
+            except Exception as e:
+                logger.warning(f"Cache retrieval failed for speed limit: {e}")
+
+        # Query database for speed limits
+        speed_limit = await self._query_speed_limit_from_db(
+            zone_id, normalized_vehicle_type, check_time, weather, visibility
+        )
+
+        # Cache the result for 1 hour
+        if self.cache_service and speed_limit is not None:
+            try:
+                await self.cache_service.set_json(cache_key, speed_limit, ttl=3600)
+            except Exception as e:
+                logger.warning(f"Cache storage failed for speed limit: {e}")
+
+        return speed_limit or self._get_default_speed_limit(normalized_vehicle_type)
+
+    async def _query_speed_limit_from_db(self, zone_id: str | None, vehicle_type: str,
+                                       check_time: datetime, weather: str | None = None,
+                                       visibility: float | None = None) -> float | None:
+        """Query speed limit from database with environmental conditions.
+        
+        Args:
+            zone_id: Traffic zone identifier
+            vehicle_type: Normalized vehicle type
+            check_time: Time to check validity
+            weather: Current weather condition
+            visibility: Current visibility in meters
+            
+        Returns:
+            Speed limit in km/h or None if not found
+        """
+        if not self.session:
+            return None
+
+        try:
+            # Build query for active speed limits
+            query = select(SpeedLimit).where(
+                and_(
+                    SpeedLimit.enforcement_enabled == True,
+                    SpeedLimit.valid_from <= check_time,
+                    or_(
+                        SpeedLimit.valid_until.is_(None),
+                        SpeedLimit.valid_until > check_time
+                    )
+                )
+            )
+
+            # Add zone and vehicle type filters
+            if zone_id:
+                query = query.where(
+                    or_(
+                        SpeedLimit.zone_id == zone_id,
+                        SpeedLimit.zone_id == "default"  # Fallback to default zone
+                    )
+                )
+            else:
+                query = query.where(SpeedLimit.zone_id == "default")
+
+            query = query.where(
+                or_(
+                    SpeedLimit.vehicle_type == vehicle_type,
+                    SpeedLimit.vehicle_type == "general"  # Fallback to general
+                )
+            )
+
+            # Order by priority (lower number = higher priority) and specificity
+            query = query.order_by(
+                SpeedLimit.priority.asc(),
+                SpeedLimit.zone_id.desc(),  # Specific zones before default
+                SpeedLimit.vehicle_type.desc()  # Specific vehicle types before general
+            )
+
+            result = await self.session.execute(query)
+            speed_limits = result.scalars().all()
+
+            # Find the best matching speed limit
+            for limit in speed_limits:
+                # Check time-based restrictions
+                if not limit.is_valid_at(check_time):
+                    continue
+
+                # Check environmental conditions
+                if not limit.applies_to_conditions(weather, visibility):
+                    continue
+
+                logger.debug(
+                    f"Found speed limit: {limit.speed_limit_kmh} km/h",
+                    zone_id=zone_id,
+                    vehicle_type=vehicle_type,
+                    limit_id=limit.id
+                )
+
+                return limit.speed_limit_kmh
+
+            return None
+
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to query speed limit from database: {e}")
+            return None
+
+    def _normalize_vehicle_type(self, vehicle_type: str | None) -> str:
+        """Normalize vehicle type for consistent lookup.
+        
+        Args:
+            vehicle_type: Raw vehicle type from detection
+            
+        Returns:
+            Normalized vehicle type
+        """
+        if not vehicle_type:
+            return "general"
+
+        vehicle_type_lower = vehicle_type.lower()
+
+        # Map common variations to standard types
+        type_mapping = {
+            "car": "car",
+            "automobile": "car",
+            "sedan": "car",
+            "suv": "car",
+            "truck": "truck",
+            "lorry": "truck",
+            "van": "truck",
+            "pickup": "truck",
+            "motorcycle": "motorcycle",
+            "motorbike": "motorcycle",
+            "bike": "motorcycle",
+            "bus": "bus",
+            "coach": "bus",
+            "emergency": "emergency",
+            "ambulance": "emergency",
+            "police": "emergency",
+            "fire": "emergency",
+        }
+
+        return type_mapping.get(vehicle_type_lower, "general")
+
+    def _get_default_speed_limit(self, vehicle_type: str) -> float:
+        """Get default speed limit when database lookup fails.
+        
+        Args:
+            vehicle_type: Normalized vehicle type
+            
+        Returns:
+            Default speed limit in km/h
+        """
         base_limit = self._rules["speed_limit"]["default_limit"]
 
-        if vehicle_type == "truck":
-            return base_limit - 10.0  # Trucks have lower limits
-        elif vehicle_type == "motorcycle":
-            return base_limit
+        # Apply vehicle-specific adjustments
+        adjustments = {
+            "truck": -10.0,     # Trucks typically have lower limits
+            "bus": -5.0,        # Buses slightly lower
+            "emergency": 20.0,  # Emergency vehicles higher limits
+            "motorcycle": 0.0,  # Same as cars
+            "car": 0.0,         # Base limit
+            "general": 0.0,     # Base limit
+        }
 
-        return base_limit
+        adjustment = adjustments.get(vehicle_type, 0.0)
+        return max(20.0, base_limit + adjustment)  # Minimum 20 km/h
 
     def _direction_to_angle(self, direction: str) -> float:
         """Convert direction string to angle in degrees."""
@@ -449,10 +636,11 @@ class AnalyticsService(BaseAsyncService):
     speed calculations, trajectory analysis, and ML-based anomaly detection.
     """
 
-    def __init__(self, session: AsyncSession, settings: Settings):
+    def __init__(self, session: AsyncSession, settings: Settings, cache_service: CacheService | None = None):
         super().__init__(session, TrafficMetrics)
         self.settings = settings
-        self.rule_engine = RuleEngine(settings)
+        self.cache_service = cache_service
+        self.rule_engine = RuleEngine(settings, session, cache_service)
         self.speed_calculator = SpeedCalculator()
         self.anomaly_detector = AnomalyDetector()
         self._initialize_anomaly_detector()
@@ -655,8 +843,9 @@ class AnalyticsService(BaseAsyncService):
             # Speed limit evaluation
             if detection.velocity_magnitude:
                 estimated_speed = detection.velocity_magnitude * 3.6  # Convert to km/h
-                speed_violation = self.rule_engine.evaluate_speed_rule(
-                    estimated_speed, detection.detection_zone, detection.vehicle_type
+                speed_violation = await self.rule_engine.evaluate_speed_rule(
+                    estimated_speed, detection.detection_zone, detection.vehicle_type,
+                    check_time=detection.created_at
                 )
 
                 if speed_violation:

@@ -28,6 +28,7 @@ make infra-logs
 ```
 
 ### Completed Components (Phase 1 & 2)
+
 - ✅ **PostgreSQL** - Primary database (port 5432)
 - ✅ **TimescaleDB** - Time-series metrics (port 5433)
 - ✅ **Redis** - Cache & message queue (port 6379)
@@ -42,6 +43,7 @@ make infra-logs
 - ✅ **Service Mesh** - gRPC integration & resilience - 1000+ RPS, <100ms latency, 99.9% availability
 
 ### Next Steps
+
 - **Phase 3: API Layer Enhancement** - Optimize existing FastAPI endpoints
 - Advanced ML model management via Model Router
 - Real-time dashboard optimizations
@@ -89,6 +91,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 | Authentication Service | ✅ Completed | P0 | 3 days | PostgreSQL, Redis | Backend Team |
 
 **Achievement Summary (January 13, 2025):**
+
 - **Streaming Service**: 540+ fps throughput, 1.8ms latency, 99.95% success rate, multi-protocol support (RTSP/WebRTC/HTTP/ONVIF)
 - **Analytics Service**: >10,000 events/sec processing, <50ms latency, rule engine, speed calculation, anomaly detection with TimescaleDB
 - **Alert Service**: <200ms delivery time, multi-channel notifications, escalation workflows, delivery tracking
@@ -141,9 +144,11 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 ## 2. Phase-wise Implementation Plan
 
 ### Phase 1: Core Infrastructure (Week 1-2) ✅ COMPLETED
+
 **Objective**: Establish foundational data and messaging infrastructure
 
 #### Sprint 1.1: Database Infrastructure ✅
+
 - ✅ Set up PostgreSQL with optimized schema
 - ✅ Configure Redis for caching and message queuing
 - ✅ Implement TimescaleDB for metrics storage
@@ -151,6 +156,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Functional database layer with migrations
 
 #### Sprint 1.2: Message Infrastructure ✅
+
 - ✅ Deploy Kafka cluster with proper topics
 - ✅ Configure Redis pub/sub for real-time events
 - ✅ Implement message serialization schemas
@@ -158,14 +164,17 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Reliable messaging infrastructure
 
 #### Dependencies Ready For
+
 - All core services can begin development
 - Data persistence layer available
 - Real-time communication established
 
 ### Phase 2: Core Services (Week 3-5) ✅ COMPLETED - January 13, 2025
+
 **Objective**: Implement critical business services
 
 #### Sprint 2.1: Streaming & Analytics Foundation ✅ COMPLETED
+
 - ✅ Complete Streaming Service implementation (540+ fps, 1.8ms latency, 99.95% success rate)
 - ✅ Build Analytics Service with rule engine (>10K events/sec throughput, <50ms processing latency)
 - ✅ Implement Alert Service with notification system (<200ms alert delivery, multi-channel notifications)
@@ -173,6 +182,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: ✅ Working video processing pipeline with exceptional performance
 
 #### Sprint 2.2: Authentication & Security ✅ COMPLETED
+
 - ✅ Complete Authentication Service with JWT (<10ms JWT validation, enterprise-grade security)
 - ✅ Implement Role-Based Access Control (RBAC) (6 roles, 35+ permissions, fine-grained access control)
 - ✅ Add session management and security middleware (MFA support with TOTP, brute force protection)
@@ -180,6 +190,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: ✅ Secure authentication system exceeding enterprise standards
 
 #### Sprint 2.3: Service Integration ✅ COMPLETED  
+
 - ✅ Implement gRPC communication between services (complete service mesh with 1000+ RPS capability)
 - ✅ Add circuit breakers and resilience patterns (<100ms latency, 99.9% availability)
 - ✅ Create service discovery mechanism (Redis-based with health monitoring)
@@ -187,6 +198,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: ✅ Resilient service mesh with production-grade reliability
 
 **Phase 2 Achievement Summary:**
+
 - **Time to Market**: Completed ahead of schedule through parallel implementation
 - **Performance Excellence**: All services exceed original performance targets by 20-50%
 - **Enterprise Ready**: Security, scalability, and monitoring built-in from day one
@@ -194,9 +206,11 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Test Coverage**: 697+ lines of comprehensive tests with >95% coverage across all services
 
 ### Phase 3: API Layer (Week 6-7)
+
 **Objective**: Complete external interfaces
 
 #### Sprint 3.1: API Completion
+
 - Complete Analytics Router implementation
 - Build Model Router for ML model management
 - Enhance error handling and validation
@@ -204,6 +218,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Complete REST API
 
 #### Sprint 3.2: Real-time Features
+
 - Optimize SSE Broadcaster for scale
 - Implement WebSocket support for dashboards
 - Add real-time alert broadcasting
@@ -211,9 +226,11 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Real-time API features
 
 ### Phase 4: Advanced ML Features (Week 8-10)
+
 **Objective**: Enhance ML capabilities
 
 #### Sprint 4.1: Model Management
+
 - Build Model Registry with versioning
 - Implement A/B testing for models
 - Create model performance monitoring
@@ -221,6 +238,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Complete MLOps pipeline
 
 #### Sprint 4.2: Edge Computing
+
 - Enhance Edge Deployment Manager
 - Implement edge-cloud synchronization
 - Add offline operation capabilities
@@ -228,9 +246,11 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Edge deployment capabilities
 
 ### Phase 5: Security & Privacy (Week 11-12)
+
 **Objective**: Implement advanced security features
 
 #### Sprint 5.1: Threat Detection
+
 - Build Threat Detection Engine
 - Implement anomaly detection algorithms
 - Add security incident response
@@ -238,6 +258,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Advanced security monitoring
 
 #### Sprint 5.2: Privacy Compliance
+
 - Implement Privacy Engine with anonymization
 - Add GDPR compliance features
 - Create data export/deletion capabilities
@@ -245,9 +266,11 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Privacy-compliant system
 
 ### Phase 6: Operations & Monitoring (Week 13-14)
+
 **Objective**: Complete operational readiness
 
 #### Sprint 6.1: Monitoring Stack
+
 - Deploy Prometheus metrics collection
 - Create Grafana dashboards
 - Implement ELK stack for logging
@@ -255,6 +278,7 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 - **Deliverables**: Complete observability
 
 #### Sprint 6.2: Production Readiness
+
 - Implement backup and disaster recovery
 - Add performance optimization
 - Create operational runbooks
@@ -268,9 +292,11 @@ This document provides a comprehensive implementation plan for the ITS Camera AI
 ### 3.1 Streaming Service Implementation
 
 #### Overview
+
 The Streaming Service manages real-time camera stream processing and frame distribution using gRPC and Redis queuing.
 
 #### Interface Definition
+
 ```python
 class StreamingServiceInterface:
     async def register_camera(self, camera_config: CameraConfig) -> CameraRegistration
@@ -280,6 +306,7 @@ class StreamingServiceInterface:
 ```
 
 #### Data Models
+
 ```python
 class CameraConfig(BaseModel):
     camera_id: str
@@ -297,6 +324,7 @@ class ProcessedFrame(BaseModel):
 ```
 
 #### Implementation Checklist
+
 - [ ] Implement gRPC server for camera communication
 - [ ] Add RTSP/WebRTC stream handling
 - [ ] Create frame quality validation
@@ -307,6 +335,7 @@ class ProcessedFrame(BaseModel):
 - [ ] Implement graceful shutdown
 
 #### Testing Requirements
+
 - Unit tests for stream processing logic
 - Integration tests with Redis queues
 - Load tests with multiple camera streams
@@ -314,6 +343,7 @@ class ProcessedFrame(BaseModel):
 - Performance benchmarking (target: <10ms per frame)
 
 #### Performance Targets
+
 - Support 100+ concurrent camera streams
 - Frame processing latency < 10ms
 - 99.9% frame processing success rate
@@ -322,9 +352,11 @@ class ProcessedFrame(BaseModel):
 ### 3.2 Analytics Service Implementation
 
 #### Overview
+
 The Analytics Service processes vehicle tracking data, evaluates traffic rules, and generates insights using TimescaleDB.
 
 #### Interface Definition
+
 ```python
 class AnalyticsServiceInterface:
     async def process_detections(self, detections: List[VehicleDetection]) -> AnalyticsResult
@@ -334,6 +366,7 @@ class AnalyticsServiceInterface:
 ```
 
 #### Data Models
+
 ```python
 class VehicleDetection(BaseModel):
     detection_id: str
@@ -352,6 +385,7 @@ class TrafficMetrics(BaseModel):
 ```
 
 #### Implementation Checklist
+
 - [ ] Create rule engine for traffic violations
 - [ ] Implement speed calculation algorithms
 - [ ] Add trajectory analysis
@@ -362,6 +396,7 @@ class TrafficMetrics(BaseModel):
 - [ ] Add performance optimization
 
 #### Testing Requirements
+
 - Unit tests for rule evaluation logic
 - Integration tests with TimescaleDB
 - Performance tests with high-volume data
@@ -369,6 +404,7 @@ class TrafficMetrics(BaseModel):
 - End-to-end analytics pipeline tests
 
 #### Performance Targets
+
 - Rule evaluation throughput > 10,000 events/second
 - Real-time analytics processing < 50ms
 - Alert generation latency < 200ms
@@ -377,9 +413,11 @@ class TrafficMetrics(BaseModel):
 ### 3.3 Alert Service Implementation
 
 #### Overview
+
 The Alert Service handles incident detection, notification distribution, and escalation management.
 
 #### Interface Definition
+
 ```python
 class AlertServiceInterface:
     async def create_alert(self, incident: IncidentData) -> AlertId
@@ -389,6 +427,7 @@ class AlertServiceInterface:
 ```
 
 #### Data Models
+
 ```python
 class Alert(BaseModel):
     alert_id: str
@@ -407,6 +446,7 @@ class NotificationChannel(BaseModel):
 ```
 
 #### Implementation Checklist
+
 - [ ] Implement alert prioritization logic
 - [ ] Create notification routing system
 - [ ] Add external system integration (emergency services)
@@ -417,6 +457,7 @@ class NotificationChannel(BaseModel):
 - [ ] Create dashboard integration
 
 #### Testing Requirements
+
 - Unit tests for alert processing logic
 - Integration tests with external systems
 - Load tests for high-volume alerts
@@ -424,6 +465,7 @@ class NotificationChannel(BaseModel):
 - Notification delivery verification
 
 #### Performance Targets
+
 - Alert creation latency < 100ms
 - Notification delivery < 200ms
 - 99.9% notification delivery success
@@ -432,9 +474,11 @@ class NotificationChannel(BaseModel):
 ### 3.4 Model Registry Implementation
 
 #### Overview
+
 The Model Registry manages ML model versions, deployment, and performance tracking using MinIO storage.
 
 #### Interface Definition
+
 ```python
 class ModelRegistryInterface:
     async def register_model(self, model: ModelArtifact) -> ModelVersion
@@ -444,6 +488,7 @@ class ModelRegistryInterface:
 ```
 
 #### Data Models
+
 ```python
 class ModelArtifact(BaseModel):
     model_id: str
@@ -461,6 +506,7 @@ class DeploymentStage(Enum):
 ```
 
 #### Implementation Checklist
+
 - [ ] Create model storage in MinIO
 - [ ] Implement semantic versioning
 - [ ] Add model validation pipeline
@@ -473,9 +519,11 @@ class DeploymentStage(Enum):
 ### 3.5 Threat Detection Engine Implementation
 
 #### Overview
+
 The Threat Detection Engine provides real-time security monitoring and anomaly detection capabilities.
 
 #### Interface Definition
+
 ```python
 class ThreatDetectionInterface:
     async def analyze_behavior(self, behavior_data: BehaviorPattern) -> ThreatAssessment
@@ -485,6 +533,7 @@ class ThreatDetectionInterface:
 ```
 
 #### Data Models
+
 ```python
 class ThreatAssessment(BaseModel):
     threat_level: ThreatLevel
@@ -502,6 +551,7 @@ class SecurityEvent(BaseModel):
 ```
 
 #### Implementation Checklist
+
 - [ ] Implement ML-based anomaly detection
 - [ ] Create behavioral analysis algorithms
 - [ ] Add threat intelligence integration
@@ -518,11 +568,13 @@ class SecurityEvent(BaseModel):
 ### 4.1 Streaming Service (gRPC, Camera Connections)
 
 #### Architecture Pattern
+
 - **Pattern**: Producer-Consumer with Quality Gates
 - **Technology**: Python gRPC, OpenCV, Redis
 - **Deployment**: Kubernetes with GPU affinity
 
 #### Key Components
+
 ```python
 class StreamingDataProcessor:
     """High-throughput video stream processing with quality validation."""
@@ -540,6 +592,7 @@ class StreamingDataProcessor:
 ```
 
 #### gRPC Service Definition
+
 ```protobuf
 service StreamingService {
     rpc RegisterCamera(CameraRegistrationRequest) returns (CameraRegistrationResponse);
@@ -549,6 +602,7 @@ service StreamingService {
 ```
 
 #### Implementation Steps
+
 1. **Week 1**: Implement gRPC server and basic frame processing
 2. **Week 2**: Add quality validation and Redis integration
 3. **Week 3**: Implement error handling and monitoring
@@ -557,12 +611,15 @@ service StreamingService {
 ### 4.2 Vision Engine (YOLO11, PyTorch)
 
 #### Architecture Pattern
+
 - **Pattern**: Pipeline with Adaptive Batching
 - **Technology**: PyTorch, TensorRT, CUDA
 - **Status**: ✅ Already Implemented
 
 #### Current Implementation Status
+
 The Vision Engine is already well-implemented with:
+
 - ✅ Adaptive Batcher for dynamic batch optimization
 - ✅ GPU Preprocessor for CUDA-accelerated processing
 - ✅ Memory Pool Manager for efficient GPU memory
@@ -570,6 +627,7 @@ The Vision Engine is already well-implemented with:
 - ✅ Production Monitoring for performance tracking
 
 #### Integration Requirements
+
 - Enhance integration with Streaming Service
 - Add Model Registry connection
 - Improve metrics collection for TimescaleDB
@@ -577,11 +635,13 @@ The Vision Engine is already well-implemented with:
 ### 4.3 Analytics Service (Traffic Metrics)
 
 #### Architecture Pattern
+
 - **Pattern**: Event-Driven Analytics with Rule Engine
 - **Technology**: Python, TimescaleDB, Apache Kafka
 - **Deployment**: Horizontally scalable workers
 
 #### Core Components
+
 ```python
 class TrafficAnalyzer:
     """Real-time traffic analytics with rule processing."""
@@ -605,6 +665,7 @@ class TrafficAnalyzer:
 ```
 
 #### Rule Engine Implementation
+
 ```python
 class RuleEngine:
     """Traffic rule evaluation engine with configurable rules."""
@@ -623,6 +684,7 @@ class RuleEngine:
 ```
 
 #### Implementation Steps
+
 1. **Week 1**: Design and implement rule engine
 2. **Week 2**: Create traffic metrics calculator
 3. **Week 3**: Add TimescaleDB integration
@@ -631,11 +693,13 @@ class RuleEngine:
 ### 4.4 Alert Service (Incident Detection)
 
 #### Architecture Pattern
+
 - **Pattern**: Event-Driven Notification with Escalation
 - **Technology**: Python, Kafka, External APIs
 - **Deployment**: High-availability with message durability
 
 #### Core Components
+
 ```python
 class AlertManager:
     """Incident detection and alert management system."""
@@ -661,6 +725,7 @@ class AlertManager:
 ```
 
 #### Notification System
+
 ```python
 class NotificationService:
     """Multi-channel notification distribution."""
@@ -687,11 +752,13 @@ class NotificationService:
 ### 4.5 Authentication Service (JWT, RBAC)
 
 #### Architecture Pattern
+
 - **Pattern**: JWT-based with Role-Based Access Control
 - **Technology**: FastAPI, PostgreSQL, Redis, JWT
 - **Security**: Multi-factor authentication, session management
 
 #### Core Components
+
 ```python
 class AuthenticationService:
     """JWT-based authentication with MFA support."""
@@ -721,6 +788,7 @@ class AuthenticationService:
 ```
 
 #### RBAC Implementation
+
 ```python
 class RoleBasedAccessControl:
     """Fine-grained permission system with role inheritance."""
@@ -749,7 +817,9 @@ class RoleBasedAccessControl:
 ### 4.6 API Gateway (FastAPI Routes)
 
 #### Current Implementation Status
+
 The API Gateway is already well-implemented with:
+
 - ✅ FastAPI Application with proper routing
 - ✅ Middleware stack for CORS, security, logging
 - ✅ Dependency injection system
@@ -757,6 +827,7 @@ The API Gateway is already well-implemented with:
 - ✅ SSE Broadcaster for real-time events
 
 #### Enhancement Requirements
+
 ```python
 class APIGateway:
     """Enhanced API Gateway with advanced features."""
@@ -781,6 +852,7 @@ class APIGateway:
 ```
 
 #### Additional Features to Implement
+
 - API versioning strategy
 - Request/response transformation
 - Advanced rate limiting
@@ -794,6 +866,7 @@ class APIGateway:
 ### 5.1 Message Schemas
 
 #### Camera Stream Processing Messages
+
 ```python
 class CameraStreamMessage(BaseModel):
     message_id: str = Field(..., description="Unique message identifier")
@@ -811,6 +884,7 @@ class FrameMetadata(BaseModel):
 ```
 
 #### Vehicle Detection Messages
+
 ```python
 class VehicleDetectionMessage(BaseModel):
     detection_id: str = Field(..., description="Unique detection identifier")
@@ -829,6 +903,7 @@ class VehicleDetection(BaseModel):
 ```
 
 #### Alert and Incident Messages
+
 ```python
 class AlertMessage(BaseModel):
     alert_id: str = Field(..., description="Unique alert identifier")
@@ -850,6 +925,7 @@ class Evidence(BaseModel):
 ### 5.2 Event Definitions
 
 #### System Events
+
 ```python
 class SystemEventType(str, Enum):
     CAMERA_CONNECTED = "camera.connected"
@@ -872,6 +948,7 @@ class SystemEvent(BaseModel):
 ```
 
 #### Business Events
+
 ```python
 class BusinessEventType(str, Enum):
     TRAFFIC_VIOLATION_DETECTED = "traffic.violation.detected"
@@ -895,6 +972,7 @@ class BusinessEvent(BaseModel):
 ### 5.3 API Contracts
 
 #### RESTful API Specifications
+
 ```python
 # Camera Management API
 class CameraAPI:
@@ -938,6 +1016,7 @@ class AnalyticsAPI:
 ```
 
 #### gRPC Service Contracts
+
 ```protobuf
 // Streaming Service
 service StreamingService {
@@ -973,6 +1052,7 @@ service VisionEngineService {
 ### 5.4 Database Schemas
 
 #### PostgreSQL Schema Design
+
 ```sql
 -- Users and Authentication
 CREATE TABLE users (
@@ -1064,6 +1144,7 @@ CREATE TABLE audit_logs (
 ```
 
 #### TimescaleDB Schema for Time-Series Data
+
 ```sql
 -- Performance Metrics
 CREATE TABLE performance_metrics (
@@ -1116,6 +1197,7 @@ CREATE INDEX idx_vehicle_detections_vehicle_time ON vehicle_detections (vehicle_
 ### 5.5 Cache Strategies
 
 #### Redis Cache Architecture
+
 ```python
 class CacheStrategy:
     """Multi-tier caching strategy implementation."""
@@ -1156,6 +1238,7 @@ class CacheStrategy:
 ```
 
 #### Cache Invalidation Strategy
+
 ```python
 class CacheInvalidation:
     """Intelligent cache invalidation system."""
@@ -1190,6 +1273,7 @@ class CacheInvalidation:
 ### 6.1 Internal Service Communication
 
 #### gRPC Service Mesh
+
 ```python
 class ServiceMeshClient:
     """Centralized service communication with circuit breakers."""
@@ -1240,6 +1324,7 @@ class ServiceMeshClient:
 ```
 
 #### Service Discovery Implementation
+
 ```python
 class ServiceRegistry:
     """Service discovery with health checking."""
@@ -1292,6 +1377,7 @@ class ServiceRegistry:
 ### 6.2 External System Interfaces
 
 #### Camera Integration Layer
+
 ```python
 class CameraIntegrationService:
     """Universal camera integration supporting multiple protocols."""
@@ -1340,6 +1426,7 @@ class CameraIntegrationService:
 ```
 
 #### Emergency Services Integration
+
 ```python
 class EmergencyServicesIntegration:
     """Integration with external emergency services."""
@@ -1394,6 +1481,7 @@ class EmergencyServicesIntegration:
 ```
 
 #### Traffic Management System Integration
+
 ```python
 class TrafficManagementIntegration:
     """Integration with external traffic management systems."""
@@ -1421,6 +1509,7 @@ class TrafficManagementIntegration:
 ### 6.3 Event Bus Implementation
 
 #### Apache Kafka Event Streaming
+
 ```python
 class KafkaEventBus:
     """Kafka-based event bus for reliable event streaming."""
@@ -1484,6 +1573,7 @@ class KafkaEventBus:
 ### 6.4 API Versioning Strategy
 
 #### Semantic Versioning Implementation
+
 ```python
 class APIVersionManager:
     """API versioning with backward compatibility."""
@@ -1528,6 +1618,7 @@ class APIVersionManager:
 ### 7.1 Unit Test Requirements
 
 #### Test Coverage Requirements by Component
+
 ```python
 # Testing Configuration
 COVERAGE_REQUIREMENTS = {
@@ -1590,6 +1681,7 @@ class TestStreamingService:
 ```
 
 #### Property-Based Testing
+
 ```python
 from hypothesis import given, strategies as st
 
@@ -1637,6 +1729,7 @@ class TestVisionEngineProperties:
 ### 7.2 Integration Test Scenarios
 
 #### Service Integration Tests
+
 ```python
 class TestServiceIntegration:
     """Integration tests for service-to-service communication."""
@@ -1718,6 +1811,7 @@ class TestServiceIntegration:
 ```
 
 #### Database Integration Tests
+
 ```python
 class TestDatabaseIntegration:
     """Integration tests for database operations."""
@@ -1790,6 +1884,7 @@ class TestDatabaseIntegration:
 ### 7.3 Performance Benchmarks
 
 #### Load Testing Framework
+
 ```python
 class PerformanceBenchmarks:
     """Performance benchmarking for critical system components."""
@@ -1870,6 +1965,7 @@ class PerformanceBenchmarks:
 ```
 
 #### Memory and Resource Benchmarks
+
 ```python
 class ResourceBenchmarks:
     """Resource utilization benchmarking."""
@@ -1920,6 +2016,7 @@ class ResourceBenchmarks:
 ### 7.4 Security Testing
 
 #### Security Test Suite
+
 ```python
 class SecurityTests:
     """Comprehensive security testing suite."""
@@ -2012,6 +2109,7 @@ class SecurityTests:
 ### 8.1 Container Build Process
 
 #### Multi-Stage Docker Builds
+
 ```dockerfile
 # Production Dockerfile for Vision Engine
 FROM nvidia/cuda:12.0-devel-ubuntu22.04 as builder
@@ -2065,6 +2163,7 @@ CMD ["python", "-m", "its_camera_ai.services.vision_engine"]
 ```
 
 #### Optimized Build Pipeline
+
 ```yaml
 # .github/workflows/build-and-deploy.yml
 name: Build and Deploy ITS Camera AI
@@ -2127,6 +2226,7 @@ jobs:
 ### 8.2 Kubernetes Manifests
 
 #### Production Deployment Configuration
+
 ```yaml
 # k8s/production/vision-engine-deployment.yaml
 apiVersion: apps/v1
@@ -2224,6 +2324,7 @@ spec:
 ```
 
 #### Horizontal Pod Autoscaler
+
 ```yaml
 # k8s/production/vision-engine-hpa.yaml
 apiVersion: autoscaling/v2
@@ -2283,6 +2384,7 @@ spec:
 ### 8.3 CI/CD Pipeline Stages
 
 #### Pipeline Configuration
+
 ```yaml
 # .gitlab-ci.yml or similar
 stages:
@@ -2398,6 +2500,7 @@ deploy:production:
 ### 8.4 Environment Promotion
 
 #### Environment-Specific Configurations
+
 ```yaml
 # k8s/environments/staging/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -2467,6 +2570,7 @@ replicas:
 ### 8.5 Rollback Procedures
 
 #### Automated Rollback Strategy
+
 ```python
 # scripts/rollback_service.py
 #!/usr/bin/env python3
@@ -2664,17 +2768,3 @@ This comprehensive implementation plan provides a structured approach to buildin
 3. **Quality Gates**: Comprehensive testing strategy ensures production readiness
 4. **Security First**: Security considerations integrated throughout the implementation
 5. **Operational Excellence**: Complete monitoring and deployment strategies
-
-### Next Steps
-
-1. **Week 1**: Begin Phase 1 (Core Infrastructure) implementation
-2. **Establish Teams**: Assign teams to specific components based on the matrix
-3. **Set up CI/CD**: Implement the deployment pipeline early
-4. **Create Development Environment**: Set up local development with containers
-5. **Begin Implementation**: Start with P0 components as defined in the matrix
-
-This plan serves as a living document that should be updated as implementation progresses and new requirements emerge. Regular reviews and adjustments will ensure successful delivery of the ITS Camera AI system.
-
-**Total Estimated Timeline**: 14 weeks for complete implementation
-**Team Requirements**: 12-15 developers across Backend, ML, DevOps, and Security teams
-**Key Milestones**: End of each phase represents a deployable system increment
