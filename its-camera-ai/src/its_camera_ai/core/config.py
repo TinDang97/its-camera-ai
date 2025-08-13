@@ -251,6 +251,50 @@ class SecurityConfig(BaseModel):
         default=["localhost"], description="List of allowed hosts for the proxy"
     )
 
+    # API Security Enhancement Settings
+    enable_api_key_auth: bool = Field(
+        default=True, description="Enable API key authentication"
+    )
+    enable_csrf_protection: bool = Field(
+        default=True, description="Enable CSRF protection"
+    )
+    enable_security_validation: bool = Field(
+        default=True, description="Enable comprehensive input validation"
+    )
+    enable_enhanced_rate_limiting: bool = Field(
+        default=True, description="Enable enhanced rate limiting"
+    )
+
+    # CSP Settings
+    csp_report_uri: str | None = Field(
+        default=None, description="CSP violation report URI"
+    )
+
+    # File Upload Security
+    max_upload_size: int = Field(
+        default=100 * 1024 * 1024, description="Maximum upload size in bytes (100MB)"
+    )
+    allowed_file_types: list[str] = Field(
+        default=["image/jpeg", "image/png", "video/mp4", "application/json"],
+        description="Allowed file MIME types"
+    )
+
+    # Input Validation Settings
+    max_json_depth: int = Field(
+        default=10, description="Maximum JSON nesting depth"
+    )
+    max_request_size: int = Field(
+        default=50 * 1024 * 1024, description="Maximum request size in bytes (50MB)"
+    )
+
+    # Security Monitoring
+    enable_security_monitoring: bool = Field(
+        default=True, description="Enable security event monitoring"
+    )
+    security_alert_webhook: str | None = Field(
+        default=None, description="Webhook URL for security alerts"
+    )
+
 
 class MinIOConfig(BaseModel):
     """MinIO object storage configuration."""
@@ -435,15 +479,43 @@ class Settings(BaseSettings):
         if not self.security.enable_security_headers:
             return {}
 
-        return {
+        headers = {
             "Strict-Transport-Security": f"max-age={self.security.hsts_max_age}; includeSubDomains",
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             "X-XSS-Protection": "1; mode=block",
             "Referrer-Policy": "strict-origin-when-cross-origin",
-            "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
-            "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+            "Content-Security-Policy": self._build_csp(),
+            "Permissions-Policy": "geolocation=(), microphone=(), camera=(self)",
         }
+
+        return headers
+
+    def _build_csp(self) -> str:
+        """Build Content Security Policy."""
+        csp_directives = [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src 'self' https://fonts.gstatic.com",
+            "img-src 'self' data: https:",
+            "connect-src 'self' ws: wss:",
+            "media-src 'self' blob:",
+            "object-src 'none'",
+            "frame-src 'none'",
+            "worker-src 'self'",
+            "manifest-src 'self'",
+            "form-action 'self'",
+            "base-uri 'self'"
+        ]
+
+        if self.is_production():
+            csp_directives.append("upgrade-insecure-requests")
+
+        if self.security.csp_report_uri:
+            csp_directives.append(f"report-uri {self.security.csp_report_uri}")
+
+        return "; ".join(csp_directives)
 
     def create_directories(self) -> None:
         """Create necessary directories if they don't exist."""
@@ -465,6 +537,28 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development environment."""
         return self.environment == "development"
+
+    def get_allowed_file_extensions(self) -> set[str]:
+        """Get allowed file extensions from MIME types."""
+        mime_to_ext = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+            "video/mp4": ".mp4",
+            "video/avi": ".avi",
+            "video/mov": ".mov",
+            "application/json": ".json",
+            "text/plain": ".txt",
+            "application/pdf": ".pdf"
+        }
+
+        extensions = set()
+        for mime_type in self.security.allowed_file_types:
+            if mime_type in mime_to_ext:
+                extensions.add(mime_to_ext[mime_type])
+
+        return extensions
 
 
 @lru_cache

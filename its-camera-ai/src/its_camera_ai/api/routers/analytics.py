@@ -16,22 +16,32 @@ from ...core.logging import get_logger
 from ...models.user import User
 from ...services.cache import CacheService
 from ..dependencies import (
-    RateLimiter,
+    RateLimiterDI,
+    get_alert_service,
+    get_analytics_service,
     get_cache_service,
     get_current_user,
     rate_limit_normal,
     require_permissions,
 )
 from ..schemas.analytics import (
+    AlertRuleRequest,
+    AlertRuleResponse,
     AnalyticsResponse,
+    AnomalyDetectionRequest,
+    DashboardResponse,
+    HeatmapResponse,
     HistoricalData,
     HistoricalQuery,
     IncidentAlert,
     IncidentType,
+    PredictionResponse,
+    ReportGenerationRequest,
     ReportRequest,
     ReportResponse,
     Severity,
     TrafficMetrics,
+    TrendAnalysisResponse,
     VehicleClass,
     VehicleCount,
 )
@@ -41,8 +51,11 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # Rate limiters
-report_rate_limit = RateLimiter(calls=10, period=3600)  # 10 reports per hour
-query_rate_limit = RateLimiter(calls=100, period=300)  # 100 queries per 5 min
+report_rate_limit = RateLimiterDI(calls=10, period=3600)  # 10 reports per hour
+query_rate_limit = RateLimiterDI(calls=100, period=300)  # 100 queries per 5 min
+dashboard_rate_limit = RateLimiterDI(calls=200, period=300)  # 200 dashboard calls per 5 min
+prediction_rate_limit = RateLimiterDI(calls=50, period=300)  # 50 prediction calls per 5 min
+heatmap_rate_limit = RateLimiterDI(calls=30, period=300)  # 30 heatmap calls per 5 min
 
 # Simulated data stores
 incidents_db: dict[str, dict[str, Any]] = {}
@@ -1012,4 +1025,1015 @@ async def query_historical_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Historical data query failed",
+        ) from e
+
+
+@router.get(
+    "/dashboard/{camera_id}",
+    response_model=DashboardResponse,
+    summary="Get dashboard data",
+    description="Get comprehensive dashboard data for a specific camera.",
+)
+async def get_dashboard_data(
+    camera_id: str,
+    current_user: User = Depends(get_current_user),
+    analytics_service=Depends(get_analytics_service),
+    cache: CacheService = Depends(get_cache_service),
+    _rate_limit: None = Depends(dashboard_rate_limit),
+) -> DashboardResponse:
+    """Get comprehensive dashboard data for a camera.
+
+    Args:
+        camera_id: Camera identifier
+        current_user: Current user
+        analytics_service: Analytics service
+        cache: Cache service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        DashboardResponse: Comprehensive dashboard data
+    """
+    try:
+        # Check cache first
+        cache_key = f"dashboard:{camera_id}"
+        cached_data = await cache.get_json(cache_key)
+        if cached_data:
+            return DashboardResponse(**cached_data)
+
+        # Get real-time analytics
+        now = datetime.now(UTC)
+        real_time_data = await get_real_time_analytics(camera_id, current_user, cache)
+
+        # Get recent violations (last 24 hours)
+        yesterday = now - timedelta(days=1)
+        recent_violations = await analytics_service.get_active_violations(
+            camera_id=camera_id, limit=10
+        )
+
+        # Get recent anomalies
+        recent_anomalies = await analytics_service.get_traffic_anomalies(
+            camera_id=camera_id,
+            time_range=(yesterday, now),
+            limit=5
+        )
+
+        # Get hourly trends for the last 24 hours
+        hourly_trends = await analytics_service.calculate_traffic_metrics(
+            camera_id=camera_id,
+            time_range=(yesterday, now),
+            aggregation_period="1hour"
+        )
+
+        # Camera status (mock data)
+        camera_status = {
+            "online": True,
+            "last_frame_at": now,
+            "fps": random.uniform(25, 30),
+            "resolution": "1920x1080",
+            "connection_quality": "excellent",
+            "storage_usage_mb": random.randint(1000, 5000),
+        }
+
+        # Performance metrics
+        performance_metrics = {
+            "avg_processing_time_ms": random.uniform(45, 85),
+            "detection_accuracy": random.uniform(0.85, 0.98),
+            "uptime_hours": random.randint(100, 720),
+            "frames_processed_today": random.randint(50000, 100000),
+        }
+
+        # Alerts summary
+        alerts_summary = {
+            "total_today": len(recent_violations) + len(recent_anomalies),
+            "critical": len([v for v in recent_violations if v.get("severity") == "critical"]),
+            "resolved_today": random.randint(5, 15),
+            "pending": len([v for v in recent_violations if v.get("status") == "active"]),
+        }
+
+        # Convert hourly trends to simple format
+        hourly_trend_data = [
+            {
+                "timestamp": trend.period_start,
+                "vehicle_count": trend.total_vehicles,
+                "avg_speed": trend.avg_speed,
+                "congestion_level": trend.congestion_level,
+                "occupancy_rate": trend.occupancy_rate,
+            }
+            for trend in hourly_trends[-24:]  # Last 24 hours
+        ]
+
+        dashboard_response = DashboardResponse(
+            camera_id=camera_id,
+            timestamp=now,
+            real_time_metrics=real_time_data.traffic_metrics,
+            active_incidents=real_time_data.active_incidents,
+            vehicle_counts=real_time_data.vehicle_counts,
+            recent_violations=recent_violations,
+            anomalies=recent_anomalies,
+            camera_status=camera_status,
+            performance_metrics=performance_metrics,
+            alerts_summary=alerts_summary,
+            hourly_trends=hourly_trend_data,
+            congestion_heatmap=None,  # Would be generated from zone data
+        )
+
+        # Cache for 30 seconds
+        await cache.set_json(cache_key, dashboard_response.model_dump(), ttl=30)
+
+        logger.info(
+            "Dashboard data retrieved",
+            camera_id=camera_id,
+            user_id=current_user.id,
+        )
+
+        return dashboard_response
+
+    except Exception as e:
+        logger.error(
+            "Failed to get dashboard data",
+            camera_id=camera_id,
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve dashboard data",
+        ) from e
+
+
+@router.post(
+    "/alerts/rules",
+    response_model=AlertRuleResponse,
+    summary="Create alert rule",
+    description="Create a custom alert rule for traffic monitoring.",
+)
+async def create_alert_rule(
+    rule_request: AlertRuleRequest,
+    current_user: User = Depends(require_permissions("alerts:create")),
+    alert_service=Depends(get_alert_service),
+    _rate_limit: None = Depends(rate_limit_normal),
+) -> AlertRuleResponse:
+    """Create a new alert rule.
+
+    Args:
+        rule_request: Alert rule configuration
+        current_user: Current user with permissions
+        alert_service: Alert service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        AlertRuleResponse: Created alert rule
+    """
+    try:
+        # Create alert rule via service
+        rule_data = rule_request.model_dump()
+        rule_data["created_by"] = current_user.id
+        rule_data["created_at"] = datetime.now(UTC)
+        rule_data["updated_at"] = datetime.now(UTC)
+
+        # Generate rule ID
+        rule_id = str(uuid4())
+        rule_data["id"] = rule_id
+
+        # Store in mock database (in production, use alert service)
+        alert_rules_db = {}
+        alert_rules_db[rule_id] = rule_data
+
+        logger.info(
+            "Alert rule created",
+            rule_id=rule_id,
+            rule_name=rule_request.name,
+            user_id=current_user.id,
+        )
+
+        return AlertRuleResponse(
+            id=rule_id,
+            **rule_request.model_dump(),
+            created_at=rule_data["created_at"],
+            updated_at=rule_data["updated_at"],
+            created_by=current_user.id,
+            last_triggered=None,
+            trigger_count=0,
+        )
+
+    except Exception as e:
+        logger.error(
+            "Failed to create alert rule",
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create alert rule",
+        ) from e
+
+
+@router.get(
+    "/alerts/rules",
+    response_model=PaginatedResponse[AlertRuleResponse],
+    summary="List alert rules",
+    description="List all alert rules with pagination.",
+)
+async def list_alert_rules(
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    is_active: bool | None = Query(None, description="Filter by active status"),
+    severity: Severity | None = Query(None, description="Filter by severity"),
+    current_user: User = Depends(get_current_user),
+    alert_service=Depends(get_alert_service),
+    _rate_limit: None = Depends(rate_limit_normal),
+) -> PaginatedResponse[AlertRuleResponse]:
+    """List alert rules with pagination and filtering.
+
+    Args:
+        page: Page number
+        size: Items per page
+        is_active: Filter by active status
+        severity: Filter by severity
+        current_user: Current user
+        alert_service: Alert service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        PaginatedResponse[AlertRuleResponse]: Paginated alert rules
+    """
+    try:
+        # Mock data for alert rules
+        mock_rules = [
+            {
+                "id": str(uuid4()),
+                "name": "Speed Limit Violation",
+                "description": "Alert when vehicles exceed speed limit",
+                "condition": {"metric": "speed", "operator": ">", "threshold": 50},
+                "severity": "high",
+                "cameras": None,
+                "zones": None,
+                "schedule": None,
+                "notification_channels": ["email"],
+                "is_active": True,
+                "cooldown_minutes": 5,
+                "created_at": datetime.now(UTC) - timedelta(days=10),
+                "updated_at": datetime.now(UTC) - timedelta(days=1),
+                "created_by": current_user.id,
+                "last_triggered": datetime.now(UTC) - timedelta(hours=2),
+                "trigger_count": 15,
+            },
+            {
+                "id": str(uuid4()),
+                "name": "High Traffic Congestion",
+                "description": "Alert during severe traffic congestion",
+                "condition": {"metric": "congestion_level", "operator": "==", "threshold": "severe"},
+                "severity": "critical",
+                "cameras": None,
+                "zones": None,
+                "schedule": None,
+                "notification_channels": ["email", "webhook"],
+                "is_active": True,
+                "cooldown_minutes": 10,
+                "created_at": datetime.now(UTC) - timedelta(days=5),
+                "updated_at": datetime.now(UTC) - timedelta(hours=12),
+                "created_by": current_user.id,
+                "last_triggered": None,
+                "trigger_count": 0,
+            },
+        ]
+
+        # Apply filters
+        filtered_rules = mock_rules
+        if is_active is not None:
+            filtered_rules = [r for r in filtered_rules if r["is_active"] == is_active]
+        if severity:
+            filtered_rules = [r for r in filtered_rules if r["severity"] == severity]
+
+        # Apply pagination
+        total = len(filtered_rules)
+        offset = (page - 1) * size
+        paginated_rules = filtered_rules[offset : offset + size]
+
+        # Convert to response models
+        rule_responses = [
+            AlertRuleResponse(**rule) for rule in paginated_rules
+        ]
+
+        result = PaginatedResponse.create(
+            items=rule_responses,
+            total=total,
+            page=page,
+            size=size,
+        )
+
+        logger.info(
+            "Alert rules listed",
+            total=total,
+            page=page,
+            size=size,
+            user_id=current_user.id,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "Failed to list alert rules",
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve alert rules",
+        ) from e
+
+
+@router.put(
+    "/alerts/rules/{rule_id}",
+    response_model=AlertRuleResponse,
+    summary="Update alert rule",
+    description="Update an existing alert rule.",
+)
+async def update_alert_rule(
+    rule_id: str,
+    rule_request: AlertRuleRequest,
+    current_user: User = Depends(require_permissions("alerts:update")),
+    alert_service=Depends(get_alert_service),
+    _rate_limit: None = Depends(rate_limit_normal),
+) -> AlertRuleResponse:
+    """Update an existing alert rule.
+
+    Args:
+        rule_id: Alert rule identifier
+        rule_request: Updated rule configuration
+        current_user: Current user with permissions
+        alert_service: Alert service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        AlertRuleResponse: Updated alert rule
+    """
+    try:
+        # Mock update (in production, use alert service)
+        updated_rule = {
+            "id": rule_id,
+            **rule_request.model_dump(),
+            "created_at": datetime.now(UTC) - timedelta(days=10),
+            "updated_at": datetime.now(UTC),
+            "created_by": current_user.id,
+            "last_triggered": None,
+            "trigger_count": 0,
+        }
+
+        logger.info(
+            "Alert rule updated",
+            rule_id=rule_id,
+            rule_name=rule_request.name,
+            user_id=current_user.id,
+        )
+
+        return AlertRuleResponse(**updated_rule)
+
+    except Exception as e:
+        logger.error(
+            "Failed to update alert rule",
+            rule_id=rule_id,
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update alert rule",
+        ) from e
+
+
+@router.delete(
+    "/alerts/rules/{rule_id}",
+    summary="Delete alert rule",
+    description="Delete an alert rule.",
+)
+async def delete_alert_rule(
+    rule_id: str,
+    current_user: User = Depends(require_permissions("alerts:delete")),
+    alert_service=Depends(get_alert_service),
+    _rate_limit: None = Depends(rate_limit_normal),
+) -> dict[str, str]:
+    """Delete an alert rule.
+
+    Args:
+        rule_id: Alert rule identifier
+        current_user: Current user with permissions
+        alert_service: Alert service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        dict: Deletion confirmation
+    """
+    try:
+        # Mock deletion (in production, use alert service)
+        logger.info(
+            "Alert rule deleted",
+            rule_id=rule_id,
+            user_id=current_user.id,
+        )
+
+        return {"message": f"Alert rule {rule_id} deleted successfully"}
+
+    except Exception as e:
+        logger.error(
+            "Failed to delete alert rule",
+            rule_id=rule_id,
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete alert rule",
+        ) from e
+
+
+@router.get(
+    "/reports/generate",
+    response_model=ReportResponse,
+    summary="Generate analytics report",
+    description="Generate a custom analytics report.",
+)
+async def generate_analytics_report(
+    background_tasks: BackgroundTasks,
+    report_type: str = Query(description="Type of report to generate"),
+    start_time: datetime = Query(description="Report start time"),
+    end_time: datetime = Query(description="Report end time"),
+    camera_ids: str | None = Query(None, description="Comma-separated camera IDs"),
+    format: str = Query("json", description="Report format"),
+    include_charts: bool = Query(False, description="Include charts"),
+    current_user: User = Depends(require_permissions("reports:create")),
+    analytics_service=Depends(get_analytics_service),
+    _rate_limit: None = Depends(report_rate_limit),
+) -> ReportResponse:
+    """Generate a custom analytics report.
+
+    Args:
+        report_type: Type of report
+        start_time: Report start time
+        end_time: Report end time
+        camera_ids: Comma-separated camera IDs
+        format: Report format
+        include_charts: Include chart visualizations
+        background_tasks: Background task manager
+        current_user: Current user with permissions
+        analytics_service: Analytics service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        ReportResponse: Report generation status
+    """
+    try:
+        # Parse camera IDs
+        camera_list = camera_ids.split(",") if camera_ids else None
+
+        # Create report request
+        from ..schemas.common import TimeRange
+
+        report_request = ReportGenerationRequest(
+            report_type=report_type,
+            time_range=TimeRange(start_time=start_time, end_time=end_time),
+            camera_ids=camera_list,
+            format=format,
+            include_charts=include_charts,
+        )
+
+        # Generate report (reuse existing logic)
+        return await generate_report(report_request, background_tasks, current_user, _rate_limit)
+
+    except Exception as e:
+        logger.error(
+            "Failed to generate analytics report",
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate report",
+        ) from e
+
+
+@router.get(
+    "/predictions/{camera_id}",
+    response_model=PredictionResponse,
+    summary="Get traffic predictions",
+    description="Get AI-powered traffic predictions for a camera.",
+)
+async def get_traffic_predictions(
+    camera_id: str,
+    forecast_hours: int = Query(24, ge=1, le=168, description="Forecast period in hours"),
+    model_version: str | None = Query(None, description="Specific model version"),
+    current_user: User = Depends(get_current_user),
+    analytics_service=Depends(get_analytics_service),
+    cache: CacheService = Depends(get_cache_service),
+    _rate_limit: None = Depends(prediction_rate_limit),
+) -> PredictionResponse:
+    """Get traffic predictions for a camera.
+
+    Args:
+        camera_id: Camera identifier
+        forecast_hours: Forecast period in hours
+        model_version: Specific model version to use
+        current_user: Current user
+        analytics_service: Analytics service
+        cache: Cache service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        PredictionResponse: Traffic predictions
+    """
+    try:
+        # Check cache first
+        cache_key = f"predictions:{camera_id}:{forecast_hours}:{model_version or 'latest'}"
+        cached_data = await cache.get_json(cache_key)
+        if cached_data:
+            return PredictionResponse(**cached_data)
+
+        # Generate mock predictions (in production, use ML models)
+        now = datetime.now(UTC)
+        forecast_start = now
+        forecast_end = now + timedelta(hours=forecast_hours)
+
+        # Create hourly predictions
+        predictions = []
+        current_time = forecast_start
+        while current_time < forecast_end:
+            # Mock prediction based on time of day
+            hour = current_time.hour
+            base_count = 20 if 6 <= hour <= 20 else 5  # Day vs night
+            rush_hour_boost = 30 if hour in [7, 8, 17, 18, 19] else 0
+
+            predicted_count = base_count + rush_hour_boost + random.randint(-5, 10)
+            predicted_speed = random.uniform(35, 65)
+
+            predictions.append({
+                "timestamp": current_time,
+                "predicted_vehicle_count": max(0, predicted_count),
+                "predicted_avg_speed": predicted_speed,
+                "predicted_congestion_level": (
+                    "severe" if predicted_count > 40
+                    else "heavy" if predicted_count > 30
+                    else "moderate" if predicted_count > 15
+                    else "light"
+                ),
+                "confidence": random.uniform(0.7, 0.95),
+            })
+
+            current_time += timedelta(hours=1)
+
+        # Get historical baseline
+        yesterday = now - timedelta(days=1)
+        historical_metrics = await analytics_service.calculate_traffic_metrics(
+            camera_id=camera_id,
+            time_range=(yesterday, now),
+            aggregation_period="1hour"
+        )
+
+        avg_historical_count = (
+            sum(m.total_vehicles for m in historical_metrics) / len(historical_metrics)
+            if historical_metrics else 20
+        )
+
+        prediction_response = PredictionResponse(
+            camera_id=camera_id,
+            prediction_timestamp=now,
+            forecast_start=forecast_start,
+            forecast_end=forecast_end,
+            predictions=predictions,
+            confidence_interval={"lower": 0.7, "upper": 0.95},
+            ml_model_version=model_version or "lstm_v2.1",
+            ml_model_accuracy=random.uniform(0.82, 0.94),
+            factors_considered=[
+                "historical_patterns",
+                "time_of_day",
+                "day_of_week",
+                "weather_conditions",
+                "special_events",
+            ],
+            historical_baseline={
+                "avg_vehicle_count": avg_historical_count,
+                "data_period_days": 30,
+                "seasonal_factor": 1.0,
+            },
+        )
+
+        # Cache for 30 minutes
+        await cache.set_json(cache_key, prediction_response.model_dump(), ttl=1800)
+
+        logger.info(
+            "Traffic predictions generated",
+            camera_id=camera_id,
+            forecast_hours=forecast_hours,
+            user_id=current_user.id,
+        )
+
+        return prediction_response
+
+    except Exception as e:
+        logger.error(
+            "Failed to get traffic predictions",
+            camera_id=camera_id,
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve traffic predictions",
+        ) from e
+
+
+@router.post(
+    "/anomalies/detect",
+    response_model=dict[str, Any],
+    summary="Trigger anomaly detection",
+    description="Trigger manual anomaly detection for specified cameras and time range.",
+)
+async def trigger_anomaly_detection(
+    request: AnomalyDetectionRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_permissions("analytics:analyze")),
+    analytics_service=Depends(get_analytics_service),
+    _rate_limit: None = Depends(rate_limit_normal),
+) -> dict[str, Any]:
+    """Trigger manual anomaly detection.
+
+    Args:
+        request: Anomaly detection parameters
+        background_tasks: Background task manager
+        current_user: Current user with permissions
+        analytics_service: Analytics service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        dict: Detection job status
+    """
+    try:
+        # Create detection job
+        job_id = str(uuid4())
+
+        # Start detection in background
+        background_tasks.add_task(
+            process_anomaly_detection,
+            job_id,
+            request,
+            analytics_service,
+        )
+
+        logger.info(
+            "Anomaly detection triggered",
+            job_id=job_id,
+            cameras=request.camera_ids,
+            user_id=current_user.id,
+        )
+
+        return {
+            "job_id": job_id,
+            "status": "started",
+            "message": "Anomaly detection job started",
+            "cameras": request.camera_ids,
+            "time_range": {
+                "start": request.time_range.start_time,
+                "end": request.time_range.end_time,
+            },
+            "estimated_completion": datetime.now(UTC) + timedelta(minutes=5),
+        }
+
+    except Exception as e:
+        logger.error(
+            "Failed to trigger anomaly detection",
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to trigger anomaly detection",
+        ) from e
+
+
+async def process_anomaly_detection(
+    job_id: str,
+    request: AnomalyDetectionRequest,
+    analytics_service,
+) -> None:
+    """Background task to process anomaly detection.
+
+    Args:
+        job_id: Detection job identifier
+        request: Detection parameters
+        analytics_service: Analytics service
+    """
+    try:
+        import asyncio
+
+        # Simulate processing time
+        await asyncio.sleep(random.uniform(30, 120))
+
+        # In production, this would use the analytics service's anomaly detector
+        logger.info(f"Anomaly detection completed for job {job_id}")
+
+    except Exception as e:
+        logger.error(f"Anomaly detection failed for job {job_id}: {e}")
+
+
+@router.get(
+    "/heatmaps/{camera_id}",
+    response_model=HeatmapResponse,
+    summary="Get traffic heatmap",
+    description="Get traffic density heatmap data for a camera.",
+)
+async def get_traffic_heatmap(
+    camera_id: str,
+    start_time: datetime = Query(description="Heatmap start time"),
+    end_time: datetime = Query(description="Heatmap end time"),
+    resolution: str = Query("medium", description="Spatial resolution (low/medium/high)"),
+    metric: str = Query("vehicle_count", description="Metric to visualize"),
+    current_user: User = Depends(get_current_user),
+    analytics_service=Depends(get_analytics_service),
+    cache: CacheService = Depends(get_cache_service),
+    _rate_limit: None = Depends(heatmap_rate_limit),
+) -> HeatmapResponse:
+    """Get traffic heatmap data for a camera.
+
+    Args:
+        camera_id: Camera identifier
+        start_time: Heatmap start time
+        end_time: Heatmap end time
+        resolution: Spatial resolution
+        metric: Metric to visualize
+        current_user: Current user
+        analytics_service: Analytics service
+        cache: Cache service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        HeatmapResponse: Heatmap data
+    """
+    try:
+        # Check cache first
+        from ..schemas.common import TimeRange
+
+        cache_key = f"heatmap:{camera_id}:{start_time.isoformat()}:{end_time.isoformat()}:{resolution}:{metric}"
+        cached_data = await cache.get_json(cache_key)
+        if cached_data:
+            return HeatmapResponse(**cached_data)
+
+        # Generate mock heatmap data
+        resolution_map = {
+            "low": {"width": 20, "height": 15},
+            "medium": {"width": 40, "height": 30},
+            "high": {"width": 80, "height": 60},
+        }
+
+        spatial_res = resolution_map.get(resolution, resolution_map["medium"])
+
+        # Generate grid data
+        heatmap_data = []
+        for y in range(spatial_res["height"]):
+            for x in range(spatial_res["width"]):
+                # Generate intensity based on position (mock logic)
+                center_x, center_y = spatial_res["width"] // 2, spatial_res["height"] // 2
+                distance_from_center = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                max_distance = (center_x ** 2 + center_y ** 2) ** 0.5
+
+                # Higher intensity near center (main road), with some randomness
+                base_intensity = 1.0 - (distance_from_center / max_distance)
+                intensity = max(0.0, base_intensity + random.uniform(-0.3, 0.3))
+
+                heatmap_data.append({
+                    "x": x,
+                    "y": y,
+                    "intensity": intensity,
+                    "value": intensity * random.uniform(50, 200),  # Actual metric value
+                    "sample_count": random.randint(5, 50),
+                })
+
+        # Define zones
+        zones = [
+            {
+                "id": "main_road",
+                "name": "Main Road",
+                "coordinates": [{"x": 10, "y": 10}, {"x": 30, "y": 20}],
+                "type": "traffic_lane",
+            },
+            {
+                "id": "intersection",
+                "name": "Intersection",
+                "coordinates": [{"x": 18, "y": 12}, {"x": 22, "y": 18}],
+                "type": "intersection",
+            },
+        ]
+
+        heatmap_response = HeatmapResponse(
+            camera_id=camera_id,
+            timestamp=datetime.now(UTC),
+            time_range=TimeRange(start_time=start_time, end_time=end_time),
+            heatmap_data=heatmap_data,
+            zones=zones,
+            intensity_scale={"min": 0.0, "max": 1.0, "unit": "normalized"},
+            aggregation_method=f"{metric}_density",
+            spatial_resolution=spatial_res,
+            metadata={
+                "metric": metric,
+                "resolution": resolution,
+                "total_samples": len(heatmap_data),
+                "data_quality": "good",
+            },
+        )
+
+        # Cache for 5 minutes
+        await cache.set_json(cache_key, heatmap_response.model_dump(), ttl=300)
+
+        logger.info(
+            "Traffic heatmap generated",
+            camera_id=camera_id,
+            resolution=resolution,
+            metric=metric,
+            user_id=current_user.id,
+        )
+
+        return heatmap_response
+
+    except Exception as e:
+        logger.error(
+            "Failed to get traffic heatmap",
+            camera_id=camera_id,
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve traffic heatmap",
+        ) from e
+
+
+@router.get(
+    "/trends",
+    response_model=TrendAnalysisResponse,
+    summary="Get traffic trend analysis",
+    description="Get comprehensive traffic trend analysis across cameras.",
+)
+async def get_traffic_trends(
+    start_time: datetime = Query(description="Analysis start time"),
+    end_time: datetime = Query(description="Analysis end time"),
+    camera_ids: str | None = Query(None, description="Comma-separated camera IDs"),
+    granularity: str = Query("hourly", description="Analysis granularity"),
+    include_predictions: bool = Query(False, description="Include trend predictions"),
+    current_user: User = Depends(get_current_user),
+    analytics_service=Depends(get_analytics_service),
+    cache: CacheService = Depends(get_cache_service),
+    _rate_limit: None = Depends(rate_limit_normal),
+) -> TrendAnalysisResponse:
+    """Get comprehensive traffic trend analysis.
+
+    Args:
+        start_time: Analysis start time
+        end_time: Analysis end time
+        camera_ids: Comma-separated camera IDs
+        granularity: Analysis granularity
+        include_predictions: Include future predictions
+        current_user: Current user
+        analytics_service: Analytics service
+        cache: Cache service
+        _rate_limit: Rate limiting dependency
+
+    Returns:
+        TrendAnalysisResponse: Comprehensive trend analysis
+    """
+    try:
+        # Parse camera IDs
+        camera_list = camera_ids.split(",") if camera_ids else []
+
+        # Check cache first
+        from ..schemas.common import TimeRange
+
+        cache_key = f"trends:{start_time.isoformat()}:{end_time.isoformat()}:{camera_ids or 'all'}:{granularity}"
+        cached_data = await cache.get_json(cache_key)
+        if cached_data:
+            return TrendAnalysisResponse(**cached_data)
+
+        # Generate mock trend analysis
+        time_range = TimeRange(start_time=start_time, end_time=end_time)
+
+        # Mock trends data
+        trends = {
+            "overall_trend": "increasing",
+            "trend_strength": 0.65,
+            "peak_hours": ["07:00-09:00", "17:00-19:00"],
+            "low_traffic_hours": ["00:00-06:00", "22:00-24:00"],
+            "weekly_pattern": {
+                "monday": "high",
+                "tuesday": "high",
+                "wednesday": "medium",
+                "thursday": "high",
+                "friday": "very_high",
+                "saturday": "medium",
+                "sunday": "low",
+            },
+            "growth_rate_percent": 12.5,
+            "volatility_index": 0.3,
+        }
+
+        # Identified patterns
+        patterns = [
+            {
+                "type": "rush_hour",
+                "description": "Morning rush hour pattern",
+                "time_windows": ["07:00-09:00"],
+                "confidence": 0.92,
+                "impact_level": "high",
+            },
+            {
+                "type": "weekend_reduction",
+                "description": "Weekend traffic reduction pattern",
+                "time_windows": ["Saturday", "Sunday"],
+                "confidence": 0.85,
+                "impact_level": "medium",
+            },
+        ]
+
+        # Seasonal analysis
+        seasonal_analysis = {
+            "season": "winter",
+            "seasonal_factor": 0.95,
+            "weather_impact": "moderate",
+            "holiday_effects": "minimal",
+            "trend_stability": "stable",
+        }
+
+        # Anomaly periods
+        anomaly_periods = [
+            {
+                "start_time": start_time + timedelta(days=5),
+                "end_time": start_time + timedelta(days=5, hours=2),
+                "anomaly_type": "traffic_surge",
+                "severity": "medium",
+                "probable_cause": "special_event",
+            }
+        ]
+
+        # Recommendations
+        recommendations = [
+            "Consider adaptive signal timing during peak hours",
+            "Implement dynamic lane allocation during rush hours",
+            "Monitor weekend patterns for tourism impact",
+            "Prepare contingency plans for identified anomaly patterns",
+        ]
+
+        # Statistical summary
+        statistical_summary = {
+            "total_data_points": 1440,  # Mock value
+            "mean_traffic_volume": 156.7,
+            "median_traffic_volume": 142.0,
+            "standard_deviation": 45.2,
+            "coefficient_of_variation": 0.29,
+            "r_squared": 0.78,
+            "correlation_factors": {
+                "time_of_day": 0.85,
+                "day_of_week": 0.72,
+                "weather": 0.34,
+            },
+        }
+
+        # Confidence metrics
+        confidence_metrics = {
+            "data_completeness": 0.94,
+            "trend_reliability": 0.87,
+            "prediction_accuracy": 0.82,
+            "model_performance": 0.89,
+        }
+
+        trend_response = TrendAnalysisResponse(
+            analysis_timestamp=datetime.now(UTC),
+            time_range=time_range,
+            cameras=camera_list or ["all_cameras"],
+            trends=trends,
+            patterns=patterns,
+            seasonal_analysis=seasonal_analysis,
+            anomaly_periods=anomaly_periods,
+            recommendations=recommendations,
+            statistical_summary=statistical_summary,
+            confidence_metrics=confidence_metrics,
+        )
+
+        # Cache for 1 hour
+        await cache.set_json(cache_key, trend_response.model_dump(), ttl=3600)
+
+        logger.info(
+            "Traffic trends analyzed",
+            cameras=len(camera_list) if camera_list else "all",
+            time_range_hours=(end_time - start_time).total_seconds() / 3600,
+            user_id=current_user.id,
+        )
+
+        return trend_response
+
+    except Exception as e:
+        logger.error(
+            "Failed to get traffic trends",
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve traffic trends",
         ) from e

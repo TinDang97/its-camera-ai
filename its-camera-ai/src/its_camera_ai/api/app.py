@@ -21,10 +21,13 @@ from ..core.config import Settings, get_settings
 from ..core.exceptions import ITSCameraAIError
 from ..core.logging import get_logger, setup_logging
 from .middleware import (
+    APIKeyAuthMiddleware,
+    CSRFProtectionMiddleware,
+    EnhancedRateLimitMiddleware,
     LoggingMiddleware,
     MetricsMiddleware,
-    RateLimitMiddleware,
-    SecurityMiddleware,
+    SecurityHeadersMiddleware,
+    SecurityValidationMiddleware,
 )
 from .routers import (
     analytics,
@@ -154,16 +157,37 @@ def create_app_with_di(settings: Settings | None = None) -> FastAPI:
 
 
 def _add_middleware(app: FastAPI, settings: Settings) -> None:
-    """Add middleware to FastAPI application."""
+    """Add comprehensive security middleware to FastAPI application.
 
-    # Security middleware (outermost)
-    if settings.security.enabled:
-        app.add_middleware(SecurityMiddleware)
+    Order matters - middleware is applied in reverse order (last added = outermost layer).
+    """
 
-    # Trusted host middleware
-    if settings.security.allowed_hosts:
+    # Logging middleware (innermost - closest to request handlers)
+    app.add_middleware(LoggingMiddleware)
+
+    # Metrics middleware
+    if settings.monitoring.enable_metrics:
+        app.add_middleware(MetricsMiddleware)
+
+    # Enhanced rate limiting middleware with advanced features
+    if settings.rate_limit_enabled:
+        app.add_middleware(EnhancedRateLimitMiddleware)
+
+    # API key authentication middleware
+    app.add_middleware(APIKeyAuthMiddleware)
+
+    # CSRF protection middleware
+    app.add_middleware(CSRFProtectionMiddleware)
+
+    # Security validation middleware (SQL injection, XSS, etc.)
+    app.add_middleware(SecurityValidationMiddleware)
+
+    # Compression middleware
+    if settings.compression.enabled:
         app.add_middleware(
-            TrustedHostMiddleware, allowed_hosts=settings.security.allowed_hosts
+            GZipMiddleware,
+            minimum_size=settings.compression.min_size,
+            compresslevel=settings.compression.level,
         )
 
     # CORS middleware
@@ -176,24 +200,15 @@ def _add_middleware(app: FastAPI, settings: Settings) -> None:
             allow_headers=settings.security.allow_headers,
         )
 
-    # Compression middleware
-    if settings.compression.enabled:
+    # Trusted host middleware
+    if settings.security.allowed_hosts:
         app.add_middleware(
-            GZipMiddleware,
-            minimum_size=settings.compression.min_size,
-            compresslevel=settings.compression.level,
+            TrustedHostMiddleware, allowed_hosts=settings.security.allowed_hosts
         )
 
-    # Rate limiting middleware
-    if settings.rate_limit_enabled:
-        app.add_middleware(RateLimitMiddleware)
-
-    # Metrics middleware
-    if settings.monitoring.enable_metrics:
-        app.add_middleware(MetricsMiddleware)
-
-    # Logging middleware (innermost - closest to request handlers)
-    app.add_middleware(LoggingMiddleware)
+    # Security headers middleware (outermost - adds security headers to all responses)
+    if settings.security.enabled:
+        app.add_middleware(SecurityHeadersMiddleware)
 
 
 def _add_exception_handlers(app: FastAPI) -> None:

@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 class FrameRepository(BaseRepository[FrameMetadata]):
     """Repository for frame data access operations.
-    
+
     Specialized methods for frame management, metadata operations,
     and performance monitoring with optimized queries.
     """
@@ -37,15 +37,15 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         offset: int = 0
     ) -> list[FrameMetadata]:
         """Get frames by camera ID.
-        
+
         Args:
             camera_id: Camera identifier
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of frame metadata from the specified camera
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -77,17 +77,17 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         offset: int = 0
     ) -> list[FrameMetadata]:
         """Get frames within a time range.
-        
+
         Args:
             start_time: Start of time range
             end_time: End of time range
             camera_id: Optional camera ID to filter by
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of frames within the time range
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -127,15 +127,15 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         limit: int = 100
     ) -> list[FrameMetadata]:
         """Get recent frames from a camera.
-        
+
         Args:
             camera_id: Camera identifier
             minutes: Number of minutes to look back
             limit: Maximum number of results
-            
+
         Returns:
             List of recent frames
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -154,15 +154,15 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         offset: int = 0
     ) -> list[FrameMetadata]:
         """Get frames by processing status.
-        
+
         Args:
             status: Frame processing status
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of frames with the specified status
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -193,16 +193,16 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         error_message: str | None = None
     ) -> bool:
         """Update frame processing status.
-        
+
         Args:
             frame_id: Frame identifier
             status: New processing status
             processing_time_ms: Optional processing time in milliseconds
             error_message: Optional error message
-            
+
         Returns:
             True if status updated successfully
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -239,14 +239,14 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         hours: int = 24
     ) -> dict[str, Any]:
         """Get frame processing statistics.
-        
+
         Args:
             camera_id: Optional camera ID to filter by
             hours: Number of hours to analyze
-            
+
         Returns:
             Dictionary with processing statistics
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -308,14 +308,14 @@ class FrameRepository(BaseRepository[FrameMetadata]):
         batch_size: int = 1000
     ) -> int:
         """Clean up old frames to manage storage.
-        
+
         Args:
             older_than_days: Delete frames older than this many days
             batch_size: Number of frames to delete per batch
-            
+
         Returns:
             Number of frames deleted
-            
+
         Raises:
             DatabaseError: If cleanup fails
         """

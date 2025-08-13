@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 class CameraService:
     """Camera service using repository pattern and dependency injection.
-    
+
     Provides high-level camera operations while delegating data access
     to the camera repository for clean architecture separation.
     """
@@ -33,14 +33,14 @@ class CameraService:
         self, camera_data: CameraCreateSchema, user_id: str | None = None
     ) -> Camera:
         """Create a new camera with validation and settings initialization.
-        
+
         Args:
             camera_data: Camera creation data
             user_id: Optional user ID for audit logging
-            
+
         Returns:
             Created camera instance
-            
+
         Raises:
             DatabaseError: If camera creation fails
         """
@@ -92,13 +92,13 @@ class CameraService:
 
     async def get_camera(self, camera_id: str) -> Camera:
         """Get camera by ID.
-        
+
         Args:
             camera_id: Camera identifier
-            
+
         Returns:
             Camera instance
-            
+
         Raises:
             NotFoundError: If camera not found
         """
@@ -106,10 +106,10 @@ class CameraService:
 
     async def get_camera_by_name(self, name: str) -> Camera | None:
         """Get camera by name.
-        
+
         Args:
             name: Camera name
-            
+
         Returns:
             Camera instance or None if not found
         """
@@ -122,15 +122,15 @@ class CameraService:
         user_id: str | None = None
     ) -> Camera:
         """Update camera information.
-        
+
         Args:
             camera_id: Camera identifier
             camera_data: Update data
             user_id: Optional user ID for audit logging
-            
+
         Returns:
             Updated camera instance
-            
+
         Raises:
             NotFoundError: If camera not found
             DatabaseError: If update fails
@@ -176,14 +176,14 @@ class CameraService:
 
     async def delete_camera(self, camera_id: str, user_id: str | None = None) -> bool:
         """Delete camera.
-        
+
         Args:
             camera_id: Camera identifier
             user_id: Optional user ID for audit logging
-            
+
         Returns:
             True if deleted successfully
-            
+
         Raises:
             DatabaseError: If deletion fails
         """
@@ -223,13 +223,13 @@ class CameraService:
         location: str | None = None
     ) -> list[Camera]:
         """List cameras with optional filtering.
-        
+
         Args:
             limit: Maximum number of results
             offset: Number of results to skip
             status: Optional status filter
             location: Optional location filter
-            
+
         Returns:
             List of cameras
         """
@@ -243,7 +243,7 @@ class CameraService:
 
     async def get_online_cameras(self) -> list[Camera]:
         """Get all online cameras.
-        
+
         Returns:
             List of online cameras
         """
@@ -251,7 +251,7 @@ class CameraService:
 
     async def get_streaming_cameras(self) -> list[Camera]:
         """Get all cameras currently streaming.
-        
+
         Returns:
             List of streaming cameras
         """
@@ -264,12 +264,12 @@ class CameraService:
         status_message: str | None = None
     ) -> bool:
         """Update camera status.
-        
+
         Args:
             camera_id: Camera identifier
             status: New status
             status_message: Optional status message
-            
+
         Returns:
             True if status updated successfully
         """
@@ -299,10 +299,10 @@ class CameraService:
 
     async def update_last_seen(self, camera_id: str) -> bool:
         """Update camera last seen timestamp.
-        
+
         Args:
             camera_id: Camera identifier
-            
+
         Returns:
             True if updated successfully
         """
@@ -310,7 +310,7 @@ class CameraService:
 
     async def get_camera_statistics(self) -> dict[str, Any]:
         """Get camera statistics and status counts.
-        
+
         Returns:
             Dictionary with camera statistics
         """
@@ -347,12 +347,12 @@ class CameraService:
         offset: int = 0
     ) -> list[Camera]:
         """Search cameras by name, location, or description.
-        
+
         Args:
             query: Search query
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of matching cameras
         """
@@ -360,10 +360,10 @@ class CameraService:
 
     async def get_cameras_by_location(self, location: str) -> list[Camera]:
         """Get cameras by location.
-        
+
         Args:
             location: Location to search for
-            
+
         Returns:
             List of cameras at the location
         """
@@ -371,7 +371,7 @@ class CameraService:
 
     async def get_maintenance_cameras(self) -> list[Camera]:
         """Get cameras that need maintenance.
-        
+
         Returns:
             List of cameras needing maintenance
         """
@@ -384,12 +384,12 @@ class CameraService:
         status_message: str | None = None
     ) -> dict[str, bool]:
         """Batch update status for multiple cameras.
-        
+
         Args:
             camera_ids: List of camera identifiers
             status: New status
             status_message: Optional status message
-            
+
         Returns:
             Dictionary mapping camera IDs to success status
         """

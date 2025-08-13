@@ -335,3 +335,180 @@ class AlertRule(BaseModel):
     cooldown_minutes: int = Field(
         description="Cooldown period between alerts", default=5, ge=1
     )
+
+
+class AlertRuleRequest(BaseModel):
+    """Request schema for creating alert rules."""
+
+    name: str = Field(description="Alert rule name", max_length=100)
+    description: str | None = Field(None, description="Rule description")
+    condition: dict[str, Any] = Field(description="Alert condition definition")
+    severity: Severity = Field(description="Alert severity level")
+    cameras: list[str] | None = Field(None, description="Specific cameras")
+    zones: list[str] | None = Field(None, description="Specific zones")
+    schedule: dict[str, Any] | None = Field(None, description="Active schedule")
+    notification_channels: list[str] = Field(
+        description="Notification channels (email, sms, webhook)"
+    )
+    is_active: bool = Field(True, description="Whether rule is active")
+    cooldown_minutes: int = Field(
+        description="Cooldown period between alerts", default=5, ge=1
+    )
+
+
+class AlertRuleResponse(BaseModel):
+    """Response schema for alert rules."""
+
+    id: str = Field(description="Alert rule ID")
+    name: str = Field(description="Alert rule name")
+    description: str | None = Field(None, description="Rule description")
+    condition: dict[str, Any] = Field(description="Alert condition definition")
+    severity: Severity = Field(description="Alert severity level")
+    cameras: list[str] | None = Field(None, description="Specific cameras")
+    zones: list[str] | None = Field(None, description="Specific zones")
+    schedule: dict[str, Any] | None = Field(None, description="Active schedule")
+    notification_channels: list[str] = Field(
+        description="Notification channels (email, sms, webhook)"
+    )
+    is_active: bool = Field(description="Whether rule is active")
+    cooldown_minutes: int = Field(description="Cooldown period between alerts")
+    created_at: datetime = Field(description="Rule creation timestamp")
+    updated_at: datetime = Field(description="Rule last update timestamp")
+    created_by: str = Field(description="User ID who created the rule")
+    last_triggered: datetime | None = Field(None, description="Last trigger timestamp")
+    trigger_count: int = Field(0, description="Total number of triggers")
+
+    class Config:
+        from_attributes = True
+
+
+class DashboardResponse(BaseModel):
+    """Response schema for dashboard data."""
+
+    camera_id: str = Field(description="Camera ID")
+    timestamp: datetime = Field(description="Dashboard data timestamp")
+    real_time_metrics: TrafficMetrics = Field(description="Real-time traffic metrics")
+    active_incidents: list[IncidentAlert] = Field(description="Active incidents")
+    vehicle_counts: list[VehicleCount] = Field(description="Recent vehicle counts")
+    recent_violations: list[dict[str, Any]] = Field(description="Recent violations")
+    anomalies: list[dict[str, Any]] = Field(description="Detected anomalies")
+    camera_status: dict[str, Any] = Field(description="Camera status information")
+    performance_metrics: dict[str, Any] = Field(description="Performance metrics")
+    alerts_summary: dict[str, Any] = Field(description="Alerts summary")
+    hourly_trends: list[dict[str, Any]] = Field(description="Hourly trend data")
+    congestion_heatmap: dict[str, Any] | None = Field(None, description="Congestion heatmap data")
+
+
+class PredictionResponse(BaseModel):
+    """Response schema for traffic predictions."""
+
+    camera_id: str = Field(description="Camera ID")
+    prediction_timestamp: datetime = Field(description="When prediction was made")
+    forecast_start: datetime = Field(description="Forecast period start")
+    forecast_end: datetime = Field(description="Forecast period end")
+    predictions: list[dict[str, Any]] = Field(description="Traffic predictions")
+    confidence_interval: dict[str, float] = Field(description="Prediction confidence")
+    ml_model_version: str = Field(description="ML model version used")
+    ml_model_accuracy: float = Field(description="Model accuracy score", ge=0, le=1)
+    factors_considered: list[str] = Field(description="Factors considered in prediction")
+    historical_baseline: dict[str, Any] = Field(description="Historical baseline data")
+
+
+class HeatmapResponse(BaseModel):
+    """Response schema for traffic heatmap data."""
+
+    camera_id: str = Field(description="Camera ID")
+    timestamp: datetime = Field(description="Heatmap data timestamp")
+    time_range: TimeRange = Field(description="Data time range")
+    heatmap_data: list[dict[str, Any]] = Field(description="Heatmap grid data")
+    zones: list[dict[str, Any]] = Field(description="Zone definitions")
+    intensity_scale: dict[str, float] = Field(description="Intensity scale mapping")
+    aggregation_method: str = Field(description="Data aggregation method")
+    spatial_resolution: dict[str, int] = Field(description="Spatial resolution (width x height)")
+    metadata: dict[str, Any] = Field(description="Additional metadata")
+
+
+class TrendAnalysisResponse(BaseModel):
+    """Response schema for traffic trend analysis."""
+
+    analysis_timestamp: datetime = Field(description="Analysis timestamp")
+    time_range: TimeRange = Field(description="Analysis time range")
+    cameras: list[str] = Field(description="Cameras included in analysis")
+    trends: dict[str, Any] = Field(description="Trend analysis results")
+    patterns: list[dict[str, Any]] = Field(description="Identified patterns")
+    seasonal_analysis: dict[str, Any] = Field(description="Seasonal trend analysis")
+    anomaly_periods: list[dict[str, Any]] = Field(description="Anomalous time periods")
+    recommendations: list[str] = Field(description="Traffic optimization recommendations")
+    statistical_summary: dict[str, Any] = Field(description="Statistical summary")
+    confidence_metrics: dict[str, float] = Field(description="Analysis confidence metrics")
+
+
+class AnomalyDetectionRequest(BaseModel):
+    """Request schema for triggering anomaly detection."""
+
+    camera_ids: list[str] = Field(description="Camera IDs to analyze")
+    time_range: TimeRange = Field(description="Analysis time range")
+    detection_method: str = Field("isolation_forest", description="Anomaly detection method")
+    sensitivity: float = Field(0.1, description="Detection sensitivity", ge=0, le=1)
+    min_anomaly_score: float = Field(0.5, description="Minimum anomaly score", ge=0, le=1)
+    include_historical_context: bool = Field(True, description="Include historical context")
+    zones: list[str] | None = Field(None, description="Specific zones to analyze")
+    vehicle_types: list[VehicleClass] | None = Field(None, description="Vehicle types to include")
+
+    @field_validator("detection_method")
+    @classmethod
+    def validate_detection_method(cls, v: str) -> str:
+        """Validate detection method."""
+        valid_methods = ["isolation_forest", "one_class_svm", "autoencoder", "statistical"]
+        if v not in valid_methods:
+            raise ValueError(f"Detection method must be one of: {', '.join(valid_methods)}")
+        return v
+
+
+class ReportGenerationRequest(BaseModel):
+    """Request schema for generating analytics reports."""
+
+    report_type: str = Field(description="Type of report to generate")
+    time_range: TimeRange = Field(description="Report time range")
+    camera_ids: list[str] | None = Field(None, description="Specific cameras")
+    format: str = Field("json", description="Report format")
+    include_charts: bool = Field(False, description="Include chart visualizations")
+    email_recipients: list[str] | None = Field(None, description="Email delivery recipients")
+    filters: dict[str, Any] | None = Field(None, description="Additional filters")
+    template: str | None = Field(None, description="Report template to use")
+    priority: str = Field("normal", description="Report generation priority")
+
+    @field_validator("report_type")
+    @classmethod
+    def validate_report_type(cls, v: str) -> str:
+        """Validate report type."""
+        valid_types = [
+            "traffic_summary",
+            "incident_report",
+            "vehicle_counts",
+            "speed_analysis",
+            "congestion_analysis",
+            "compliance_report",
+            "anomaly_report",
+            "trend_analysis",
+            "custom",
+        ]
+        if v not in valid_types:
+            raise ValueError(f"Report type must be one of: {', '.join(valid_types)}")
+        return v
+
+    @field_validator("format")
+    @classmethod
+    def validate_format(cls, v: str) -> str:
+        """Validate report format."""
+        if v not in ["json", "csv", "pdf", "excel", "html"]:
+            raise ValueError("Format must be 'json', 'csv', 'pdf', 'excel', or 'html'")
+        return v
+
+    @field_validator("priority")
+    @classmethod
+    def validate_priority(cls, v: str) -> str:
+        """Validate priority level."""
+        if v not in ["low", "normal", "high", "urgent"]:
+            raise ValueError("Priority must be 'low', 'normal', 'high', or 'urgent'")
+        return v

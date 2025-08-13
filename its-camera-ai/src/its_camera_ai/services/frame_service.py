@@ -40,10 +40,10 @@ class FrameService:
 
     async def get_by_id(self, frame_id: str) -> FrameMetadata | None:
         """Get frame metadata by ID.
-        
+
         Args:
             frame_id: Frame identifier
-            
+
         Returns:
             Frame metadata if found, None otherwise
         """
@@ -51,10 +51,10 @@ class FrameService:
 
     async def create(self, **kwargs: Any) -> FrameMetadata:
         """Create frame metadata.
-        
+
         Args:
             **kwargs: Frame metadata fields
-            
+
         Returns:
             Created frame metadata
         """
@@ -62,11 +62,11 @@ class FrameService:
 
     async def update(self, frame_id: str, **kwargs: Any) -> FrameMetadata:
         """Update frame metadata.
-        
+
         Args:
             frame_id: Frame identifier
             **kwargs: Fields to update
-            
+
         Returns:
             Updated frame metadata
         """
@@ -74,10 +74,10 @@ class FrameService:
 
     async def delete(self, frame_id: str) -> bool:
         """Delete frame metadata.
-        
+
         Args:
             frame_id: Frame identifier
-            
+
         Returns:
             True if deleted successfully
         """
@@ -85,10 +85,10 @@ class FrameService:
 
     async def bulk_delete(self, frame_ids: list[str]) -> int:
         """Bulk delete frame metadata.
-        
+
         Args:
             frame_ids: List of frame identifiers
-            
+
         Returns:
             Number of deleted frames
         """
@@ -498,11 +498,11 @@ class FrameService:
         limit: int = 100
     ) -> list[FrameMetadata]:
         """Get frames by processing status.
-        
+
         Args:
             status: Processing status to filter by
             limit: Maximum number of frames
-            
+
         Returns:
             List of frames with the specified status
         """
@@ -516,13 +516,13 @@ class FrameService:
         limit: int = 1000
     ) -> list[FrameMetadata]:
         """Get frames within a time range.
-        
+
         Args:
             start_time: Start time
             end_time: End time
             camera_id: Optional camera ID filter
             limit: Maximum number of frames
-            
+
         Returns:
             List of frames within the time range
         """
@@ -542,10 +542,10 @@ class DetectionService:
 
     async def get_by_id(self, detection_id: str) -> DetectionResult | None:
         """Get detection result by ID.
-        
+
         Args:
             detection_id: Detection identifier
-            
+
         Returns:
             Detection result if found, None otherwise
         """
@@ -553,10 +553,10 @@ class DetectionService:
 
     async def create(self, **kwargs: Any) -> DetectionResult:
         """Create detection result.
-        
+
         Args:
             **kwargs: Detection result fields
-            
+
         Returns:
             Created detection result
         """
@@ -564,11 +564,11 @@ class DetectionService:
 
     async def update(self, detection_id: str, **kwargs: Any) -> DetectionResult:
         """Update detection result.
-        
+
         Args:
             detection_id: Detection identifier
             **kwargs: Fields to update
-            
+
         Returns:
             Updated detection result
         """
@@ -576,10 +576,10 @@ class DetectionService:
 
     async def delete(self, detection_id: str) -> bool:
         """Delete detection result.
-        
+
         Args:
             detection_id: Detection identifier
-            
+
         Returns:
             True if deleted successfully
         """
@@ -671,10 +671,10 @@ class DetectionService:
 
     async def get_by_frame_id(self, frame_id: str) -> list[DetectionResult]:
         """Get detection results by frame ID.
-        
+
         Args:
             frame_id: Frame identifier
-            
+
         Returns:
             List of detection results for the frame
         """
@@ -687,12 +687,12 @@ class DetectionService:
         offset: int = 0
     ) -> list[DetectionResult]:
         """Get detection results by camera ID.
-        
+
         Args:
             camera_id: Camera identifier
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of detection results from the camera
         """
@@ -707,12 +707,12 @@ class DetectionService:
         hours: int = 24
     ) -> dict[str, Any]:
         """Get detection statistics.
-        
+
         Args:
             camera_id: Optional camera ID filter
             class_name: Optional class name filter
             hours: Number of hours to analyze
-            
+
         Returns:
             Detection statistics dictionary
         """
@@ -724,11 +724,11 @@ class DetectionService:
         self, older_than_days: int = 90, batch_size: int = 1000
     ) -> int:
         """Clean up old detection results.
-        
+
         Args:
             older_than_days: Delete detections older than this many days
             batch_size: Number of detections to delete per batch
-            
+
         Returns:
             Number of detections deleted
         """

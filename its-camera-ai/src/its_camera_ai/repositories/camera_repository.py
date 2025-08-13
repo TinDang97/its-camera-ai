@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 class CameraRepository(BaseRepository[Camera]):
     """Repository for camera data access operations.
-    
+
     Specialized methods for camera management, status tracking,
     and performance monitoring with optimized queries.
     """
@@ -40,13 +40,13 @@ class CameraRepository(BaseRepository[Camera]):
 
     async def get_by_name(self, name: str) -> Camera | None:
         """Get camera by name.
-        
+
         Args:
             name: Camera name to search for
-            
+
         Returns:
             Camera instance or None if not found
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -65,13 +65,13 @@ class CameraRepository(BaseRepository[Camera]):
 
     async def get_by_location(self, location: str) -> list[Camera]:
         """Get cameras by location.
-        
+
         Args:
             location: Location to search for
-            
+
         Returns:
             List of cameras at the location
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -95,15 +95,15 @@ class CameraRepository(BaseRepository[Camera]):
         offset: int = 0
     ) -> list[Camera]:
         """Get cameras by status.
-        
+
         Args:
             status: Camera status to filter by
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of cameras with the specified status
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -131,15 +131,15 @@ class CameraRepository(BaseRepository[Camera]):
         offset: int = 0
     ) -> list[Camera]:
         """Get cameras by type.
-        
+
         Args:
             camera_type: Camera type to filter by
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of cameras of the specified type
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -166,14 +166,14 @@ class CameraRepository(BaseRepository[Camera]):
         offset: int = 0
     ) -> list[Camera]:
         """Get online cameras.
-        
+
         Args:
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of online cameras
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -185,14 +185,14 @@ class CameraRepository(BaseRepository[Camera]):
         offset: int = 0
     ) -> list[Camera]:
         """Get cameras currently streaming.
-        
+
         Args:
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of streaming cameras
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -205,15 +205,15 @@ class CameraRepository(BaseRepository[Camera]):
         status_message: str | None = None
     ) -> bool:
         """Update camera status.
-        
+
         Args:
             camera_id: Camera identifier
             status: New status
             status_message: Optional status message
-            
+
         Returns:
             True if status updated successfully
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -247,14 +247,14 @@ class CameraRepository(BaseRepository[Camera]):
         last_seen: datetime | None = None
     ) -> bool:
         """Update camera last seen timestamp.
-        
+
         Args:
             camera_id: Camera identifier
             last_seen: Last seen timestamp (defaults to current time)
-            
+
         Returns:
             True if updated successfully
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -278,10 +278,10 @@ class CameraRepository(BaseRepository[Camera]):
 
     async def get_status_counts(self) -> dict[str, int]:
         """Get camera count by status.
-        
+
         Returns:
             Dictionary with status counts
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -309,15 +309,15 @@ class CameraRepository(BaseRepository[Camera]):
         offset: int = 0
     ) -> list[Camera]:
         """Search cameras by name, location, or description.
-        
+
         Args:
             query: Search query
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of matching cameras
-            
+
         Raises:
             DatabaseError: If search fails
         """
@@ -343,10 +343,10 @@ class CameraRepository(BaseRepository[Camera]):
 
     async def get_cameras_needing_maintenance(self) -> list[Camera]:
         """Get cameras that need maintenance.
-        
+
         Returns:
             List of cameras needing maintenance
-            
+
         Raises:
             DatabaseError: If query fails
         """

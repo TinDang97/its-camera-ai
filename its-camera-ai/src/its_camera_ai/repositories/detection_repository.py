@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 class DetectionRepository(BaseRepository[DetectionResult]):
     """Repository for detection result data access operations.
-    
+
     Specialized methods for detection analytics, confidence analysis,
     and performance monitoring with optimized queries.
     """
@@ -32,13 +32,13 @@ class DetectionRepository(BaseRepository[DetectionResult]):
 
     async def get_by_frame_id(self, frame_id: str) -> list[DetectionResult]:
         """Get detection results by frame ID.
-        
+
         Args:
             frame_id: Frame identifier
-            
+
         Returns:
             List of detection results for the frame
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -66,15 +66,15 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         offset: int = 0
     ) -> list[DetectionResult]:
         """Get detection results by camera ID.
-        
+
         Args:
             camera_id: Camera identifier
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of detection results from the camera
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -105,16 +105,16 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         offset: int = 0
     ) -> list[DetectionResult]:
         """Get detection results by object class.
-        
+
         Args:
             class_name: Object class name (e.g., 'car', 'truck', 'person')
             camera_id: Optional camera ID to filter by
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of detection results for the specified class
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -151,16 +151,16 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         limit: int = 1000
     ) -> list[DetectionResult]:
         """Get high-confidence detection results.
-        
+
         Args:
             min_confidence: Minimum confidence threshold
             camera_id: Optional camera ID to filter by
             hours: Number of hours to look back
             limit: Maximum number of results
-            
+
         Returns:
             List of high-confidence detection results
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -202,15 +202,15 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         end_time: datetime | None = None
     ) -> dict[str, int]:
         """Get detection counts by object class.
-        
+
         Args:
             camera_id: Optional camera ID to filter by
             start_time: Optional start time filter
             end_time: Optional end time filter
-            
+
         Returns:
             Dictionary with class names and counts
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -254,15 +254,15 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         hours: int = 24
     ) -> dict[str, float]:
         """Get confidence statistics for detections.
-        
+
         Args:
             class_name: Optional class name to filter by
             camera_id: Optional camera ID to filter by
             hours: Number of hours to analyze
-            
+
         Returns:
             Dictionary with confidence statistics
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -325,14 +325,14 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         days: int = 7
     ) -> list[dict[str, Any]]:
         """Get hourly detection counts for time-series analysis.
-        
+
         Args:
             camera_id: Optional camera ID to filter by
             days: Number of days to analyze
-            
+
         Returns:
             List of dictionaries with hourly counts
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -376,14 +376,14 @@ class DetectionRepository(BaseRepository[DetectionResult]):
         batch_size: int = 1000
     ) -> int:
         """Clean up old detection results to manage storage.
-        
+
         Args:
             older_than_days: Delete detections older than this many days
             batch_size: Number of detections to delete per batch
-            
+
         Returns:
             Number of detections deleted
-            
+
         Raises:
             DatabaseError: If cleanup fails
         """

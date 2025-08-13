@@ -176,7 +176,6 @@ class MetricsRepository(BaseRepository[SystemMetrics]):
                 start_time = datetime.now() - timedelta(hours=hours)
 
                 # PostgreSQL-specific time bucketing
-                bucket_size = f"{interval_minutes} minutes"
 
                 query = select(
                     func.date_trunc("hour", SystemMetrics.timestamp).label(

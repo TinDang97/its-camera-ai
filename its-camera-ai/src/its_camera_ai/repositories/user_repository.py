@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 class UserRepository(BaseRepository[User]):
     """Repository for user data access operations.
-    
+
     Specialized methods for user authentication, role management,
     and security operations with optimized queries.
     """
@@ -31,13 +31,13 @@ class UserRepository(BaseRepository[User]):
 
     async def get_by_username(self, username: str) -> User | None:
         """Get user by username.
-        
+
         Args:
             username: Username to search for
-            
+
         Returns:
             User instance or None if not found
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -56,13 +56,13 @@ class UserRepository(BaseRepository[User]):
 
     async def get_by_email(self, email: str) -> User | None:
         """Get user by email.
-        
+
         Args:
             email: Email to search for
-            
+
         Returns:
             User instance or None if not found
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -84,13 +84,13 @@ class UserRepository(BaseRepository[User]):
         username_or_email: str
     ) -> User | None:
         """Get user by username or email.
-        
+
         Args:
             username_or_email: Username or email to search for
-            
+
         Returns:
             User instance or None if not found
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -114,13 +114,13 @@ class UserRepository(BaseRepository[User]):
 
     async def get_with_roles(self, user_id: str) -> User | None:
         """Get user with roles loaded.
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             User instance with roles or None if not found
-            
+
         Raises:
             DatabaseError: If query fails
         """
@@ -145,21 +145,21 @@ class UserRepository(BaseRepository[User]):
         offset: int = 0
     ) -> list[User]:
         """Get active users.
-        
+
         Args:
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of active users
-            
+
         Raises:
             DatabaseError: If query fails
         """
         async with self._get_session() as session:
             try:
                 query = select(User).where(
-                    and_(User.is_active == True, User.is_verified == True)
+                    and_(User.is_active, User.is_verified)
                 ).limit(limit).offset(offset)
 
                 result = await session.execute(query)
@@ -178,14 +178,14 @@ class UserRepository(BaseRepository[User]):
         hashed_password: str
     ) -> bool:
         """Update user password.
-        
+
         Args:
             user_id: User identifier
             hashed_password: New hashed password
-            
+
         Returns:
             True if password updated successfully
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -215,14 +215,14 @@ class UserRepository(BaseRepository[User]):
         login_time: datetime | None = None
     ) -> bool:
         """Update user last login time.
-        
+
         Args:
             user_id: User identifier
             login_time: Login time (defaults to current time)
-            
+
         Returns:
             True if updated successfully
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -246,13 +246,13 @@ class UserRepository(BaseRepository[User]):
 
     async def set_verified(self, user_id: str) -> bool:
         """Mark user as verified.
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             True if marked as verified
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -278,13 +278,13 @@ class UserRepository(BaseRepository[User]):
 
     async def toggle_active_status(self, user_id: str) -> bool:
         """Toggle user active status.
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             New active status
-            
+
         Raises:
             DatabaseError: If update fails
         """
@@ -314,15 +314,15 @@ class UserRepository(BaseRepository[User]):
         offset: int = 0
     ) -> list[User]:
         """Search users by username, email, or full name.
-        
+
         Args:
             query: Search query
             limit: Maximum number of results
             offset: Number of results to skip
-            
+
         Returns:
             List of matching users
-            
+
         Raises:
             DatabaseError: If search fails
         """

@@ -441,7 +441,7 @@ class MetricsService:
             created_count = 0
 
             # Create aggregations for each group
-            for (metric_name, metric_type, source_type, source_id), metrics in metric_groups.items():
+            for (metric_name, _metric_type, _source_type, _source_id), metrics in metric_groups.items():
                 if not metrics:
                     continue
 
@@ -449,43 +449,25 @@ class MetricsService:
                 values.sort()
 
                 sample_count = len(values)
-                min_value = min(values)
-                max_value = max(values)
+                min(values)
+                max(values)
                 avg_value = sum(values) / sample_count
-                sum_value = sum(values)
+                sum(values)
 
                 # Calculate standard deviation
                 variance = sum((x - avg_value) ** 2 for x in values) / sample_count
-                std_deviation = variance ** 0.5 if variance > 0 else None
+                variance ** 0.5 if variance > 0 else None
 
                 # Calculate percentiles
                 p50_idx = int(sample_count * 0.5)
                 p95_idx = int(sample_count * 0.95)
                 p99_idx = int(sample_count * 0.99)
 
-                p50_value = values[p50_idx] if p50_idx < sample_count else values[-1]
-                p95_value = values[p95_idx] if p95_idx < sample_count else values[-1]
-                p99_value = values[p99_idx] if p99_idx < sample_count else values[-1]
+                values[p50_idx] if p50_idx < sample_count else values[-1]
+                values[p95_idx] if p95_idx < sample_count else values[-1]
+                values[p99_idx] if p99_idx < sample_count else values[-1]
 
                 # Create aggregated metric using repository
-                aggregated_data = {
-                    "metric_name": metric_name,
-                    "metric_type": metric_type,
-                    "aggregation_period": "1h",
-                    "period_start": period_start,
-                    "period_end": period_end,
-                    "source_type": source_type,
-                    "source_id": source_id,
-                    "sample_count": sample_count,
-                    "min_value": min_value,
-                    "max_value": max_value,
-                    "avg_value": avg_value,
-                    "sum_value": sum_value,
-                    "std_deviation": std_deviation,
-                    "p50_value": p50_value,
-                    "p95_value": p95_value,
-                    "p99_value": p99_value,
-                }
 
                 # Note: This assumes AggregatedMetrics has a repository
                 # For now, we'll create the instance directly and use the base repository pattern
