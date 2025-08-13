@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import BaseModel
+from .base import BaseTableModel
 
 
 class MetricType(str, Enum):
@@ -88,14 +88,12 @@ class MetricUnit(str, Enum):
     NONE = "none"
 
 
-class SystemMetrics(BaseModel):
+class SystemMetrics(BaseTableModel):
     """System performance and operational metrics.
 
     Designed for time-series data storage with efficient querying
     for monitoring dashboards and alerting systems.
     """
-
-    __tablename__ = "system_metrics"
 
     # Metric identification
     metric_name: Mapped[str] = mapped_column(
@@ -109,15 +107,13 @@ class SystemMetrics(BaseModel):
     )
 
     # Metric value and timestamp
-    value: Mapped[float] = mapped_column(
-        Float, nullable=False, comment="Metric value"
-    )
+    value: Mapped[float] = mapped_column(Float, nullable=False, comment="Metric value")
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         index=True,
         server_default=text("CURRENT_TIMESTAMP"),
-        comment="Metric collection timestamp"
+        comment="Metric collection timestamp",
     )
 
     # Source information
@@ -176,47 +172,49 @@ class SystemMetrics(BaseModel):
         Index("idx_metrics_name_timestamp", "metric_name", "timestamp"),
         Index("idx_metrics_type_timestamp", "metric_type", "timestamp"),
         Index("idx_metrics_source_timestamp", "source_type", "source_id", "timestamp"),
-
         # Source-specific queries
         Index("idx_metrics_hostname_timestamp", "hostname", "timestamp"),
         Index("idx_metrics_service_timestamp", "service_name", "timestamp"),
-
         # Aggregation queries
-        Index("idx_metrics_aggregation", "metric_name", "aggregation_period", "timestamp"),
-
+        Index(
+            "idx_metrics_aggregation", "metric_name", "aggregation_period", "timestamp"
+        ),
         # Value-based queries (for alerting)
         Index("idx_metrics_value_thresholds", "metric_name", "value", "timestamp"),
-
         # Performance monitoring specific indexes
         Index(
             "idx_metrics_performance",
-            "metric_type", "source_id", "timestamp",
+            "metric_type",
+            "source_id",
+            "timestamp",
             postgresql_where=text(
                 "metric_type IN ('processing_time', 'throughput', 'latency', 'frame_rate')"
-            )
+            ),
         ),
-
         # Resource utilization queries
         Index(
             "idx_metrics_resources",
-            "metric_type", "hostname", "timestamp",
+            "metric_type",
+            "hostname",
+            "timestamp",
             postgresql_where=text(
                 "metric_type IN ('cpu_usage', 'memory_usage', 'gpu_usage', 'disk_usage')"
-            )
+            ),
         ),
-
         # Recent metrics (last 24 hours)
         Index(
             "idx_metrics_recent",
-            "metric_name", "timestamp", "value",
-            postgresql_where=text("timestamp > CURRENT_TIMESTAMP - INTERVAL '24 hours'")
+            "metric_name",
+            "timestamp",
+            "value",
+            postgresql_where=text(
+                "timestamp > CURRENT_TIMESTAMP - INTERVAL '24 hours'"
+            ),
         ),
-
         # GIN index for labels/tags queries
         Index("idx_metrics_labels_gin", "labels", postgresql_using="gin"),
-
         # Consider partitioning by timestamp for very large datasets
-        {"comment": "System metrics optimized for time-series monitoring"}
+        {"comment": "System metrics optimized for time-series monitoring"},
     )
 
     def set_thresholds(self, warning: float, critical: float) -> None:
@@ -255,16 +253,15 @@ class SystemMetrics(BaseModel):
     def is_warning(self) -> bool:
         """Check if metric value exceeds warning threshold."""
         return (
-            self.warning_threshold is not None and
-            self.value >= self.warning_threshold
+            self.warning_threshold is not None and self.value >= self.warning_threshold
         )
 
     @property
     def is_critical(self) -> bool:
         """Check if metric value exceeds critical threshold."""
         return (
-            self.critical_threshold is not None and
-            self.value >= self.critical_threshold
+            self.critical_threshold is not None
+            and self.value >= self.critical_threshold
         )
 
     @property
@@ -283,7 +280,7 @@ class SystemMetrics(BaseModel):
         value: float,
         source_id: str | None = None,
         unit: MetricUnit = MetricUnit.MILLISECONDS,
-        labels: dict[str, str] | None = None
+        labels: dict[str, str] | None = None,
     ) -> "SystemMetrics":
         """Create a performance metric.
 
@@ -304,7 +301,7 @@ class SystemMetrics(BaseModel):
             value=value,
             source_type="camera",
             source_id=source_id,
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
         if labels:
@@ -318,7 +315,7 @@ class SystemMetrics(BaseModel):
         metric_type: MetricType,
         value: float,
         hostname: str,
-        unit: MetricUnit = MetricUnit.PERCENT
+        unit: MetricUnit = MetricUnit.PERCENT,
     ) -> "SystemMetrics":
         """Create a resource utilization metric.
 
@@ -338,7 +335,7 @@ class SystemMetrics(BaseModel):
             value=value,
             source_type="system",
             hostname=hostname,
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
     def __repr__(self) -> str:
@@ -351,14 +348,12 @@ class SystemMetrics(BaseModel):
         )
 
 
-class AggregatedMetrics(BaseModel):
+class AggregatedMetrics(BaseTableModel):
     """Pre-computed aggregated metrics for faster dashboard queries.
 
     Stores hourly, daily, and weekly rollups to avoid expensive
     real-time aggregations on large datasets.
     """
-
-    __tablename__ = "aggregated_metrics"
 
     # Metric identification
     metric_name: Mapped[str] = mapped_column(
@@ -420,10 +415,22 @@ class AggregatedMetrics(BaseModel):
 
     # Indexes for aggregated queries
     __table_args__ = (
-        Index("idx_agg_metrics_name_period", "metric_name", "aggregation_period", "period_start"),
-        Index("idx_agg_metrics_source_period", "source_type", "source_id", "period_start"),
-        Index("idx_agg_metrics_period_range", "aggregation_period", "period_start", "period_end"),
-        {"comment": "Pre-computed metric aggregations for dashboard queries"}
+        Index(
+            "idx_agg_metrics_name_period",
+            "metric_name",
+            "aggregation_period",
+            "period_start",
+        ),
+        Index(
+            "idx_agg_metrics_source_period", "source_type", "source_id", "period_start"
+        ),
+        Index(
+            "idx_agg_metrics_period_range",
+            "aggregation_period",
+            "period_start",
+            "period_end",
+        ),
+        {"comment": "Pre-computed metric aggregations for dashboard queries"},
     )
 
     def __repr__(self) -> str:

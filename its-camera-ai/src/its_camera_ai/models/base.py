@@ -3,18 +3,18 @@
 Provides base SQLAlchemy model with common fields and methods.
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, text
+from sqlalchemy import DateTime, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import as_declarative, declared_attr
-from sqlalchemy.orm import Mapped
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-@as_declarative()
-class BaseModel:
+class BaseTableModel(DeclarativeBase):
     """Base model class with common fields and functionality.
 
     All models should inherit from this class to get:
@@ -24,7 +24,7 @@ class BaseModel:
     """
 
     # Primary key as UUID
-    id: Mapped[str] = Column(
+    id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
         default=lambda: str(uuid4()),
@@ -32,14 +32,14 @@ class BaseModel:
     )
 
     # Timestamps
-    created_at: Mapped[datetime] = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
 
-    updated_at: Mapped[datetime] = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         server_default=text("CURRENT_TIMESTAMP"),
@@ -47,12 +47,10 @@ class BaseModel:
         nullable=False,
     )
 
-    @declared_attr
+    @declared_attr.directive
     def __tablename__(cls) -> str:
         """Generate table name from class name."""
         # Convert CamelCase to snake_case
-        import re
-
         name = re.sub(r"(?<!^)(?=[A-Z])", "_", cls.__name__).lower()
         return name
 

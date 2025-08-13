@@ -29,8 +29,7 @@ class AnalyticsMigration:
     async def __aenter__(self):
         """Initialize database engine."""
         self.engine = create_async_engine(
-            self.settings.database.url,
-            echo=self.settings.database.echo
+            self.settings.database.url, echo=self.settings.database.echo
         )
         return self
 
@@ -76,13 +75,15 @@ class AnalyticsMigration:
         logger.info("Enabling TimescaleDB extension")
 
         async with self.engine.begin() as conn:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE"))
+            await conn.execute(
+                text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
+            )
 
             # Also create supporting extensions
             extensions = [
-                "CREATE EXTENSION IF NOT EXISTS postgis",      # For spatial queries
+                "CREATE EXTENSION IF NOT EXISTS postgis",  # For spatial queries
                 "CREATE EXTENSION IF NOT EXISTS pg_stat_statements",  # For query analysis
-                "CREATE EXTENSION IF NOT EXISTS pg_trgm",     # For text search
+                "CREATE EXTENSION IF NOT EXISTS pg_trgm",  # For text search
             ]
 
             for ext_sql in extensions:
@@ -97,11 +98,11 @@ class AnalyticsMigration:
         logger.info("Creating analytics tables")
 
         # Import models to trigger table creation
-        from src.its_camera_ai.models.base import BaseModel
+        from src.its_camera_ai.models.base import BaseTableModel
 
         async with self.engine.begin() as conn:
             # Create all analytics tables
-            await conn.run_sync(BaseModel.metadata.create_all)
+            await conn.run_sync(BaseTableModel.metadata.create_all)
 
     async def _create_hypertables(self):
         """Create TimescaleDB hypertables for time-series data."""
@@ -112,32 +113,32 @@ class AnalyticsMigration:
                 "table": "traffic_metrics",
                 "time_column": "timestamp",
                 "chunk_interval": "1 hour",
-                "partitioning_column": "camera_id"
+                "partitioning_column": "camera_id",
             },
             {
                 "table": "rule_violations",
                 "time_column": "detection_time",
                 "chunk_interval": "1 day",
-                "partitioning_column": "camera_id"
+                "partitioning_column": "camera_id",
             },
             {
                 "table": "traffic_anomalies",
                 "time_column": "detection_time",
                 "chunk_interval": "1 day",
-                "partitioning_column": "camera_id"
+                "partitioning_column": "camera_id",
             },
             {
                 "table": "vehicle_trajectories",
                 "time_column": "start_time",
                 "chunk_interval": "1 day",
-                "partitioning_column": "camera_id"
+                "partitioning_column": "camera_id",
             },
             {
                 "table": "alert_notifications",
                 "time_column": "created_time",
                 "chunk_interval": "1 day",
-                "partitioning_column": None
-            }
+                "partitioning_column": None,
+            },
         ]
 
         async with self.engine.begin() as conn:
@@ -169,7 +170,9 @@ class AnalyticsMigration:
                             await conn.execute(text(partition_sql))
                             logger.info(f"Added space partitioning to {ht['table']}")
                         except Exception as e:
-                            logger.debug(f"Space partitioning info for {ht['table']}: {e}")
+                            logger.debug(
+                                f"Space partitioning info for {ht['table']}: {e}"
+                            )
 
                 except Exception as e:
                     logger.debug(f"Hypertable creation info for {ht['table']}: {e}")
@@ -183,22 +186,18 @@ class AnalyticsMigration:
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_traffic_metrics_camera_hour ON traffic_metrics (camera_id, date_trunc('hour', timestamp))",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_traffic_metrics_congestion_time ON traffic_metrics (congestion_level, timestamp) WHERE congestion_level IN ('heavy', 'severe')",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_traffic_metrics_speed_outliers ON traffic_metrics (average_speed, timestamp) WHERE average_speed > 100 OR average_speed < 5",
-
             # Rule violations indexes
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_violations_severity_camera ON rule_violations (severity, camera_id, detection_time)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_violations_plate_type ON rule_violations (license_plate, violation_type) WHERE license_plate IS NOT NULL",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_violations_active_recent ON rule_violations (status, detection_time) WHERE status = 'active'",
-
             # Traffic anomalies indexes
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_anomalies_score_camera ON traffic_anomalies (anomaly_score DESC, camera_id, detection_time)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_anomalies_type_severity ON traffic_anomalies (anomaly_type, severity, detection_time)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_anomalies_unvalidated ON traffic_anomalies (human_validated, anomaly_score) WHERE human_validated = false",
-
             # Vehicle trajectories indexes
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trajectories_track_camera ON vehicle_trajectories (vehicle_track_id, camera_id, start_time)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trajectories_anomalous ON vehicle_trajectories (is_anomalous, anomaly_score) WHERE is_anomalous = true",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trajectories_duration ON vehicle_trajectories (duration_seconds, start_time) WHERE duration_seconds > 300",
-
             # Alert notifications indexes
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_alerts_pending_priority ON alert_notifications (status, priority, created_time) WHERE status IN ('pending', 'failed')",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_alerts_recipient_channel ON alert_notifications (recipient, notification_channel, created_time)",
@@ -221,28 +220,28 @@ class AnalyticsMigration:
             {
                 "table": "traffic_metrics",
                 "retention": "90 days",
-                "description": "Keep detailed metrics for 90 days"
+                "description": "Keep detailed metrics for 90 days",
             },
             {
                 "table": "rule_violations",
                 "retention": "365 days",
-                "description": "Keep violations for 1 year for compliance"
+                "description": "Keep violations for 1 year for compliance",
             },
             {
                 "table": "traffic_anomalies",
                 "retention": "180 days",
-                "description": "Keep anomalies for 6 months for analysis"
+                "description": "Keep anomalies for 6 months for analysis",
             },
             {
                 "table": "vehicle_trajectories",
                 "retention": "30 days",
-                "description": "Keep trajectories for 30 days (privacy)"
+                "description": "Keep trajectories for 30 days (privacy)",
             },
             {
                 "table": "alert_notifications",
                 "retention": "90 days",
-                "description": "Keep alert history for 90 days"
-            }
+                "description": "Keep alert history for 90 days",
+            },
         ]
 
         async with self.engine.begin() as conn:
@@ -256,7 +255,9 @@ class AnalyticsMigration:
                         );
                     """
                     await conn.execute(text(sql))
-                    logger.info(f"Set retention policy for {policy['table']}: {policy['retention']}")
+                    logger.info(
+                        f"Set retention policy for {policy['table']}: {policy['retention']}"
+                    )
                 except Exception as e:
                     logger.debug(f"Retention policy info for {policy['table']}: {e}")
 
@@ -317,7 +318,7 @@ class AnalyticsMigration:
         aggregates = [
             ("traffic_metrics_hourly", hourly_metrics_sql),
             ("violations_daily", daily_violations_sql),
-            ("anomalies_weekly", weekly_anomalies_sql)
+            ("anomalies_weekly", weekly_anomalies_sql),
         ]
 
         async with self.engine.begin() as conn:
@@ -350,23 +351,23 @@ class AnalyticsMigration:
             {
                 "table": "traffic_metrics",
                 "compress_after": "7 days",
-                "description": "Compress metrics older than 7 days"
+                "description": "Compress metrics older than 7 days",
             },
             {
                 "table": "rule_violations",
                 "compress_after": "30 days",
-                "description": "Compress violations older than 30 days"
+                "description": "Compress violations older than 30 days",
             },
             {
                 "table": "traffic_anomalies",
                 "compress_after": "14 days",
-                "description": "Compress anomalies older than 14 days"
+                "description": "Compress anomalies older than 14 days",
             },
             {
                 "table": "vehicle_trajectories",
                 "compress_after": "3 days",
-                "description": "Compress trajectories older than 3 days"
-            }
+                "description": "Compress trajectories older than 3 days",
+            },
         ]
 
         async with self.engine.begin() as conn:
@@ -385,7 +386,9 @@ class AnalyticsMigration:
                         );
                     """
                     await conn.execute(text(policy_sql))
-                    logger.info(f"Set compression policy for {policy['table']}: {policy['compress_after']}")
+                    logger.info(
+                        f"Set compression policy for {policy['table']}: {policy['compress_after']}"
+                    )
 
                 except Exception as e:
                     logger.debug(f"Compression policy info for {policy['table']}: {e}")
@@ -401,9 +404,15 @@ async def main():
     print("✅ Analytics migration completed successfully!")
     print("\nNext steps:")
     print("1. Verify hypertables: SELECT * FROM timescaledb_information.hypertables;")
-    print("2. Check retention policies: SELECT * FROM timescaledb_information.retention_policies;")
-    print("3. Monitor compression: SELECT * FROM timescaledb_information.compression_settings;")
-    print("4. View continuous aggregates: SELECT * FROM timescaledb_information.continuous_aggregates;")
+    print(
+        "2. Check retention policies: SELECT * FROM timescaledb_information.retention_policies;"
+    )
+    print(
+        "3. Monitor compression: SELECT * FROM timescaledb_information.compression_settings;"
+    )
+    print(
+        "4. View continuous aggregates: SELECT * FROM timescaledb_information.continuous_aggregates;"
+    )
 
 
 if __name__ == "__main__":

@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
-from ..models.base import BaseModel
+from ..models.base import BaseTableModel
 
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar("T", bound=BaseTableModel)
 logger = get_logger(__name__)
 
 
-class BaseAsyncService[T: BaseModel]:
+class BaseAsyncService[T: BaseTableModel]:
     """Base async service class for database operations.
 
     Provides common CRUD operations with proper error handling,

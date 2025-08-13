@@ -21,12 +21,12 @@ from ...models.user import User
 from ...services.auth import AuthService
 from ...services.cache import CacheService
 from ..dependencies import (
-    RateLimiter,
     get_auth_service,
     get_cache_service,
     get_current_user,
-    get_db,
+    get_database_session,
     rate_limit_strict,
+    RateLimiterDI,
 )
 from ..schemas.auth import (
     LoginRequest,
@@ -52,9 +52,9 @@ security = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Rate limiters for different endpoints
-register_rate_limit = RateLimiter(calls=5, period=3600)  # 5 registrations per hour
-login_rate_limit = RateLimiter(calls=10, period=900)  # 10 login attempts per 15 min
-password_reset_rate_limit = RateLimiter(calls=3, period=3600)  # 3 resets per hour
+register_rate_limit = RateLimiterDI(calls=5, period=3600)  # 5 registrations per hour
+login_rate_limit = RateLimiterDI(calls=10, period=900)  # 10 login attempts per 15 min
+password_reset_rate_limit = RateLimiterDI(calls=3, period=3600)  # 3 resets per hour
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -117,16 +117,17 @@ async def send_verification_email(
     email_service = EmailService(settings)
 
     success = await email_service.send_verification_email(
-        to_email=email,
-        username=username,
-        verification_token=token,
-        full_name=full_name
+        to_email=email, username=username, verification_token=token, full_name=full_name
     )
 
     if success:
-        logger.info("Verification email sent successfully", email=email, username=username)
+        logger.info(
+            "Verification email sent successfully", email=email, username=username
+        )
     else:
-        logger.error("Failed to send verification email", email=email, username=username)
+        logger.error(
+            "Failed to send verification email", email=email, username=username
+        )
 
 
 async def send_password_reset_email(
@@ -147,16 +148,17 @@ async def send_password_reset_email(
     email_service = EmailService(settings)
 
     success = await email_service.send_password_reset_email(
-        to_email=email,
-        username=username,
-        reset_token=token,
-        full_name=full_name
+        to_email=email, username=username, reset_token=token, full_name=full_name
     )
 
     if success:
-        logger.info("Password reset email sent successfully", email=email, username=username)
+        logger.info(
+            "Password reset email sent successfully", email=email, username=username
+        )
     else:
-        logger.error("Failed to send password reset email", email=email, username=username)
+        logger.error(
+            "Failed to send password reset email", email=email, username=username
+        )
 
 
 @router.post(
@@ -167,9 +169,10 @@ async def send_password_reset_email(
     description="Create a new user account with email verification.",
 )
 async def register(
+    request: Request,
     user_data: RegisterRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     _cache: CacheService = Depends(get_cache_service),
     settings: Settings = Depends(get_settings),
     _rate_limit: None = Depends(register_rate_limit),
@@ -240,7 +243,7 @@ async def register(
             str(user_data.email),
             verification_token,
             user.username,
-            user.full_name
+            user.full_name,
         )
 
         logger.info(
@@ -278,8 +281,9 @@ async def register(
     description="Authenticate user and return access tokens.",
 )
 async def login(
+    request: Request,
     login_data: LoginRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     auth_service: AuthService = Depends(get_auth_service),
     settings: Settings = Depends(get_settings),
     _rate_limit: None = Depends(login_rate_limit),
@@ -376,8 +380,9 @@ async def login(
     description="Get a new access token using refresh token.",
 )
 async def refresh_token(
+    request: Request,
     token_data: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     auth_service: AuthService = Depends(get_auth_service),
     settings: Settings = Depends(get_settings),
 ) -> TokenRefreshResponse:
@@ -452,7 +457,7 @@ async def logout(
     cache: CacheService = Depends(get_cache_service),
     settings: Settings = Depends(get_settings),
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     auth_service: AuthService = Depends(get_auth_service),
 ) -> SuccessResponse:
     """Logout user and invalidate tokens.
@@ -477,8 +482,7 @@ async def logout(
         # Blacklist current token if provided
         if credentials and credentials.credentials:
             await token_service.blacklist_token(
-                credentials.credentials,
-                reason="user_logout"
+                credentials.credentials, reason="user_logout"
             )
 
         # Get client information for audit log
@@ -494,14 +498,14 @@ async def logout(
             ip_address=client_ip,
             user_agent=user_agent,
             success=True,
-            details={"logout_type": "user_initiated"}
+            details={"logout_type": "user_initiated"},
         )
 
         logger.info(
             "User logged out successfully",
             user_id=current_user.id,
             username=current_user.username,
-            ip_address=client_ip
+            ip_address=client_ip,
         )
 
         return SuccessResponse(
@@ -527,8 +531,9 @@ async def logout(
     description="Verify user email using verification token.",
 )
 async def verify_email(
+    request: Request,
     verification_data: VerificationRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ) -> SuccessResponse:
     """Verify user email address.
@@ -595,9 +600,10 @@ async def verify_email(
     description="Send password reset email to user.",
 )
 async def request_password_reset(
+    request: Request,
     reset_data: PasswordResetRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
     _rate_limit: None = Depends(password_reset_rate_limit),
 ) -> SuccessResponse:
@@ -634,7 +640,7 @@ async def request_password_reset(
             str(reset_data.email),
             reset_token,
             user.username,
-            user.full_name
+            user.full_name,
         )
 
         logger.info(
@@ -659,8 +665,9 @@ async def request_password_reset(
     description="Reset password using reset token.",
 )
 async def confirm_password_reset(
+    request: Request,
     reset_data: PasswordResetConfirm,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ) -> SuccessResponse:
     """Confirm password reset.
@@ -727,6 +734,7 @@ async def confirm_password_reset(
     description="Get current user profile information.",
 )
 async def get_profile(
+    request: Request,
     current_user: User = Depends(get_current_user),
 ) -> UserResponse:
     """Get current user profile.
@@ -754,13 +762,14 @@ async def get_profile(
 @router.put(
     "/profile",
     response_model=UserResponse,
-    summary="Update user profile",
+    summary="Update current user profile",
     description="Update current user profile information.",
 )
 async def update_profile(
+    request: Request,
     profile_data: UserProfile,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     _rate_limit: None = Depends(rate_limit_strict),
 ) -> UserResponse:
     """Update current user profile.
@@ -835,9 +844,10 @@ async def update_profile(
     description="Change user password.",
 )
 async def change_password(
+    request: Request,
     password_data: PasswordChangeRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     _rate_limit: None = Depends(rate_limit_strict),
 ) -> SuccessResponse:
     """Change user password.
@@ -888,9 +898,10 @@ async def change_password(
     description="Setup multi-factor authentication for user.",
 )
 async def setup_mfa(
+    request: Request,
     mfa_data: MFASetupRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     cache: CacheService = Depends(get_cache_service),
     settings: Settings = Depends(get_settings),
     _rate_limit: None = Depends(rate_limit_strict),
@@ -916,7 +927,7 @@ async def setup_mfa(
         if current_user.mfa_enabled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA is already enabled for this user"
+                detail="MFA is already enabled for this user",
             )
 
         if mfa_data.method == "totp":
@@ -925,26 +936,26 @@ async def setup_mfa(
             logger.info(
                 "TOTP MFA setup initiated",
                 user_id=current_user.id,
-                username=current_user.username
+                username=current_user.username,
             )
 
             return MFASetupResponse(
                 secret=setup_info["secret"],
                 backup_codes=setup_info["backup_codes"],
-                qr_code_url=setup_info["qr_code_url"]
+                qr_code_url=setup_info["qr_code_url"],
             )
 
         elif mfa_data.method == "sms":
             # SMS MFA setup (placeholder for future implementation)
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="SMS MFA not yet implemented"
+                detail="SMS MFA not yet implemented",
             )
 
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported MFA method: {mfa_data.method}"
+                detail=f"Unsupported MFA method: {mfa_data.method}",
             )
 
     except HTTPException:
@@ -954,11 +965,10 @@ async def setup_mfa(
             "MFA setup failed",
             user_id=current_user.id,
             method=mfa_data.method,
-            error=str(e)
+            error=str(e),
         )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="MFA setup failed"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="MFA setup failed"
         ) from e
 
 
@@ -969,9 +979,10 @@ async def setup_mfa(
     description="Verify multi-factor authentication code.",
 )
 async def verify_mfa(
+    request: Request,
     mfa_data: MFAVerifyRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     cache: CacheService = Depends(get_cache_service),
     settings: Settings = Depends(get_settings),
 ) -> SuccessResponse:
@@ -995,7 +1006,7 @@ async def verify_mfa(
         if not current_user.mfa_enabled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA is not enabled for this user"
+                detail="MFA is not enabled for this user",
             )
 
         is_valid = False
@@ -1015,40 +1026,32 @@ async def verify_mfa(
             logger.info(
                 "MFA verification successful",
                 user_id=current_user.id,
-                method=verification_method
+                method=verification_method,
             )
 
             return SuccessResponse(
                 success=True,
                 message="MFA verified successfully",
-                data={
-                    "user_id": current_user.id,
-                    "method": verification_method
-                },
+                data={"user_id": current_user.id, "method": verification_method},
             )
         else:
             logger.warning(
                 "MFA verification failed",
                 user_id=current_user.id,
-                method=verification_method
+                method=verification_method,
             )
 
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid MFA code"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid MFA code"
             )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "MFA verification error",
-            user_id=current_user.id,
-            error=str(e)
-        )
+        logger.error("MFA verification error", user_id=current_user.id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="MFA verification failed"
+            detail="MFA verification failed",
         ) from e
 
 
@@ -1059,9 +1062,10 @@ async def verify_mfa(
     description="Complete MFA setup by verifying initial code.",
 )
 async def complete_mfa_setup(
+    request: Request,
     verification_data: MFAVerifyRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_database_session),
     cache: CacheService = Depends(get_cache_service),
     settings: Settings = Depends(get_settings),
 ) -> SuccessResponse:
@@ -1086,7 +1090,7 @@ async def complete_mfa_setup(
         if current_user.mfa_enabled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA is already enabled for this user"
+                detail="MFA is already enabled for this user",
             )
 
         # Verify setup code
@@ -1097,7 +1101,7 @@ async def complete_mfa_setup(
         if not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid verification code"
+                detail="Invalid verification code",
             )
 
         # Send notification email
@@ -1106,32 +1110,30 @@ async def complete_mfa_setup(
             to_email=current_user.email,
             username=current_user.username,
             mfa_method="TOTP",
-            setup_time=datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
+            setup_time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
             backup_codes_count=settings.security.mfa_backup_codes_count,
-            full_name=current_user.full_name
+            full_name=current_user.full_name,
         )
 
         logger.info(
             "MFA setup completed successfully",
             user_id=current_user.id,
-            username=current_user.username
+            username=current_user.username,
         )
 
         return SuccessResponse(
             success=True,
             message="MFA enabled successfully",
-            data={"user_id": current_user.id}
+            data={"user_id": current_user.id},
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(
-            "MFA setup completion failed",
-            user_id=current_user.id,
-            error=str(e)
+            "MFA setup completion failed", user_id=current_user.id, error=str(e)
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="MFA setup completion failed"
+            detail="MFA setup completion failed",
         ) from e

@@ -17,6 +17,8 @@ class ITSCameraAIError(Exception):
         cause: Original exception that caused this error
     """
 
+    status_code: int = 400
+
     def __init__(
         self,
         message: str,

@@ -241,7 +241,7 @@ class PasswordPolicy:
     HISTORY_SIZE = 12  # Remember last 12 passwords
 
     @staticmethod
-    def validate_password(password: str, username: str = None) -> dict[str, Any]:
+    def validate_password(password: str, username: str | None = None) -> dict[str, Any]:
         """Validate password against policy."""
         errors = []
         score = 0
@@ -338,7 +338,7 @@ class BruteForceProtection:
     async def is_blocked(self, identifier: str) -> bool:
         """Check if identifier is blocked."""
         lockout_key = f"auth:lockout:{identifier}"
-        return await self.redis.exists(lockout_key)
+        return bool(await self.redis.exists(lockout_key))
 
     async def record_failure(self, identifier: str) -> int:
         """Record failed attempt and return remaining attempts."""
@@ -443,10 +443,10 @@ class JWTManager:
         try:
             payload = jwt.decode(token, public_pem, algorithms=[self.algorithm])
             return payload
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationError("Token has expired")
-        except jwt.InvalidTokenError:
-            raise AuthenticationError("Invalid token")
+        except jwt.ExpiredSignatureError as e:
+            raise AuthenticationError("Token has expired") from e
+        except jwt.InvalidTokenError as e:
+            raise AuthenticationError("Invalid token") from e
 
 
 class SessionManager:
@@ -474,11 +474,7 @@ class SessionManager:
                 await self.redis.delete(f"session:{oldest_session}")
 
         # Store session data
-        session_data = session_info.dict()
-        session_data["created_at"] = session_data["created_at"].isoformat()
-        session_data["last_activity"] = session_data["last_activity"].isoformat()
-        session_data["expires_at"] = session_data["expires_at"].isoformat()
-
+        session_data = session_info.model_dump()
         await self.redis.hset(session_key, mapping=session_data)
         await self.redis.expire(session_key, self.session_ttl)
 
@@ -851,7 +847,7 @@ class AuthenticationService:
             self.logger.error(
                 "Authentication error", error=str(e), username=credentials.username
             )
-            raise AuthenticationError(f"Authentication failed: {str(e)}")
+            raise AuthenticationError(f"Authentication failed: {str(e)}") from e
 
     async def verify_token(self, token: str) -> TokenValidation:
         """
@@ -957,7 +953,7 @@ class AuthenticationService:
             raise
         except Exception as e:
             self.logger.error("Token refresh error", error=str(e))
-            raise AuthenticationError(f"Token refresh failed: {str(e)}")
+            raise AuthenticationError(f"Token refresh failed: {str(e)}") from e
 
     async def enroll_mfa(self, user_id: str, method: MFAMethod) -> MFAEnrollment:
         """
@@ -1049,9 +1045,11 @@ class AuthenticationService:
             # Log MFA verification attempt
             audit_event = SecurityAuditEvent(
                 event_id=str(uuid4()),
-                event_type=SecurityEventType.MFA_VERIFIED
-                if is_valid
-                else SecurityEventType.MFA_FAILED,
+                event_type=(
+                    SecurityEventType.MFA_VERIFIED
+                    if is_valid
+                    else SecurityEventType.MFA_FAILED
+                ),
                 user_id=user_id,
                 success=is_valid,
                 timestamp=datetime.now(UTC),
@@ -1100,9 +1098,11 @@ class AuthenticationService:
             # Log permission check
             audit_event = SecurityAuditEvent(
                 event_id=str(uuid4()),
-                event_type=SecurityEventType.PERMISSION_GRANTED
-                if has_permission
-                else SecurityEventType.PERMISSION_DENIED,
+                event_type=(
+                    SecurityEventType.PERMISSION_GRANTED
+                    if has_permission
+                    else SecurityEventType.PERMISSION_DENIED
+                ),
                 user_id=user_id,
                 username=user.username,
                 resource=resource,
@@ -1303,17 +1303,3 @@ class AuthenticationService:
 
         await self.session_manager.create_session(session_info)
         return session_info
-
-
-# ============================
-# Factory Functions
-# ============================
-
-
-async def create_auth_service(
-    session: AsyncSession, redis_url: str = None
-) -> AuthenticationService:
-    """Factory function to create authentication service."""
-    settings = get_settings()
-    redis_client = redis.from_url(redis_url or settings.redis.url)
-    return AuthenticationService(session, redis_client, settings.security)

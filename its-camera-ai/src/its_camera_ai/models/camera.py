@@ -20,7 +20,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import BaseModel
+from its_camera_ai.core.types.geo_json import GeoJSONFeature
+
+from .base import BaseTableModel
 
 
 class CameraType(str, Enum):
@@ -54,14 +56,12 @@ class StreamProtocol(str, Enum):
     HTTP = "http"
 
 
-class Camera(BaseModel):
+class Camera(BaseTableModel):
     """Camera registry model with comprehensive metadata and settings.
 
     Supports 100+ concurrent cameras with optimized indexing for
     high-performance queries and real-time status updates.
     """
-
-    __tablename__ = "cameras"
 
     # Basic Information
     name: Mapped[str] = mapped_column(
@@ -109,18 +109,19 @@ class Camera(BaseModel):
         nullable=False,
         default=CameraStatus.OFFLINE,
         index=True,
-        comment="Current camera status"
+        comment="Current camera status",
     )
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, index=True, comment="Camera enabled status"
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="Camera enabled status",
     )
 
     # Configuration (JSONB for flexible settings)
     config: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Camera configuration settings"
+        JSONB, nullable=False, default=dict, comment="Camera configuration settings"
     )
 
     # Zone and Tagging
@@ -133,7 +134,10 @@ class Camera(BaseModel):
 
     # Health Metrics
     last_seen_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True, comment="Last successful connection"
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="Last successful connection",
     )
     last_frame_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last frame received timestamp"
@@ -166,7 +170,7 @@ class Camera(BaseModel):
         back_populates="camera",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="select"
+        lazy="select",
     )
 
     settings = relationship(
@@ -174,7 +178,7 @@ class Camera(BaseModel):
         back_populates="camera",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        uselist=False
+        uselist=False,
     )
 
     # Indexes for performance optimization
@@ -188,10 +192,12 @@ class Camera(BaseModel):
         Index("idx_camera_tags_gin", "tags", postgresql_using="gin"),
         Index("idx_camera_config_gin", "config", postgresql_using="gin"),
         Index("idx_camera_coordinates_gin", "coordinates", postgresql_using="gin"),
-        {"comment": "Camera registry with optimizations for high-throughput queries"}
+        {"comment": "Camera registry with optimizations for high-throughput queries"},
     )
 
-    def update_health_metrics(self, frame_count: int, avg_time: float, uptime: float) -> None:
+    def update_health_metrics(
+        self, frame_count: int, avg_time: float, uptime: float
+    ) -> None:
         """Update camera health metrics.
 
         Args:
@@ -204,7 +210,9 @@ class Camera(BaseModel):
         self.uptime_percentage = uptime
         self.last_seen_at = datetime.now(UTC)
 
-    def set_status(self, status: CameraStatus, error_message: str | None = None) -> None:
+    def set_status(
+        self, status: CameraStatus, error_message: str | None = None
+    ) -> None:
         """Update camera status with optional error information.
 
         Args:
@@ -218,13 +226,36 @@ class Camera(BaseModel):
         if error_message and "config" in self.__dict__:
             if "errors" not in self.config:
                 self.config["errors"] = []
-            self.config["errors"].append({
-                "timestamp": datetime.now(UTC).isoformat(),
-                "message": error_message,
-                "status": status.value
-            })
+            self.config["errors"].append(
+                {
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "message": error_message,
+                    "status": status.value,
+                }
+            )
             # Keep only last 10 errors
             self.config["errors"] = self.config["errors"][-10:]
+
+    def to_geo_json(self) -> GeoJSONFeature:
+        """Convert camera metadata to GeoJSON format."""
+        coord_data = self.coordinates or {"lat": 0.0, "lng": 0.0, "altitude": 0.0}
+        lat = float(coord_data.get("lat", 0.0))
+        long = float(coord_data.get("lng", 0.0))
+        altitude = float(coord_data.get("altitude", 0.0))
+
+        return {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [long, lat, altitude]},
+            "properties": {
+                "id": self.id,
+                "name": self.name,
+                "status": self.status,
+                "location": self.location,
+                "created_at": self.created_at,
+                "updated_at": self.updated_at,
+                "altitude": altitude,
+            },
+        }
 
     @property
     def is_streaming(self) -> bool:
@@ -235,31 +266,26 @@ class Camera(BaseModel):
     def is_healthy(self) -> bool:
         """Check if camera is healthy and operational."""
         return (
-            self.is_active and
-            self.status in (CameraStatus.ONLINE.value, CameraStatus.STREAMING.value) and
-            self.uptime_percentage is not None and
-            self.uptime_percentage > 0.8  # 80% uptime threshold
+            self.is_active
+            and self.status in (CameraStatus.ONLINE.value, CameraStatus.STREAMING.value)
+            and self.uptime_percentage is not None
+            and self.uptime_percentage > 0.8  # 80% uptime threshold
         )
 
     def __repr__(self) -> str:
         return f"<Camera(id={self.id}, name={self.name}, status={self.status})>"
 
 
-class CameraSettings(BaseModel):
+class CameraSettings(BaseTableModel):
     """Camera-specific processing and configuration settings.
 
     Separated from Camera model for better performance and flexibility
     in high-frequency updates during processing optimization.
     """
 
-    __tablename__ = "camera_settings"
-
     # Foreign key to camera
     camera_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        nullable=False,
-        index=True,
-        comment="Reference to camera"
+        UUID(as_uuid=False), nullable=False, index=True, comment="Reference to camera"
     )
 
     # Processing Settings
@@ -289,7 +315,10 @@ class CameraSettings(BaseModel):
         Integer, nullable=False, default=8, comment="Maximum batch size for inference"
     )
     frame_skip: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="Number of frames to skip (0=process all)"
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of frames to skip (0=process all)",
     )
     resize_resolution: Mapped[dict[str, int] | None] = mapped_column(
         JSONB, nullable=True, comment="Target resolution for processing {width, height}"
@@ -305,7 +334,10 @@ class CameraSettings(BaseModel):
 
     # Recording and Storage
     record_detections_only: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, comment="Record only frames with detections"
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Record only frames with detections",
     )
     storage_retention_days: Mapped[int] = mapped_column(
         Integer, nullable=False, default=7, comment="Frame storage retention in days"
@@ -332,7 +364,7 @@ class CameraSettings(BaseModel):
         Index("idx_camera_settings_camera_id", "camera_id"),
         Index("idx_camera_settings_model", "model_name"),
         Index("idx_camera_settings_detection", "detection_enabled"),
-        {"comment": "Camera-specific processing and configuration settings"}
+        {"comment": "Camera-specific processing and configuration settings"},
     )
 
     def update_performance_settings(self, avg_processing_time: float) -> None:

@@ -17,7 +17,7 @@ from sqlalchemy.pool import NullPool
 from ..core.config import Settings
 from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
-from .base import BaseModel
+from .base import BaseTableModel
 
 logger = get_logger(__name__)
 
@@ -45,26 +45,29 @@ class DatabaseManager:
 
             # Production optimizations
             if self.settings.is_production():
-                engine_kwargs.update({
-                    # Increase connection limits for high throughput
-                    "pool_size": min(self.settings.database.pool_size * 2, 50),
-                    "max_overflow": min(self.settings.database.max_overflow * 2, 100),
-                    # Optimize for bulk operations
-                    "connect_args": {
-                        "server_settings": {
-                            "jit": "off",  # Disable JIT for consistent performance
-                            "application_name": "ITS-Camera-AI",
-                        }
-                    },
-                })
+                engine_kwargs.update(
+                    {
+                        # Increase connection limits for high throughput
+                        "pool_size": min(self.settings.database.pool_size * 2, 50),
+                        "max_overflow": min(
+                            self.settings.database.max_overflow * 2, 100
+                        ),
+                        # Optimize for bulk operations
+                        "connect_args": {
+                            "server_settings": {
+                                "jit": "off",  # Disable JIT for consistent performance
+                                "application_name": "ITS-Camera-AI",
+                            }
+                        },
+                    }
+                )
             else:
                 # Development configuration
                 engine_kwargs["poolclass"] = NullPool
 
             # Create async engine
             self.engine = create_async_engine(
-                self.settings.get_database_url(async_driver=True),
-                **engine_kwargs
+                self.settings.get_database_url(async_driver=True), **engine_kwargs
             )
 
             # Create session factory
@@ -93,7 +96,7 @@ class DatabaseManager:
 
         try:
             async with self.engine.begin() as conn:
-                await conn.run_sync(BaseModel.metadata.create_all)
+                await conn.run_sync(BaseTableModel.metadata.create_all)
 
             logger.info("Database tables created")
 
@@ -127,47 +130,3 @@ class DatabaseManager:
                 raise
             finally:
                 await session.close()
-
-
-# Global database manager instance
-_db_manager: DatabaseManager | None = None
-
-
-async def create_database_engine(settings: Settings) -> DatabaseManager:
-    """Create and initialize database manager.
-
-    Args:
-        settings: Application settings
-
-    Returns:
-        DatabaseManager: Initialized database manager
-    """
-    global _db_manager
-
-    if _db_manager is None:
-        _db_manager = DatabaseManager(settings)
-        await _db_manager.initialize()
-
-    return _db_manager
-
-
-async def get_database_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get database session dependency.
-
-    Yields:
-        AsyncSession: Database session
-    """
-    if _db_manager is None:
-        raise DatabaseError("Database not initialized")
-
-    async with _db_manager.get_session() as session:
-        yield session
-
-
-async def close_database() -> None:
-    """Close database connections."""
-    global _db_manager
-
-    if _db_manager:
-        await _db_manager.close()
-        _db_manager = None

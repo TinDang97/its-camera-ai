@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import BaseModel
+from .base import BaseTableModel
 
 
 class DetectionClass(str, Enum):
@@ -66,14 +66,12 @@ class VehicleType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class DetectionResult(BaseModel):
+class DetectionResult(BaseTableModel):
     """Individual detection result within a frame.
 
     Stores bounding box coordinates, classification confidence,
     tracking information, and vehicle-specific attributes.
     """
-
-    __tablename__ = "detection_results"
 
     # Foreign key to frame metadata
     frame_metadata_id: Mapped[str] = mapped_column(
@@ -81,7 +79,7 @@ class DetectionResult(BaseModel):
         ForeignKey("frame_metadata.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
-        comment="Reference to frame metadata"
+        comment="Reference to frame metadata",
     )
 
     # Detection sequence within frame
@@ -240,55 +238,48 @@ class DetectionResult(BaseModel):
         Index("idx_detection_frame_id", "frame_metadata_id"),
         Index("idx_detection_class", "class_name"),
         Index("idx_detection_track_id", "track_id"),
-
         # Confidence and quality filters
         Index("idx_detection_confidence", "class_confidence"),
         Index("idx_detection_quality", "detection_quality"),
-
         # Spatial queries (bounding box)
         Index("idx_detection_bbox_center", "bbox_x1", "bbox_y1"),
         Index("idx_detection_bbox_area", "bbox_area"),
-
         # Tracking and motion
         Index("idx_detection_velocity", "velocity_magnitude"),
         Index("idx_detection_direction", "direction"),
-
         # Vehicle-specific queries
         Index("idx_detection_vehicle_type", "vehicle_type"),
         Index("idx_detection_color", "color_primary"),
-
         # License plate queries
         Index("idx_detection_license_plate", "license_plate"),
-
         # Zone-based queries
         Index("idx_detection_zone", "detection_zone"),
         Index("idx_detection_zone_entry", "detection_zone", "zone_entry_time"),
-
         # Quality flags
         Index("idx_detection_flags", "is_false_positive", "is_verified"),
-
         # Composite indexes for common queries
         Index("idx_detection_class_confidence", "class_name", "class_confidence"),
         Index("idx_detection_track_time", "track_id", "created_at"),
-
         # High-performance vehicle detection queries
         Index(
             "idx_detection_vehicles",
-            "frame_metadata_id", "class_name", "class_confidence",
+            "frame_metadata_id",
+            "class_name",
+            "class_confidence",
             postgresql_where=text(
                 "class_name IN ('car', 'truck', 'bus', 'motorcycle', 'bicycle') "
                 "AND class_confidence >= 0.5"
-            )
+            ),
         ),
-
         # License plate detections
         Index(
             "idx_detection_with_plates",
-            "frame_metadata_id", "license_plate", "license_plate_confidence",
-            postgresql_where=text("license_plate IS NOT NULL")
+            "frame_metadata_id",
+            "license_plate",
+            "license_plate_confidence",
+            postgresql_where=text("license_plate IS NOT NULL"),
         ),
-
-        {"comment": "Detection results with spatial and classification indexes"}
+        {"comment": "Detection results with spatial and classification indexes"},
     )
 
     def set_bounding_box(self, x1: float, y1: float, x2: float, y2: float) -> None:
@@ -317,17 +308,15 @@ class DetectionResult(BaseModel):
         """
         self.velocity_x = vx
         self.velocity_y = vy
-        self.velocity_magnitude = (vx ** 2 + vy ** 2) ** 0.5
+        self.velocity_magnitude = (vx**2 + vy**2) ** 0.5
 
         # Calculate direction in degrees (0-360)
         import math
+
         self.direction = (math.atan2(vy, vx) * 180 / math.pi) % 360
 
     def set_license_plate(
-        self,
-        plate_text: str,
-        confidence: float,
-        bbox: dict[str, float] | None = None
+        self, plate_text: str, confidence: float, bbox: dict[str, float] | None = None
     ) -> None:
         """Set license plate information.
 
@@ -362,10 +351,9 @@ class DetectionResult(BaseModel):
         self.is_verified = True
         if self.additional_attributes is None:
             self.additional_attributes = {}
-        self.additional_attributes.update({
-            "verified_by": verified_by,
-            "verified_at": datetime.now(UTC).isoformat()
-        })
+        self.additional_attributes.update(
+            {"verified_by": verified_by, "verified_at": datetime.now(UTC).isoformat()}
+        )
 
     @property
     def bbox_center_x(self) -> float:
@@ -381,8 +369,11 @@ class DetectionResult(BaseModel):
     def is_vehicle(self) -> bool:
         """Check if detection is a vehicle."""
         vehicle_classes = {
-            DetectionClass.CAR, DetectionClass.TRUCK, DetectionClass.BUS,
-            DetectionClass.MOTORCYCLE, DetectionClass.BICYCLE
+            DetectionClass.CAR,
+            DetectionClass.TRUCK,
+            DetectionClass.BUS,
+            DetectionClass.MOTORCYCLE,
+            DetectionClass.BICYCLE,
         }
         return self.class_name in {cls.value for cls in vehicle_classes}
 
@@ -395,9 +386,9 @@ class DetectionResult(BaseModel):
     def is_reliable(self) -> bool:
         """Check if detection is reliable (high confidence, good quality)."""
         return (
-            self.is_high_confidence and
-            self.detection_quality >= 0.7 and
-            not self.is_false_positive
+            self.is_high_confidence
+            and self.detection_quality >= 0.7
+            and not self.is_false_positive
         )
 
     def __repr__(self) -> str:

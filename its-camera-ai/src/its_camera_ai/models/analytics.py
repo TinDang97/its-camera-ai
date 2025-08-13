@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import BaseModel
+from .base import BaseTableModel
 
 
 class CongestionLevel(str, Enum):
@@ -60,14 +60,12 @@ class AnomalyType(str, Enum):
     UNUSUAL_TRAJECTORY = "unusual_trajectory"
 
 
-class TrafficMetrics(BaseModel):
+class TrafficMetrics(BaseTableModel):
     """Time-series traffic metrics model optimized for TimescaleDB.
 
     Stores aggregated traffic metrics with hypertable partitioning
     for high-performance time-series analytics.
     """
-
-    __tablename__ = "traffic_metrics"
 
     # Time dimension (primary for TimescaleDB hypertable)
     timestamp: Mapped[datetime] = mapped_column(
@@ -246,14 +244,12 @@ class TrafficMetrics(BaseModel):
     )
 
 
-class RuleViolation(BaseModel):
+class RuleViolation(BaseTableModel):
     """Traffic rule violation detection results.
 
     Records detected violations of traffic rules with evidence
     and severity assessment.
     """
-
-    __tablename__ = "rule_violations"
 
     # Violation identification
     violation_type: Mapped[str] = mapped_column(
@@ -404,14 +400,12 @@ class RuleViolation(BaseModel):
     )
 
 
-class VehicleTrajectory(BaseModel):
+class VehicleTrajectory(BaseTableModel):
     """Vehicle trajectory analysis and path tracking.
 
     Stores analyzed vehicle paths for anomaly detection,
     behavior analysis, and traffic pattern recognition.
     """
-
-    __tablename__ = "vehicle_trajectories"
 
     # Vehicle identification
     vehicle_track_id: Mapped[int] = mapped_column(
@@ -593,14 +587,12 @@ class VehicleTrajectory(BaseModel):
     )
 
 
-class TrafficAnomaly(BaseModel):
+class TrafficAnomaly(BaseTableModel):
     """Traffic anomaly detection results.
 
     Records detected anomalies in traffic patterns, vehicle behavior,
     or system performance with detailed analysis.
     """
-
-    __tablename__ = "traffic_anomalies"
 
     # Anomaly identification
     anomaly_type: Mapped[str] = mapped_column(
@@ -781,14 +773,12 @@ class TrafficAnomaly(BaseModel):
     )
 
 
-class SpeedLimit(BaseModel):
+class SpeedLimit(BaseTableModel):
     """Speed limit configuration by zone and vehicle type.
 
     Stores dynamic speed limits that can be looked up by traffic zone
     and vehicle classification for accurate violation detection.
     """
-
-    __tablename__ = "speed_limits"
 
     # Zone and location information
     zone_id: Mapped[str] = mapped_column(
@@ -807,7 +797,7 @@ class SpeedLimit(BaseModel):
         nullable=False,
         index=True,
         default="general",
-        comment="Vehicle type (general/car/truck/motorcycle/bus/emergency)"
+        comment="Vehicle type (general/car/truck/motorcycle/bus/emergency)",
     )
 
     # Speed limit values (km/h)
@@ -826,12 +816,16 @@ class SpeedLimit(BaseModel):
         String(8), nullable=True, comment="Daily end time (HH:MM:SS format)"
     )
     days_of_week: Mapped[list[int] | None] = mapped_column(
-        JSONB, nullable=True, comment="Days of week (0=Monday to 6=Sunday), null=all days"
+        JSONB,
+        nullable=True,
+        comment="Days of week (0=Monday to 6=Sunday), null=all days",
     )
 
     # Environmental conditions
     weather_conditions: Mapped[list[str] | None] = mapped_column(
-        JSONB, nullable=True, comment="Weather conditions when limit applies (null=all conditions)"
+        JSONB,
+        nullable=True,
+        comment="Weather conditions when limit applies (null=all conditions)",
     )
     minimum_visibility: Mapped[float | None] = mapped_column(
         Float, nullable=True, comment="Minimum visibility in meters for this limit"
@@ -839,24 +833,37 @@ class SpeedLimit(BaseModel):
 
     # Enforcement configuration
     enforcement_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, comment="Whether to enforce this speed limit"
+        Boolean,
+        nullable=False,
+        default=True,
+        comment="Whether to enforce this speed limit",
     )
     warning_threshold: Mapped[float | None] = mapped_column(
         Float, nullable=True, comment="Speed threshold for warnings (km/h over limit)"
     )
     violation_threshold: Mapped[float] = mapped_column(
-        Float, nullable=False, default=10.0, comment="Speed threshold for violations (km/h over limit)"
+        Float,
+        nullable=False,
+        default=10.0,
+        comment="Speed threshold for violations (km/h over limit)",
     )
 
     # Priority and validity
     priority: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=100, comment="Priority when multiple limits apply (lower=higher priority)"
+        Integer,
+        nullable=False,
+        default=100,
+        comment="Priority when multiple limits apply (lower=higher priority)",
     )
     valid_from: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, comment="Speed limit validity start date"
+        DateTime(timezone=True),
+        nullable=False,
+        comment="Speed limit validity start date",
     )
     valid_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Speed limit validity end date (null=permanent)"
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Speed limit validity end date (null=permanent)",
     )
 
     # Geographic boundaries (optional)
@@ -885,16 +892,26 @@ class SpeedLimit(BaseModel):
         Index("idx_speed_limit_validity", "valid_from", "valid_until"),
         Index("idx_speed_limit_priority", "priority"),
         # Composite index for efficient lookups
-        Index("idx_speed_limit_lookup", "zone_id", "vehicle_type", "enforcement_enabled", "valid_from"),
+        Index(
+            "idx_speed_limit_lookup",
+            "zone_id",
+            "vehicle_type",
+            "enforcement_enabled",
+            "valid_from",
+        ),
         # Partial index for active limits
         Index(
             "idx_speed_limit_active",
             "zone_id",
             "vehicle_type",
             "priority",
-            postgresql_where=text("enforcement_enabled = true AND (valid_until IS NULL OR valid_until > NOW())")
+            postgresql_where=text(
+                "enforcement_enabled = true AND (valid_until IS NULL OR valid_until > NOW())"
+            ),
         ),
-        {"comment": "Dynamic speed limits by zone and vehicle type with time-based restrictions"}
+        {
+            "comment": "Dynamic speed limits by zone and vehicle type with time-based restrictions"
+        },
     )
 
     def is_valid_at(self, check_time: datetime) -> bool:
@@ -921,12 +938,16 @@ class SpeedLimit(BaseModel):
         # Check time of day if specified
         if self.effective_start_time and self.effective_end_time:
             current_time = check_time.strftime("%H:%M:%S")
-            if not (self.effective_start_time <= current_time <= self.effective_end_time):
+            if not (
+                self.effective_start_time <= current_time <= self.effective_end_time
+            ):
                 return False
 
         return True
 
-    def applies_to_conditions(self, weather: str | None = None, visibility: float | None = None) -> bool:
+    def applies_to_conditions(
+        self, weather: str | None = None, visibility: float | None = None
+    ) -> bool:
         """Check if speed limit applies to current environmental conditions.
 
         Args:
@@ -957,13 +978,11 @@ class SpeedLimit(BaseModel):
         return f"<SpeedLimit(zone={self.zone_id}, vehicle={self.vehicle_type}, limit={self.speed_limit_kmh})>"
 
 
-class AlertNotification(BaseModel):
+class AlertNotification(BaseTableModel):
     """Alert notification tracking for rule violations and anomalies.
 
     Tracks delivery status and recipient responses for generated alerts.
     """
-
-    __tablename__ = "alert_notifications"
 
     # Alert reference
     alert_type: Mapped[str] = mapped_column(

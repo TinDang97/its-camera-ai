@@ -14,7 +14,7 @@ from .analytics import (
     VehicleTrajectory,
     ViolationType,
 )
-from .base import BaseModel
+from .base import BaseTableModel
 from .camera import Camera, CameraSettings, CameraStatus, CameraType, StreamProtocol
 from .database import DatabaseManager, create_database_engine, get_database_session
 from .detection_result import DetectionClass, DetectionResult, VehicleType
@@ -24,7 +24,7 @@ from .user import User
 
 __all__ = [
     # Base infrastructure
-    "BaseModel",
+    "BaseTableModel",
     "DatabaseManager",
     "create_database_engine",
     "get_database_session",

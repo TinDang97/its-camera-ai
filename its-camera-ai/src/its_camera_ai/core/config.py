@@ -107,6 +107,7 @@ class MonitoringConfig(BaseModel):
 class SecurityConfig(BaseModel):
     """Security configuration settings."""
 
+    enabled: bool = Field(default=True, description="Enable authentication")
     # JWT Settings
     secret_key: str = Field(
         default="change-me-in-production",
@@ -128,7 +129,11 @@ class SecurityConfig(BaseModel):
     allowed_origins: list[str] = Field(
         default=["*"], description="Allowed CORS origins"
     )
-
+    allow_credentials: bool = Field(default=True, description="Allow credentials")
+    allow_methods: list[str] = Field(
+        default=["GET", "POST", "PUT", "DELETE"], description="Allowed CORS methods"
+    )
+    allow_headers: list[str] = Field(default=["*"], description="Allowed CORS headers")
     # Rate Limiting
     rate_limit_per_minute: int = Field(
         default=100, description="Rate limit per minute per IP"
@@ -241,6 +246,11 @@ class SecurityConfig(BaseModel):
         default=True, description="Enable continuous security verification"
     )
 
+    # Hosted Proxy
+    allowed_hosts: list[str] = Field(
+        default=["localhost"], description="List of allowed hosts for the proxy"
+    )
+
 
 class MinIOConfig(BaseModel):
     """MinIO object storage configuration."""
@@ -331,6 +341,23 @@ class MinIOConfig(BaseModel):
     log_retention_days: int = Field(default=90, description="Log retention (days)")
 
 
+class CompressionConfig(BaseModel):
+    """Compression settings."""
+
+    enabled: bool = Field(default=True, description="Enable compression")
+    level: int = Field(default=6, ge=1, le=9, description="Compression level (1-9)")
+    min_size: int = Field(
+        default=1024, ge=0, description="Minimum size to compress (bytes)"
+    )
+    formats: list[str] = Field(
+        default=["jpeg", "png"], description="Supported compression formats"
+    )
+    
+
+class RateLimit(BaseModel):
+    
+
+
 class Settings(BaseSettings):
     """Main application settings.
 
@@ -363,7 +390,10 @@ class Settings(BaseSettings):
     ml: MLConfig = Field(default_factory=MLConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    compression: CompressionConfig = Field(default_factory=CompressionConfig)
     minio: MinIOConfig = Field(default_factory=MinIOConfig)
+
+    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
 
     # File paths
     data_dir: Path = Field(default=Path("data"), description="Data directory")
@@ -377,7 +407,7 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "env_nested_delimiter": "__",
         "case_sensitive": False,
-        "extra": "ignore"
+        "extra": "ignore",
     }
 
     @field_validator("log_level")

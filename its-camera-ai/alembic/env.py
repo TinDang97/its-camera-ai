@@ -21,7 +21,7 @@ sys.path.insert(0, str(project_root / "src"))
 
 # Import models and configuration
 from its_camera_ai.core.config import get_settings
-from its_camera_ai.models import BaseModel
+from its_camera_ai.models import BaseTableModel
 
 # This is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -33,7 +33,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Add your model's MetaData object here for 'autogenerate' support
-target_metadata = BaseModel.metadata
+target_metadata = BaseTableModel.metadata
 
 # Get database URL from settings
 settings = get_settings()
@@ -93,7 +93,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations in async mode.
-    
+
     Creates an async engine and runs migrations in a separate
     thread to handle async database operations.
     """

@@ -1,7 +1,8 @@
-"""FastAPI application factory and configuration.
+"""FastAPI application with dependency injection integration.
 
-Creates and configures the FastAPI application with proper middleware,
-error handling, monitoring, and API route registration.
+Enhanced FastAPI application factory that integrates with the
+dependency injection container system for clean architecture
+and proper resource management.
 """
 
 from collections.abc import AsyncGenerator
@@ -15,10 +16,10 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 
+from ..containers import ApplicationContainer
 from ..core.config import Settings, get_settings
 from ..core.exceptions import ITSCameraAIError
 from ..core.logging import get_logger, setup_logging
-from .dependencies import cleanup_dependencies, setup_dependencies
 from .middleware import (
     LoggingMiddleware,
     MetricsMiddleware,
@@ -38,44 +39,81 @@ logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan context manager.
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan context manager with container instance binding.
 
-    Handles startup and shutdown events for the FastAPI application.
+    Handles startup and shutdown events for the FastAPI application
+    with container instance bound to the app state.
     """
     settings = get_settings()
 
     # Startup
-    logger.info("Starting ITS Camera AI application", version=settings.app_version)
+    logger.info(
+        "Starting ITS Camera AI application with DI", version=settings.app_version
+    )
 
     try:
-        # Setup dependencies (database, Redis, etc.)
-        await setup_dependencies(settings)
+        # Create and initialize container instance
+        container = ApplicationContainer()
+        container.config.from_dict(settings.model_dump())
 
-        logger.info("Application startup complete")
+        # Initialize container resources
+        await container.init_resources()
+
+        # Bind container instance to app state
+        app.state.container = container
+
+        # Wire dependencies for API modules
+        container.wire(
+            modules=[
+                "src.its_camera_ai.api.routers.auth",
+                "src.its_camera_ai.api.routers.cameras",
+                "src.its_camera_ai.api.routers.analytics",
+                "src.its_camera_ai.api.routers.system",
+                "src.its_camera_ai.api.routers.health",
+                "src.its_camera_ai.api.routers.models",
+                "src.its_camera_ai.api.dependencies",
+                "src.its_camera_ai.cli.commands.auth",
+                "src.its_camera_ai.cli.commands.services",
+                "src.its_camera_ai.cli.commands.config",
+            ]
+        )
+
+        logger.info("Application startup complete with container instance binding")
         yield
 
     except Exception as e:
-        logger.error("Failed to start application", error=str(e))
+        logger.error("Failed to start application with DI", error=str(e))
         raise
     finally:
         # Shutdown
         logger.info("Shutting down ITS Camera AI application")
         try:
-            await cleanup_dependencies()
+            # Get container from app state
+            container = getattr(app.state, "container", None)
+            if container:
+                # Unwire dependencies
+                container.unwire()
+
+                # Shutdown container resources
+                await container.shutdown_resources()
+
+                # Clear container from app state
+                app.state.container = None
+
             logger.info("Application shutdown complete")
         except Exception as e:
             logger.error("Error during shutdown", error=str(e))
 
 
-def create_app(settings: Settings = None) -> FastAPI:
-    """Create and configure FastAPI application.
+def create_app_with_di(settings: Settings | None = None) -> FastAPI:
+    """Create and configure FastAPI application with dependency injection.
 
     Args:
         settings: Application settings (optional, will use default if not provided)
 
     Returns:
-        FastAPI: Configured FastAPI application instance
+        FastAPI: Configured FastAPI application instance with DI
     """
     if settings is None:
         settings = get_settings()
@@ -83,18 +121,18 @@ def create_app(settings: Settings = None) -> FastAPI:
     # Setup logging first
     setup_logging(settings)
 
-    # Create FastAPI app
+    # Create FastAPI app with DI lifespan
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="AI-powered traffic monitoring and analytics system",
+        description="AI-powered traffic monitoring and analytics system with dependency injection",
         docs_url="/api/docs" if not settings.is_production() else None,
         redoc_url="/api/redoc" if not settings.is_production() else None,
         openapi_url="/api/openapi.json" if not settings.is_production() else None,
         lifespan=lifespan,
     )
 
-    # Store settings in app state
+    # Store settings in app state (container will be bound during lifespan)
     app.state.settings = settings
 
     # Add middleware (order matters - first added = outermost layer)
@@ -103,36 +141,29 @@ def create_app(settings: Settings = None) -> FastAPI:
     # Add exception handlers
     _add_exception_handlers(app)
 
-    # Include routers
-    _include_routers(app, settings)
+    # Include routers with DI support
+    _include_routers(app)
 
-    # Mount Prometheus metrics endpoint
+    # Add Prometheus metrics endpoint
     if settings.monitoring.enable_metrics:
         metrics_app = make_asgi_app()
         app.mount("/metrics", metrics_app)
 
-    logger.info(
-        "FastAPI application created",
-        title=settings.app_name,
-        version=settings.app_version,
-        environment=settings.environment,
-        debug=settings.debug,
-    )
-
+    logger.info("FastAPI application created with dependency injection")
     return app
 
 
 def _add_middleware(app: FastAPI, settings: Settings) -> None:
-    """Add middleware to the FastAPI application."""
+    """Add middleware to FastAPI application."""
 
     # Security middleware (outermost)
-    app.add_middleware(SecurityMiddleware)
+    if settings.security.enabled:
+        app.add_middleware(SecurityMiddleware)
 
-    # Trusted hosts
-    if settings.is_production():
+    # Trusted host middleware
+    if settings.security.allowed_hosts:
         app.add_middleware(
-            TrustedHostMiddleware,
-            allowed_hosts=["*"],  # Configure properly in production
+            TrustedHostMiddleware, allowed_hosts=settings.security.allowed_hosts
         )
 
     # CORS middleware
@@ -140,164 +171,152 @@ def _add_middleware(app: FastAPI, settings: Settings) -> None:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.security.allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-            allow_headers=["*"],
+            allow_credentials=settings.security.allow_credentials,
+            allow_methods=settings.security.allow_methods,
+            allow_headers=settings.security.allow_headers,
         )
 
-    # Rate limiting
-    app.add_middleware(
-        RateLimitMiddleware,
-        calls=settings.security.rate_limit_per_minute,
-        period=60,
-    )
+    # Compression middleware
+    if settings.compression.enabled:
+        app.add_middleware(
+            GZipMiddleware,
+            minimum_size=settings.compression.min_size,
+            compresslevel=settings.compression.level,
+        )
 
-    # Compression
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    # Rate limiting middleware
+    if settings.rate_limit_enabled:
+        app.add_middleware(RateLimitMiddleware)
 
-    # Metrics collection
+    # Metrics middleware
     if settings.monitoring.enable_metrics:
         app.add_middleware(MetricsMiddleware)
 
-    # Logging middleware (innermost)
+    # Logging middleware (innermost - closest to request handlers)
     app.add_middleware(LoggingMiddleware)
 
 
 def _add_exception_handlers(app: FastAPI) -> None:
-    """Add custom exception handlers to the FastAPI application."""
+    """Add custom exception handlers."""
 
     @app.exception_handler(ITSCameraAIError)
-    async def its_camera_ai_error_handler(
+    async def its_camera_ai_exception_handler(
         request: Request, exc: ITSCameraAIError
     ) -> JSONResponse:
-        """Handle custom application errors."""
+        """Handle custom ITS Camera AI exceptions."""
         logger.error(
-            "Application error",
-            error=exc.__class__.__name__,
-            message=exc.message,
-            code=exc.code,
-            details=exc.details,
+            "ITS Camera AI error",
+            error_type=type(exc).__name__,
+            error=str(exc),
             path=request.url.path,
             method=request.method,
         )
-
-        # Map error types to HTTP status codes
-        status_code = 500
-        if "VALIDATION" in exc.code:
-            status_code = 400
-        elif "AUTHENTICATION" in exc.code:
-            status_code = 401
-        elif "AUTHORIZATION" in exc.code:
-            status_code = 403
-        elif "NOT_FOUND" in exc.code:
-            status_code = 404
-        elif "RATE_LIMIT" in exc.code:
-            status_code = 429
-
         return JSONResponse(
-            status_code=status_code,
-            content=exc.to_dict(),
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "message": exc.message,
+                "details": exc.details,
+            },
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error_handler(
+    async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        """Handle Pydantic validation errors."""
+        """Handle request validation errors."""
         logger.warning(
-            "Validation error",
+            "Request validation error",
             errors=exc.errors(),
             path=request.url.path,
             method=request.method,
         )
-
         return JSONResponse(
-            status_code=400,
+            status_code=422,
             content={
-                "error": "ValidationError",
+                "error": "validation_error",
                 "message": "Request validation failed",
-                "code": "VALIDATION_ERROR",
-                "details": {
-                    "errors": exc.errors(),
-                },
+                "details": exc.errors(),
             },
         )
 
-    @app.exception_handler(Exception)
-    async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        """Handle unexpected errors."""
+    @app.exception_handler(500)
+    async def internal_server_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        """Handle internal server errors."""
         logger.error(
-            "Unexpected error",
-            error=exc.__class__.__name__,
-            message=str(exc),
+            "Internal server error",
+            error_type=type(exc).__name__,
+            error=str(exc),
             path=request.url.path,
             method=request.method,
-            exc_info=True,
         )
-
         return JSONResponse(
             status_code=500,
             content={
-                "error": "InternalServerError",
-                "message": "An unexpected error occurred",
-                "code": "INTERNAL_SERVER_ERROR",
+                "error": "internal_server_error",
+                "message": "An internal server error occurred",
+                "details": None,
             },
         )
 
 
-def _include_routers(app: FastAPI, settings: Settings) -> None:
-    """Include API routers in the FastAPI application."""
+def _include_routers(app: FastAPI) -> None:
+    """Include API routers with dependency injection support."""
 
-    # Health check (no prefix)
-    app.include_router(health.router, tags=["health"])
+    # Include all API routers with common prefix and tags
+    app.include_router(health.router, prefix="/api/v1", tags=["health"])
 
-    # API routes with prefix
-    api_prefix = settings.api_prefix
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 
-    app.include_router(
-        auth.router, prefix=api_prefix + "/auth", tags=["authentication"]
-    )
+    app.include_router(cameras.router, prefix="/api/v1/cameras", tags=["cameras"])
 
-    app.include_router(cameras.router, prefix=api_prefix + "/cameras", tags=["cameras"])
+    app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
 
-    app.include_router(
-        analytics.router, prefix=api_prefix + "/analytics", tags=["analytics"]
-    )
+    app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
 
-    app.include_router(models.router, prefix=api_prefix + "/models", tags=["models"])
-
-    app.include_router(system.router, prefix=api_prefix + "/system", tags=["system"])
+    app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 
 
-# Global app instance for easy access
-_app: FastAPI = None
+# Create the main app instance with dependency injection
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Main factory function for creating the FastAPI app with DI.
 
+    This is the primary entry point for creating the application.
 
-def get_app() -> FastAPI:
-    """Get the global FastAPI application instance.
+    Args:
+        settings: Application settings
 
     Returns:
-        FastAPI: The application instance
-
-    Raises:
-        RuntimeError: If the app hasn't been created yet
+        FastAPI application with dependency injection
     """
-    global _app
-    if _app is None:
-        _app = create_app()
-    return _app
+    return create_app_with_di(settings)
 
 
-# For debugging and development
+# Convenience function for getting the application
+def get_application() -> FastAPI:
+    """Get configured FastAPI application with dependency injection.
+
+    Returns:
+        FastAPI application instance
+    """
+    settings = get_settings()
+    return create_app_with_di(settings)
+
+
+# Application instance for deployment
+app = create_app_with_di()
+
+
 if __name__ == "__main__":
     import uvicorn
 
     settings = get_settings()
     uvicorn.run(
-        "its_camera_ai.api.app:get_app",
-        factory=True,
-        host=settings.api_host,
-        port=settings.api_port,
-        reload=settings.reload,
-        log_level=settings.log_level.lower(),
+        "src.its_camera_ai.api.app_di:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=not settings.is_production(),
+        log_config=None,  # Use our custom logging
     )

@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import BaseModel
+from .base import BaseTableModel
 
 
 class ProcessingStatus(str, Enum):
@@ -39,19 +39,17 @@ class FrameQuality(str, Enum):
     """Frame quality assessment enumeration."""
 
     EXCELLENT = "excellent"  # 0.9-1.0
-    GOOD = "good"           # 0.7-0.9
-    FAIR = "fair"           # 0.5-0.7
-    POOR = "poor"           # 0.0-0.5
+    GOOD = "good"  # 0.7-0.9
+    FAIR = "fair"  # 0.5-0.7
+    POOR = "poor"  # 0.0-0.5
 
 
-class FrameMetadata(BaseModel):
+class FrameMetadata(BaseTableModel):
     """Frame metadata for real-time processing results.
 
     Designed for high-throughput inserts (30+ FPS per camera, 100+ cameras)
     with optimized indexing and partitioning for time-series queries.
     """
-
-    __tablename__ = "frame_metadata"
 
     # Foreign key to camera (indexed for fast joins)
     camera_id: Mapped[str] = mapped_column(
@@ -59,7 +57,7 @@ class FrameMetadata(BaseModel):
         ForeignKey("cameras.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
-        comment="Reference to camera"
+        comment="Reference to camera",
     )
 
     # Frame identification and timing (critical for ordering)
@@ -71,13 +69,15 @@ class FrameMetadata(BaseModel):
         nullable=False,
         index=True,
         server_default=text("CURRENT_TIMESTAMP"),
-        comment="Frame capture timestamp"
+        comment="Frame capture timestamp",
     )
     processing_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Processing start timestamp"
     )
     processing_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Processing completion timestamp"
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Processing completion timestamp",
     )
 
     # Processing status and performance
@@ -86,7 +86,7 @@ class FrameMetadata(BaseModel):
         nullable=False,
         default=ProcessingStatus.PENDING,
         index=True,
-        comment="Frame processing status"
+        comment="Frame processing status",
     )
     processing_time_ms: Mapped[float | None] = mapped_column(
         Float, nullable=True, comment="Total processing time in milliseconds"
@@ -122,12 +122,18 @@ class FrameMetadata(BaseModel):
         String(100), nullable=True, comment="Storage bucket name"
     )
     is_stored: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, comment="Frame stored to persistent storage"
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Frame stored to persistent storage",
     )
 
     # Detection summary (for quick queries)
     has_detections: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, comment="Frame contains vehicle detections"
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Frame contains vehicle detections",
     )
     detection_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="Total number of detections"
@@ -186,7 +192,7 @@ class FrameMetadata(BaseModel):
         back_populates="frame_metadata",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="select"
+        lazy="select",
     )
 
     # Optimized indexes for high-throughput queries
@@ -196,40 +202,38 @@ class FrameMetadata(BaseModel):
         Index("idx_frame_camera_frame_num", "camera_id", "frame_number"),
         Index("idx_frame_status_timestamp", "status", "timestamp"),
         Index("idx_frame_detections_timestamp", "has_detections", "timestamp"),
-
         # Performance monitoring queries
         Index("idx_frame_processing_time", "processing_time_ms"),
         Index("idx_frame_quality_score", "quality_score"),
-
         # Analytics queries
         Index("idx_frame_traffic_density", "traffic_density"),
         Index("idx_frame_vehicle_count", "vehicle_count"),
-
         # Storage management
         Index("idx_frame_storage_status", "is_stored", "timestamp"),
         Index("idx_frame_storage_path", "storage_path"),
-
         # Error tracking
         Index("idx_frame_error_retry", "status", "retry_count"),
-
         # Composite indexes for common queries
         Index("idx_frame_camera_quality", "camera_id", "quality_score", "timestamp"),
-        Index("idx_frame_camera_detections", "camera_id", "has_detections", "timestamp"),
-
+        Index(
+            "idx_frame_camera_detections", "camera_id", "has_detections", "timestamp"
+        ),
         # Partial indexes for performance
         Index(
             "idx_frame_failed_status",
-            "camera_id", "timestamp",
-            postgresql_where=text("status = 'failed'")
+            "camera_id",
+            "timestamp",
+            postgresql_where=text("status = 'failed'"),
         ),
         Index(
             "idx_frame_with_detections",
-            "camera_id", "timestamp", "vehicle_count",
-            postgresql_where=text("has_detections = true")
+            "camera_id",
+            "timestamp",
+            "vehicle_count",
+            postgresql_where=text("has_detections = true"),
         ),
-
         # Consider partitioning by timestamp for very large datasets
-        {"comment": "Frame metadata optimized for high-throughput processing"}
+        {"comment": "Frame metadata optimized for high-throughput processing"},
     )
 
     def start_processing(self) -> None:
@@ -243,7 +247,7 @@ class FrameMetadata(BaseModel):
         has_detections: bool = False,
         detection_count: int = 0,
         vehicle_count: int = 0,
-        quality_score: float | None = None
+        quality_score: float | None = None,
     ) -> None:
         """Mark frame as processing completed with results.
 

@@ -14,25 +14,25 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import BaseModel
+from .base import BaseTableModel
 
 # Association tables for many-to-many relationships
 user_roles = Table(
     "user_roles",
-    BaseModel.metadata,
+    BaseTableModel.metadata,
     Column("user_id", String, ForeignKey("user.id"), primary_key=True),
     Column("role_id", String, ForeignKey("role.id"), primary_key=True),
 )
 
 role_permissions = Table(
     "role_permissions",
-    BaseModel.metadata,
+    BaseTableModel.metadata,
     Column("role_id", String, ForeignKey("role.id"), primary_key=True),
     Column("permission_id", String, ForeignKey("permission.id"), primary_key=True),
 )
 
 
-class User(BaseModel):
+class User(BaseTableModel):
     """User model for authentication."""
 
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
@@ -73,7 +73,7 @@ class User(BaseModel):
         return f"<User(username={self.username})>"
 
 
-class Role(BaseModel):
+class Role(BaseTableModel):
     """Role model for authorization."""
 
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
@@ -91,9 +91,7 @@ class Role(BaseModel):
         return f"<Role(name={self.name})>"
 
 
-
-
-class Permission(BaseModel):
+class Permission(BaseTableModel):
     """Permission model for fine-grained access control."""
 
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
@@ -110,7 +108,7 @@ class Permission(BaseModel):
         return f"<Permission(name={self.name}, resource={self.resource}, action={self.action})>"
 
 
-class SecurityAuditLog(BaseModel):
+class SecurityAuditLog(BaseTableModel):
     """Security audit log for compliance and monitoring."""
 
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -136,7 +134,7 @@ class SecurityAuditLog(BaseModel):
         return f"<SecurityAuditLog(event_type={self.event_type}, user={self.username}, timestamp={self.timestamp})>"
 
 
-class UserSession(BaseModel):
+class UserSession(BaseTableModel):
     """User session model for tracking active sessions."""
 
     session_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
