@@ -21,12 +21,12 @@ from ...models.user import User
 from ...services.auth import AuthService
 from ...services.cache import CacheService
 from ..dependencies import (
+    RateLimiterDI,
     get_auth_service,
     get_cache_service,
     get_current_user,
     get_database_session,
     rate_limit_strict,
-    RateLimiterDI,
 )
 from ..schemas.auth import (
     LoginRequest,

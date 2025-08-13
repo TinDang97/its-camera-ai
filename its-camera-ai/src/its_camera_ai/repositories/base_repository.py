@@ -4,13 +4,12 @@ Provides generic async CRUD functionality with error handling,
 transaction management, and query optimization for all repository classes.
 """
 
-from typing import Any, TypeVar, AsyncContextManager
-from collections.abc import AsyncGenerator
+from typing import Any, AsyncContextManager, TypeVar
 from uuid import UUID
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.exceptions import DatabaseError, NotFoundError
 from ..core.logging import get_logger

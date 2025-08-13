@@ -9,8 +9,7 @@ from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
