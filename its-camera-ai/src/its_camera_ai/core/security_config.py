@@ -12,8 +12,9 @@ import os
 import secrets
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SecurityLevel(str, Enum):
@@ -44,8 +45,9 @@ class NetworkBindingConfig(BaseModel):
         description="Default host for development binding"
     )
 
-    @validator('production_hosts')
-    def validate_production_hosts(cls, v):
+    @field_validator('production_hosts')
+    @classmethod
+    def validate_production_hosts(cls, v: list[str]) -> list[str]:
         """Ensure production hosts are secure."""
         if "0.0.0.0" in v:
             raise ValueError("Production should not bind to 0.0.0.0 (all interfaces)")
@@ -72,8 +74,9 @@ class FileSecurityConfig(BaseModel):
         description="Allowed file extensions for uploads"
     )
 
-    @validator('temp_file_permissions')
-    def validate_permissions(cls, v):
+    @field_validator('temp_file_permissions')
+    @classmethod
+    def validate_permissions(cls, v: int) -> int:
         """Ensure secure file permissions."""
         if v & 0o077:  # Check if group/other have any permissions
             raise ValueError("Temporary files should only be accessible by owner (0o600)")
@@ -104,8 +107,9 @@ class JWTSecurityConfig(BaseModel):
         description="Require issuer claim in JWT tokens"
     )
 
-    @validator('algorithm')
-    def validate_algorithm(cls, v):
+    @field_validator('algorithm')
+    @classmethod
+    def validate_algorithm(cls, v: str) -> str:
         """Ensure secure JWT algorithm."""
         secure_algorithms = ["RS256", "ES256", "PS256"]
         if v not in secure_algorithms:
@@ -145,8 +149,9 @@ class PasswordPolicyConfig(BaseModel):
         description="Number of previous passwords to remember"
     )
 
-    @validator('min_length')
-    def validate_min_length(cls, v):
+    @field_validator('min_length')
+    @classmethod
+    def validate_min_length(cls, v: int) -> int:
         """Ensure secure minimum length."""
         if v < 8:
             raise ValueError("Minimum password length should be at least 8 characters")
@@ -265,7 +270,7 @@ class ComprehensiveSecurityConfig(BaseModel):
         )
         return host in allowed_hosts
 
-    def get_secure_temp_file_config(self) -> dict[str, any]:
+    def get_secure_temp_file_config(self) -> dict[str, Any]:
         """Get secure temporary file configuration."""
         return {
             "permissions": self.file_security.temp_file_permissions,
@@ -282,7 +287,7 @@ class ComprehensiveSecurityConfig(BaseModel):
         file_ext = Path(filename).suffix.lower()
         return file_ext in self.file_security.allowed_extensions
 
-    def get_jwt_config_for_environment(self, is_production: bool) -> dict[str, any]:
+    def get_jwt_config_for_environment(self, is_production: bool) -> dict[str, Any]:
         """Get JWT configuration for environment."""
         config = self.jwt_security.dict()
 

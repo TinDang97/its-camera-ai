@@ -17,6 +17,7 @@ try:
     import pycuda.autoinit
     import pycuda.driver as cuda
     import tensorrt as trt
+
     TRT_AVAILABLE = True
 except ImportError:
     trt = None
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 class TensorRTEngineBuilder:
     """
     Advanced TensorRT engine builder optimized for YOLO11 traffic monitoring.
-    
+
     Key optimizations:
     - Profile-guided optimization for traffic scenes
     - Layer fusion optimization
@@ -44,7 +45,7 @@ class TensorRTEngineBuilder:
         max_batch_size: int = 32,
         workspace_size_gb: int = 4,
         dla_core: int | None = None,
-        enable_tactics: bool = True
+        enable_tactics: bool = True,
     ):
         if not TRT_AVAILABLE:
             raise ImportError("TensorRT not available")
@@ -65,16 +66,16 @@ class TensorRTEngineBuilder:
         self,
         onnx_path: Path,
         engine_path: Path,
-        calibration_data: list[np.ndarray] | None = None
+        calibration_data: list[np.ndarray] | None = None,
     ) -> Path:
         """
         Build optimized TensorRT engine from ONNX model.
-        
+
         Args:
             onnx_path: Path to ONNX model
             engine_path: Output path for TensorRT engine
             calibration_data: Optional calibration data for INT8 quantization
-            
+
         Returns:
             Path to generated engine file
         """
@@ -89,7 +90,7 @@ class TensorRTEngineBuilder:
         parser = trt.OnnxParser(network, self.trt_logger)
 
         # Parse ONNX model
-        with open(onnx_path, 'rb') as model:
+        with open(onnx_path, "rb") as model:
             if not parser.parse(model.read()):
                 for error in range(parser.num_errors):
                     logger.error(f"ONNX parsing error: {parser.get_error(error)}")
@@ -111,9 +112,9 @@ class TensorRTEngineBuilder:
             self._configure_dla(config)
 
         # Build engine with timing cache
-        cache_file = engine_path.with_suffix('.timing_cache')
+        cache_file = engine_path.with_suffix(".timing_cache")
         if cache_file.exists():
-            with open(cache_file, 'rb') as f:
+            with open(cache_file, "rb") as f:
                 config.set_timing_cache(f.read())
 
         logger.info("Building TensorRT engine (this may take several minutes)...")
@@ -123,13 +124,13 @@ class TensorRTEngineBuilder:
             raise RuntimeError("Failed to build TensorRT engine")
 
         # Save engine and timing cache
-        with open(engine_path, 'wb') as f:
+        with open(engine_path, "wb") as f:
             f.write(serialized_engine)
 
         # Save timing cache for future builds
         timing_cache = config.get_timing_cache()
         if timing_cache:
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 f.write(timing_cache.serialize())
 
         build_time = time.time() - start_time
@@ -138,9 +139,7 @@ class TensorRTEngineBuilder:
         return engine_path
 
     def _configure_precision(
-        self,
-        config: trt.IBuilderConfig,
-        calibration_data: list[np.ndarray] | None
+        self, config: trt.IBuilderConfig, calibration_data: list[np.ndarray] | None
     ) -> None:
         """Configure precision and quantization settings."""
         if self.precision == "fp16":
@@ -158,7 +157,7 @@ class TensorRTEngineBuilder:
                 calibrator = TrafficINT8Calibrator(
                     calibration_data=calibration_data,
                     input_shape=(1, 3, *self.input_size),
-                    cache_file="yolo11_traffic_int8.cache"
+                    cache_file="yolo11_traffic_int8.cache",
                 )
                 config.int8_calibrator = calibrator
             else:
@@ -171,9 +170,7 @@ class TensorRTEngineBuilder:
             logger.info("Best precision mode enabled (FP16 + INT8)")
 
     def _configure_optimization_profiles(
-        self,
-        config: trt.IBuilderConfig,
-        network: trt.INetworkDefinition
+        self, config: trt.IBuilderConfig, network: trt.INetworkDefinition
     ) -> None:
         """Configure dynamic shape optimization profiles."""
         profile = builder.create_optimization_profile()
@@ -187,8 +184,8 @@ class TensorRTEngineBuilder:
         profile.set_shape(
             input_name,
             min=(1, 3, *self.input_size),
-            opt=(4, 3, *self.input_size),    # Optimized for 4-camera setups
-            max=(8, 3, *self.input_size)
+            opt=(4, 3, *self.input_size),  # Optimized for 4-camera setups
+            max=(8, 3, *self.input_size),
         )
         config.add_optimization_profile(profile)
 
@@ -198,18 +195,22 @@ class TensorRTEngineBuilder:
             profile2.set_shape(
                 input_name,
                 min=(8, 3, *self.input_size),
-                opt=(16, 3, *self.input_size),   # Optimized for high-throughput
-                max=(self.max_batch_size, 3, *self.input_size)
+                opt=(16, 3, *self.input_size),  # Optimized for high-throughput
+                max=(self.max_batch_size, 3, *self.input_size),
             )
             config.add_optimization_profile(profile2)
 
-        logger.info(f"Optimization profiles configured for batch sizes 1-{self.max_batch_size}")
+        logger.info(
+            f"Optimization profiles configured for batch sizes 1-{self.max_batch_size}"
+        )
 
     def _configure_advanced_optimizations(self, config: trt.IBuilderConfig) -> None:
         """Configure advanced optimization settings."""
 
         # Enable layer fusion optimizations
-        config.set_flag(trt.BuilderFlag.DISABLE_TIMING_CACHE)  # Force rebuild for optimal performance
+        config.set_flag(
+            trt.BuilderFlag.DISABLE_TIMING_CACHE
+        )  # Force rebuild for optimal performance
 
         # Configure tactics for YOLO-specific optimizations
         if self.enable_tactics:
@@ -220,7 +221,9 @@ class TensorRTEngineBuilder:
             self._configure_yolo_tactics(config)
 
         # Enable graph optimization
-        config.set_flag(trt.BuilderFlag.STRIP_PLAN)  # Remove debugging info for smaller engines
+        config.set_flag(
+            trt.BuilderFlag.STRIP_PLAN
+        )  # Remove debugging info for smaller engines
 
         # Configure profiling verbosity
         config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
@@ -266,7 +269,7 @@ class TensorRTEngineBuilder:
 class TrafficINT8Calibrator(trt.IInt8EntropyCalibrator2):
     """
     INT8 calibrator optimized for traffic monitoring scenarios.
-    
+
     Uses real traffic images for accurate quantization calibration.
     """
 
@@ -275,7 +278,7 @@ class TrafficINT8Calibrator(trt.IInt8EntropyCalibrator2):
         calibration_data: list[np.ndarray],
         input_shape: tuple[int, ...],
         cache_file: str = "traffic_int8_calibration.cache",
-        batch_size: int = 1
+        batch_size: int = 1,
     ):
         trt.IInt8EntropyCalibrator2.__init__(self)
 
@@ -335,6 +338,7 @@ class TrafficINT8Calibrator(trt.IInt8EntropyCalibrator2):
 
         # Resize image
         import cv2
+
         resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
         # Apply letterbox padding
@@ -342,7 +346,7 @@ class TrafficINT8Calibrator(trt.IInt8EntropyCalibrator2):
         pad_w = (target_w - new_w) // 2
 
         padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
-        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = resized
+        padded[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
 
         # Convert to CHW and normalize
         img_chw = np.transpose(padded, (2, 0, 1))
@@ -353,13 +357,13 @@ class TrafficINT8Calibrator(trt.IInt8EntropyCalibrator2):
     def read_calibration_cache(self) -> bytes:
         """Read calibration cache if exists."""
         if os.path.exists(self.cache_file):
-            with open(self.cache_file, 'rb') as f:
+            with open(self.cache_file, "rb") as f:
                 return f.read()
         return None
 
     def write_calibration_cache(self, cache: bytes) -> None:
         """Write calibration cache."""
-        with open(self.cache_file, 'wb') as f:
+        with open(self.cache_file, "wb") as f:
             f.write(cache)
         logger.info(f"INT8 calibration cache saved to {self.cache_file}")
 
@@ -367,7 +371,7 @@ class TrafficINT8Calibrator(trt.IInt8EntropyCalibrator2):
 class TensorRTInferenceEngine:
     """
     High-performance TensorRT inference engine for YOLO11.
-    
+
     Optimized for production traffic monitoring with sub-100ms latency.
     """
 
@@ -395,12 +399,14 @@ class TensorRTInferenceEngine:
 
     def _load_engine(self) -> trt.ICudaEngine:
         """Load TensorRT engine from file."""
-        with open(self.engine_path, 'rb') as f:
+        with open(self.engine_path, "rb") as f:
             engine_data = f.read()
 
         engine = self.runtime.deserialize_cuda_engine(engine_data)
         if engine is None:
-            raise RuntimeError(f"Failed to load TensorRT engine from {self.engine_path}")
+            raise RuntimeError(
+                f"Failed to load TensorRT engine from {self.engine_path}"
+            )
 
         return engine
 
@@ -422,13 +428,15 @@ class TensorRTInferenceEngine:
                 host_mem = cuda.pagelocked_empty(size, dtype)
                 device_mem = cuda.mem_alloc(size)
 
-                self.inputs.append({
-                    'name': binding_name,
-                    'host': host_mem,
-                    'device': device_mem,
-                    'shape': shape,
-                    'dtype': dtype
-                })
+                self.inputs.append(
+                    {
+                        "name": binding_name,
+                        "host": host_mem,
+                        "device": device_mem,
+                        "shape": shape,
+                        "dtype": dtype,
+                    }
+                )
 
             else:
                 # Output binding
@@ -436,28 +444,28 @@ class TensorRTInferenceEngine:
                 host_mem = cuda.pagelocked_empty(size, dtype)
                 device_mem = cuda.mem_alloc(size)
 
-                self.outputs.append({
-                    'name': binding_name,
-                    'host': host_mem,
-                    'device': device_mem,
-                    'shape': shape,
-                    'dtype': dtype
-                })
+                self.outputs.append(
+                    {
+                        "name": binding_name,
+                        "host": host_mem,
+                        "device": device_mem,
+                        "shape": shape,
+                        "dtype": dtype,
+                    }
+                )
 
             self.bindings.append(int(device_mem))
 
     def infer_batch(
-        self,
-        input_tensor: np.ndarray,
-        profile_index: int = 0
+        self, input_tensor: np.ndarray, profile_index: int = 0
     ) -> list[np.ndarray]:
         """
         Run inference on batch with optimal performance.
-        
+
         Args:
             input_tensor: Input batch tensor (NCHW format)
             profile_index: Optimization profile index to use
-            
+
         Returns:
             List of output arrays
         """
@@ -479,22 +487,19 @@ class TensorRTInferenceEngine:
 
         # Copy input data to device
         cuda.memcpy_htod_async(
-            self.inputs[0]['device'],
-            input_tensor.ravel(),
-            self.stream
+            self.inputs[0]["device"], input_tensor.ravel(), self.stream
         )
 
         # Run inference
         self.context.execute_async_v2(
-            bindings=self.bindings,
-            stream_handle=self.stream.handle
+            bindings=self.bindings, stream_handle=self.stream.handle
         )
 
         # Copy outputs back to host
         outputs = []
         for output in self.outputs:
-            cuda.memcpy_dtoh_async(output['host'], output['device'], self.stream)
-            outputs.append(output['host'].copy())
+            cuda.memcpy_dtoh_async(output["host"], output["device"], self.stream)
+            outputs.append(output["host"].copy())
 
         # Synchronize stream
         self.stream.synchronize()
@@ -502,13 +507,11 @@ class TensorRTInferenceEngine:
         return outputs
 
     def benchmark_performance(
-        self,
-        input_shape: tuple[int, ...],
-        num_iterations: int = 100
+        self, input_shape: tuple[int, ...], num_iterations: int = 100
     ) -> dict[str, float]:
         """
         Benchmark inference performance.
-        
+
         Returns:
             Performance metrics including latency and throughput
         """
@@ -534,18 +537,20 @@ class TensorRTInferenceEngine:
 
         # Calculate metrics
         metrics = {
-            'avg_latency_ms': np.mean(latencies),
-            'p50_latency_ms': np.percentile(latencies, 50),
-            'p95_latency_ms': np.percentile(latencies, 95),
-            'p99_latency_ms': np.percentile(latencies, 99),
-            'min_latency_ms': np.min(latencies),
-            'max_latency_ms': np.max(latencies),
-            'throughput_fps': (num_iterations * input_shape[0]) / total_time,
-            'total_time_s': total_time,
+            "avg_latency_ms": np.mean(latencies),
+            "p50_latency_ms": np.percentile(latencies, 50),
+            "p95_latency_ms": np.percentile(latencies, 95),
+            "p99_latency_ms": np.percentile(latencies, 99),
+            "min_latency_ms": np.min(latencies),
+            "max_latency_ms": np.max(latencies),
+            "throughput_fps": (num_iterations * input_shape[0]) / total_time,
+            "total_time_s": total_time,
         }
 
-        logger.info(f"Benchmark completed: {metrics['avg_latency_ms']:.2f}ms avg latency, "
-                   f"{metrics['throughput_fps']:.1f} FPS")
+        logger.info(
+            f"Benchmark completed: {metrics['avg_latency_ms']:.2f}ms avg latency, "
+            f"{metrics['throughput_fps']:.1f} FPS"
+        )
 
         return metrics
 
@@ -553,12 +558,12 @@ class TensorRTInferenceEngine:
         """Clean up resources."""
         # Free GPU memory
         for inp in self.inputs:
-            inp['device'].free()
+            inp["device"].free()
         for out in self.outputs:
-            out['device'].free()
+            out["device"].free()
 
         # Clean up CUDA context
-        if hasattr(self, 'cuda_ctx'):
+        if hasattr(self, "cuda_ctx"):
             self.cuda_ctx.pop()
 
 
@@ -567,11 +572,11 @@ def optimize_yolo11_for_production(
     output_dir: Path,
     precision: str = "fp16",
     max_batch_size: int = 32,
-    calibration_images: list[np.ndarray] | None = None
+    calibration_images: list[np.ndarray] | None = None,
 ) -> dict[str, Path]:
     """
     Complete optimization pipeline for YOLO11 production deployment.
-    
+
     Returns:
         Dictionary containing paths to optimized models
     """
@@ -595,27 +600,25 @@ def optimize_yolo11_for_production(
         int8=(precision in ["int8", "best"]),
         optimize=True,
         workspace=4,
-        nms=True
+        nms=True,
     )
 
     # Move ONNX file to output directory
-    original_onnx = Path(str(model_path).replace('.pt', '.onnx'))
+    original_onnx = Path(str(model_path).replace(".pt", ".onnx"))
     if original_onnx.exists():
         original_onnx.rename(onnx_path)
 
     # Step 2: Build TensorRT engine
     logger.info("Step 2: Building TensorRT engine...")
     engine_builder = TensorRTEngineBuilder(
-        precision=precision,
-        max_batch_size=max_batch_size,
-        workspace_size_gb=4
+        precision=precision, max_batch_size=max_batch_size, workspace_size_gb=4
     )
 
     engine_path = output_dir / f"{model_path.stem}_trt_{precision}.engine"
     engine_builder.build_engine_from_onnx(
         onnx_path=onnx_path,
         engine_path=engine_path,
-        calibration_data=calibration_images
+        calibration_data=calibration_images,
     )
 
     # Step 3: Benchmark performance
@@ -632,8 +635,9 @@ def optimize_yolo11_for_production(
 
     # Save benchmark results
     import json
+
     benchmark_path = output_dir / "benchmark_results.json"
-    with open(benchmark_path, 'w') as f:
+    with open(benchmark_path, "w") as f:
         json.dump(benchmark_results, f, indent=2)
 
     total_time = time.time() - start_time

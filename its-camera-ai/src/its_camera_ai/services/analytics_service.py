@@ -6,7 +6,7 @@ Optimized for high-performance processing with TimescaleDB integration.
 """
 
 import statistics
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -199,7 +199,7 @@ class RuleEngine:
             Speed limit in km/h
         """
         if check_time is None:
-            check_time = datetime.utcnow()
+            check_time = datetime.now(UTC)
 
         # Normalize vehicle type
         normalized_vehicle_type = self._normalize_vehicle_type(vehicle_type)
@@ -659,7 +659,7 @@ class AnalyticsService(BaseAsyncService):
         """Get historical traffic data for anomaly detector training."""
         try:
             # Get data from last 30 days for training
-            end_time = datetime.utcnow()
+            end_time = datetime.now(UTC)
             start_time = end_time - timedelta(days=30)
 
             query = (
@@ -715,7 +715,7 @@ class AnalyticsService(BaseAsyncService):
         Returns:
             Analytics processing results
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
 
         try:
             # Filter valid vehicle detections
@@ -741,7 +741,7 @@ class AnalyticsService(BaseAsyncService):
             # Update trajectory analysis
             await self._update_trajectory_analysis(vehicle_detections, camera_id)
 
-            processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
             result = {
                 "camera_id": camera_id,
@@ -911,7 +911,7 @@ class AnalyticsService(BaseAsyncService):
             "flow_rate": 0.0,  # Would need historical data to calculate
             "occupancy_rate": 0.0,  # Would need zone configuration
             "queue_length": 0.0,  # Would need zone analysis
-            "timestamp": metrics.get("timestamp", datetime.utcnow()),
+            "timestamp": metrics.get("timestamp", datetime.now(UTC)),
         }
 
         anomalies = self.anomaly_detector.detect_anomalies([data_point])
@@ -936,7 +936,7 @@ class AnalyticsService(BaseAsyncService):
                 record = TrafficAnomaly(
                     anomaly_type="traffic_pattern",
                     severity=anomaly["severity"],
-                    detection_time=datetime.utcnow(),
+                    detection_time=datetime.now(UTC),
                     camera_id=camera_id,
                     anomaly_score=anomaly["anomaly_score"],
                     confidence=min(1.0, anomaly["anomaly_score"] * 1.2),
@@ -1304,7 +1304,7 @@ class AnalyticsService(BaseAsyncService):
                 "report_type": report_type,
                 "time_range": {"start": start_time, "end": end_time},
                 "cameras": camera_ids,
-                "generated_at": datetime.utcnow(),
+                "generated_at": datetime.now(UTC),
             }
 
             # Aggregate metrics across cameras

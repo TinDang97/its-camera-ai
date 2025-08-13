@@ -943,6 +943,703 @@ def _add_production_config_section(include_examples: bool) -> str:
     return section
 
 
+@app.command()
+def restore(
+    backup_file: Path = typer.Argument(
+        help="Backup file to restore from"
+    ),
+    confirm: bool = typer.Option(
+        False, "--confirm", "-y", help="Skip confirmation prompt"
+    ),
+) -> None:
+    """🔄 Restore configuration from backup.
+    
+    Restore system configuration from a previously created backup file.
+    This will replace current configuration settings.
+    """
+    if not backup_file.exists():
+        print_error(f"Backup file not found: {backup_file}")
+        return
+
+    if not confirm:
+        if not confirm_action(f"Restore configuration from '{backup_file}'? This will replace current settings."):
+            print_info("Restore cancelled")
+            return
+
+    backup_manager = ConfigBackupManager()
+    success = backup_manager.restore_full_backup(str(backup_file))
+
+    if success:
+        print_success("Configuration restored successfully")
+        print_info("You may need to restart services for changes to take effect")
+    else:
+        print_error("Failed to restore configuration")
+
+
+@app.command()
+def list_backups() -> None:
+    """📋 List available configuration backups.
+    
+    Display all available configuration backups including full system
+    backups and individual section/key backups.
+    """
+    backup_manager = ConfigBackupManager()
+    backups = backup_manager.list_backups()
+
+    # Display full backups
+    full_backups = backups.get("full_backups", [])
+    if full_backups:
+        table = Table(title="Full System Backups")
+        table.add_column("Timestamp", style="cyan")
+        table.add_column("File", style="green")
+        table.add_column("Variables", style="blue")
+        table.add_column("Age", style="yellow")
+
+        for backup in sorted(full_backups, key=lambda x: x["timestamp"], reverse=True):
+            timestamp = backup["timestamp"]
+            age_seconds = time.time() - timestamp
+
+            from ..utils import format_duration
+            age = format_duration(int(age_seconds))
+
+            table.add_row(
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp)),
+                Path(backup["file"]).name,
+                str(backup["env_vars_count"]),
+                age
+            )
+
+        console.print(table)
+
+    # Display section backups
+    section_backups = backups.get("section_backups", {})
+    if section_backups:
+        console.print("\n[bold]Section Backups:[/bold]")
+        for section, backup_data in section_backups.items():
+            timestamp = backup_data["timestamp"]
+            age_seconds = time.time() - timestamp
+
+            from ..utils import format_duration
+            age = format_duration(int(age_seconds))
+            var_count = len(backup_data["data"])
+
+            console.print(f"  • {section}: {var_count} variables, {age} ago")
+
+    # Display key backups
+    key_backups = backups.get("key_backups", {})
+    if key_backups:
+        console.print("\n[bold]Individual Key Backups:[/bold]")
+        for key, backup_data in key_backups.items():
+            timestamp = backup_data["timestamp"]
+            age_seconds = time.time() - timestamp
+
+            from ..utils import format_duration
+            age = format_duration(int(age_seconds))
+
+            console.print(f"  • {key}: {age} ago")
+
+    if not any([full_backups, section_backups, key_backups]):
+        print_info("No configuration backups found")
+
+
+@app.command()
+def diff(
+    config1: Path = typer.Argument(help="First configuration file or 'current' for current settings"),
+    config2: Path = typer.Argument(help="Second configuration file or 'defaults' for default settings"),
+    output_format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table, json, or unified"
+    ),
+) -> None:
+    """🔍 Compare configuration files or settings.
+    
+    Compare two configuration sources and show differences.
+    Use 'current' to compare against current runtime settings.
+    Use 'defaults' to compare against default values.
+    """
+    try:
+        # Load first configuration
+        if str(config1) == "current":
+            settings = get_settings()
+            config1_data = settings.model_dump()
+        elif str(config1) == "defaults":
+            # Create default settings without environment overrides
+            old_env = os.environ.copy()
+            # Temporarily clear ITS environment variables
+            prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+            for key in list(os.environ.keys()):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del os.environ[key]
+
+            try:
+                from ...core.config import Settings
+                default_settings = Settings()
+                config1_data = default_settings.model_dump()
+            finally:
+                os.environ.update(old_env)
+        else:
+            config1_data = _load_config_file(config1)
+
+        # Load second configuration
+        if str(config2) == "current":
+            settings = get_settings()
+            config2_data = settings.model_dump()
+        elif str(config2) == "defaults":
+            # Same as above for defaults
+            old_env = os.environ.copy()
+            prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+            for key in list(os.environ.keys()):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del os.environ[key]
+
+            try:
+                from ...core.config import Settings
+                default_settings = Settings()
+                config2_data = default_settings.model_dump()
+            finally:
+                os.environ.update(old_env)
+        else:
+            config2_data = _load_config_file(config2)
+
+        # Compare configurations
+        differences = _compare_configs(config1_data, config2_data)
+
+        if not differences:
+            print_success("Configurations are identical")
+            return
+
+        # Display differences based on format
+        if output_format == "table":
+            _display_config_diff_table(differences, str(config1), str(config2))
+        elif output_format == "json":
+            console.print_json(json.dumps(differences, indent=2, default=str))
+        elif output_format == "unified":
+            _display_config_diff_unified(differences, str(config1), str(config2))
+        else:
+            print_error(f"Invalid output format: {output_format}")
+
+    except Exception as e:
+        print_error(f"Failed to compare configurations: {e}")
+
+
+def _load_config_file(config_file: Path) -> dict[str, Any]:
+    """Load configuration from file."""
+    if not config_file.exists():
+        raise Exception(f"Configuration file not found: {config_file}")
+
+    if config_file.suffix.lower() == ".json":
+        with open(config_file) as f:
+            return json.load(f)
+    elif config_file.suffix.lower() in [".yaml", ".yml"]:
+        import yaml
+        with open(config_file) as f:
+            return yaml.safe_load(f) or {}
+    else:
+        raise Exception(f"Unsupported configuration file format: {config_file.suffix}")
+
+
+def _compare_configs(config1: dict[str, Any], config2: dict[str, Any], prefix: str = "") -> list[dict[str, Any]]:
+    """Compare two configuration dictionaries."""
+    differences = []
+
+    all_keys = set(config1.keys()) | set(config2.keys())
+
+    for key in sorted(all_keys):
+        current_path = f"{prefix}.{key}" if prefix else key
+
+        if key not in config1:
+            differences.append({
+                "key": current_path,
+                "type": "added",
+                "old_value": None,
+                "new_value": config2[key]
+            })
+        elif key not in config2:
+            differences.append({
+                "key": current_path,
+                "type": "removed",
+                "old_value": config1[key],
+                "new_value": None
+            })
+        else:
+            val1, val2 = config1[key], config2[key]
+
+            if isinstance(val1, dict) and isinstance(val2, dict):
+                # Recurse into nested dictionaries
+                nested_diffs = _compare_configs(val1, val2, current_path)
+                differences.extend(nested_diffs)
+            elif val1 != val2:
+                differences.append({
+                    "key": current_path,
+                    "type": "changed",
+                    "old_value": val1,
+                    "new_value": val2
+                })
+
+    return differences
+
+
+def _display_config_diff_table(differences: list[dict[str, Any]], config1_name: str, config2_name: str) -> None:
+    """Display configuration differences in table format."""
+    table = Table(title=f"Configuration Differences: {config1_name} vs {config2_name}")
+    table.add_column("Key", style="cyan")
+    table.add_column("Type", style="blue")
+    table.add_column(f"Value in {config1_name}", style="green")
+    table.add_column(f"Value in {config2_name}", style="yellow")
+
+    for diff in differences:
+        type_color = {
+            "changed": "yellow",
+            "added": "green",
+            "removed": "red"
+        }.get(diff["type"], "white")
+
+        old_val = str(diff["old_value"]) if diff["old_value"] is not None else "[dim]N/A[/dim]"
+        new_val = str(diff["new_value"]) if diff["new_value"] is not None else "[dim]N/A[/dim]"
+
+        table.add_row(
+            diff["key"],
+            f"[{type_color}]{diff['type'].title()}[/{type_color}]",
+            old_val,
+            new_val
+        )
+
+    console.print(table)
+    print_info(f"Found {len(differences)} differences")
+
+
+def _display_config_diff_unified(differences: list[dict[str, Any]], config1_name: str, config2_name: str) -> None:
+    """Display configuration differences in unified diff format."""
+    console.print(f"[bold]--- {config1_name}[/bold]")
+    console.print(f"[bold]+++ {config2_name}[/bold]")
+    console.print()
+
+    for diff in differences:
+        key = diff["key"]
+        diff_type = diff["type"]
+
+        if diff_type == "changed":
+            console.print(f"[red]- {key}: {diff['old_value']}[/red]")
+            console.print(f"[green]+ {key}: {diff['new_value']}[/green]")
+        elif diff_type == "removed":
+            console.print(f"[red]- {key}: {diff['old_value']}[/red]")
+        elif diff_type == "added":
+            console.print(f"[green]+ {key}: {diff['new_value']}[/green]")
+
+        console.print()
+
+
+class ConfigBackupManager:
+    """Manager for configuration backups and rollbacks."""
+
+    def __init__(self):
+        self.backup_dir = Path("config_backups")
+        self.backup_dir.mkdir(exist_ok=True)
+        self.backup_index_file = self.backup_dir / "backup_index.json"
+        self._load_backup_index()
+
+    def _load_backup_index(self) -> None:
+        """Load backup index from file."""
+        if self.backup_index_file.exists():
+            try:
+                with open(self.backup_index_file) as f:
+                    self.backup_index = json.load(f)
+            except Exception:
+                self.backup_index = {}
+        else:
+            self.backup_index = {}
+
+    def _save_backup_index(self) -> None:
+        """Save backup index to file."""
+        try:
+            with open(self.backup_index_file, 'w') as f:
+                json.dump(self.backup_index, f, indent=2)
+        except Exception as e:
+            print_error(f"Failed to save backup index: {e}")
+
+    def save_key_backup(self, key: str, value: str) -> None:
+        """Save backup for a specific key."""
+        timestamp = int(time.time())
+        backup_entry = {
+            "timestamp": timestamp,
+            "key": key,
+            "value": value
+        }
+
+        if "keys" not in self.backup_index:
+            self.backup_index["keys"] = {}
+
+        self.backup_index["keys"][key] = backup_entry
+        self._save_backup_index()
+
+    def restore_key_backup(self, key: str) -> str | None:
+        """Restore backup for a specific key."""
+        if "keys" not in self.backup_index:
+            return None
+
+        backup_entry = self.backup_index["keys"].get(key)
+        return backup_entry["value"] if backup_entry else None
+
+    def save_section_backup(self, section: str, data: dict[str, str]) -> None:
+        """Save backup for a configuration section."""
+        timestamp = int(time.time())
+        backup_entry = {
+            "timestamp": timestamp,
+            "section": section,
+            "data": data
+        }
+
+        if "sections" not in self.backup_index:
+            self.backup_index["sections"] = {}
+
+        self.backup_index["sections"][section] = backup_entry
+        self._save_backup_index()
+
+    def restore_section_backup(self, section: str) -> dict[str, str] | None:
+        """Restore backup for a configuration section."""
+        if "sections" not in self.backup_index:
+            return None
+
+        backup_entry = self.backup_index["sections"].get(section)
+        return backup_entry["data"] if backup_entry else None
+
+    def create_full_backup(self) -> str:
+        """Create a full system backup."""
+        timestamp = int(time.time())
+        backup_file = self.backup_dir / f"full_backup_{timestamp}.json"
+
+        # Collect all ITS-related environment variables
+        env_data = {}
+        prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+
+        for key, value in os.environ.items():
+            if any(key.startswith(prefix) for prefix in prefixes):
+                env_data[key] = value
+
+        backup_data = {
+            "timestamp": timestamp,
+            "type": "full_backup",
+            "environment": env_data
+        }
+
+        try:
+            with open(backup_file, 'w') as f:
+                json.dump(backup_data, f, indent=2)
+
+            # Update index
+            if "full_backups" not in self.backup_index:
+                self.backup_index["full_backups"] = []
+
+            self.backup_index["full_backups"].append({
+                "timestamp": timestamp,
+                "file": str(backup_file),
+                "env_vars_count": len(env_data)
+            })
+
+            self._save_backup_index()
+            return str(backup_file)
+
+        except Exception as e:
+            print_error(f"Failed to create full backup: {e}")
+            return ""
+
+    def restore_full_backup(self, backup_file: str) -> bool:
+        """Restore from a full system backup."""
+        try:
+            backup_path = Path(backup_file)
+            if not backup_path.exists():
+                print_error(f"Backup file not found: {backup_file}")
+                return False
+
+            with open(backup_path) as f:
+                backup_data = json.load(f)
+
+            if backup_data.get("type") != "full_backup":
+                print_error("Invalid backup file format")
+                return False
+
+            # Clear current ITS environment variables
+            prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+            cleared_vars = []
+
+            for key in list(os.environ.keys()):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del os.environ[key]
+                    cleared_vars.append(key)
+
+            # Restore from backup
+            env_data = backup_data.get("environment", {})
+            for key, value in env_data.items():
+                os.environ[key] = value
+
+            print_success(f"Restored {len(env_data)} environment variables from backup")
+            print_info(f"Cleared {len(cleared_vars)} existing variables")
+            return True
+
+        except Exception as e:
+            print_error(f"Failed to restore from backup: {e}")
+            return False
+
+    def list_backups(self) -> dict[str, Any]:
+        """List all available backups."""
+        return {
+            "full_backups": self.backup_index.get("full_backups", []),
+            "section_backups": self.backup_index.get("sections", {}),
+            "key_backups": self.backup_index.get("keys", {})
+        }
+
+
+def _update_json_config(config_file: Path, key: str, value: str) -> None:
+    """Update JSON configuration file."""
+    try:
+        with open(config_file) as f:
+            config_data = json.load(f)
+
+        # Navigate to the key using dot notation
+        keys = key.split(".")
+        current = config_data
+
+        # Navigate to parent of target key
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+
+        # Convert value to appropriate type
+        final_key = keys[-1]
+        try:
+            # Try to parse as JSON for complex types
+            parsed_value = json.loads(value)
+        except json.JSONDecodeError:
+            # Use as string if not valid JSON
+            parsed_value = value
+
+        current[final_key] = parsed_value
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            json.dump(config_data, f, indent=2)
+
+    except Exception as e:
+        raise Exception(f"Failed to update JSON config: {e}")
+
+
+def _update_yaml_config(config_file: Path, key: str, value: str) -> None:
+    """Update YAML configuration file."""
+    try:
+        import yaml
+
+        with open(config_file) as f:
+            config_data = yaml.safe_load(f) or {}
+
+        # Navigate to the key using dot notation
+        keys = key.split(".")
+        current = config_data
+
+        # Navigate to parent of target key
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+
+        # Convert value to appropriate type
+        final_key = keys[-1]
+        try:
+            # Try to parse as YAML for proper type conversion
+            parsed_value = yaml.safe_load(value)
+        except yaml.YAMLError:
+            parsed_value = value
+
+        current[final_key] = parsed_value
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            yaml.dump(config_data, f, default_flow_style=False)
+
+    except ImportError:
+        raise Exception("PyYAML not installed. Please install it to update YAML files.")
+    except Exception as e:
+        raise Exception(f"Failed to update YAML config: {e}")
+
+
+def _update_env_config(config_file: Path, key: str, value: str) -> None:
+    """Update .env configuration file."""
+    try:
+        # Convert dot notation to environment variable format
+        env_key = "__".join(key.split(".")).upper()
+
+        lines = []
+        key_found = False
+
+        if config_file.exists():
+            with open(config_file) as f:
+                lines = f.readlines()
+
+        # Update existing key or add new one
+        for i, line in enumerate(lines):
+            if line.strip() and not line.strip().startswith('#'):
+                if '=' in line:
+                    existing_key = line.split('=', 1)[0].strip()
+                    if existing_key == env_key:
+                        lines[i] = f"{env_key}={value}\n"
+                        key_found = True
+                        break
+
+        if not key_found:
+            lines.append(f"{env_key}={value}\n")
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            f.writelines(lines)
+
+    except Exception as e:
+        raise Exception(f"Failed to update .env config: {e}")
+
+
+def _update_ini_config(config_file: Path, key: str, value: str) -> None:
+    """Update INI configuration file."""
+    try:
+        import configparser
+
+        config = configparser.ConfigParser()
+        config.read(config_file)
+
+        # Parse key (section.option format)
+        if '.' in key:
+            section, option = key.split('.', 1)
+        else:
+            section = 'DEFAULT'
+            option = key
+
+        if section not in config:
+            config.add_section(section)
+
+        config.set(section, option, value)
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            config.write(f)
+
+    except Exception as e:
+        raise Exception(f"Failed to update INI config: {e}")
+
+
+def _validate_updated_config(config_file: Path, key: str, value: str) -> None:
+    """Validate configuration after update."""
+    try:
+        # Basic validation - check if file is still valid
+        if config_file.suffix.lower() == ".json":
+            with open(config_file) as f:
+                json.load(f)  # Will raise exception if invalid JSON
+        elif config_file.suffix.lower() in [".yaml", ".yml"]:
+            import yaml
+            with open(config_file) as f:
+                yaml.safe_load(f)  # Will raise exception if invalid YAML
+
+        # Additional validation based on key type
+        if "port" in key.lower():
+            try:
+                port_val = int(value)
+                if not (1 <= port_val <= 65535):
+                    raise ValueError(f"Port {port_val} is out of valid range (1-65535)")
+            except ValueError as e:
+                raise Exception(f"Invalid port value: {e}")
+
+        elif "url" in key.lower():
+            # Basic URL validation
+            if not (value.startswith('http://') or value.startswith('https://') or
+                   value.startswith('postgresql://') or value.startswith('redis://')):
+                print_warning(f"URL value '{value}' may not be properly formatted")
+
+        elif "timeout" in key.lower():
+            try:
+                timeout_val = float(value)
+                if timeout_val < 0:
+                    raise ValueError("Timeout cannot be negative")
+            except ValueError:
+                raise Exception(f"Invalid timeout value: {value}")
+
+    except Exception as e:
+        raise Exception(f"Configuration validation failed: {e}")
+
+
+@app.command()
+def backup(
+    backup_type: str = typer.Argument(
+        "full", help="Backup type: full, section, or key"
+    ),
+    target: str | None = typer.Option(
+        None, "--target", "-t", help="Target section or key name for partial backups"
+    ),
+    output_file: Path | None = typer.Option(
+        None, "--output", "-o", help="Output backup file (for full backups)"
+    ),
+) -> None:
+    """💾 Create configuration backups.
+    
+    Create backups of configuration settings for safe rollback.
+    Supports full system backups or targeted section/key backups.
+    """
+    backup_manager = ConfigBackupManager()
+
+    if backup_type == "full":
+        backup_file = backup_manager.create_full_backup()
+        if backup_file:
+            if output_file:
+                # Copy to specified location
+                import shutil
+                shutil.copy2(backup_file, output_file)
+                print_success(f"Full backup created: {output_file}")
+            else:
+                print_success(f"Full backup created: {backup_file}")
+        else:
+            print_error("Failed to create full backup")
+
+    elif backup_type == "section":
+        if not target:
+            print_error("Section name is required for section backup")
+            return
+
+        # Get current section configuration
+        section_data = {}
+        section_prefixes = {
+            "database": "DATABASE__",
+            "redis": "REDIS__",
+            "ml": "ML__",
+            "security": "SECURITY__",
+            "monitoring": "MONITORING__",
+            "api": "API_"
+        }
+
+        prefix = section_prefixes.get(target.lower())
+        if prefix:
+            for key, value in os.environ.items():
+                if key.startswith(prefix):
+                    section_data[key] = value
+
+            if section_data:
+                backup_manager.save_section_backup(target, section_data)
+                print_success(f"Section backup created for '{target}' ({len(section_data)} variables)")
+            else:
+                print_warning(f"No configuration found for section '{target}'")
+        else:
+            print_error(f"Unknown section '{target}'")
+
+    elif backup_type == "key":
+        if not target:
+            print_error("Key name is required for key backup")
+            return
+
+        env_key = "__".join(target.split(".")).upper()
+        if env_key in os.environ:
+            backup_manager.save_key_backup(target, os.environ[env_key])
+            print_success(f"Key backup created for '{target}'")
+        else:
+            print_warning(f"Configuration key '{target}' not found in environment")
+
+    else:
+        print_error(f"Invalid backup type '{backup_type}'. Use 'full', 'section', or 'key'")
+
+
 def _add_docker_config_section(include_examples: bool) -> str:
     """
     Add Docker-specific configuration section.
@@ -978,3 +1675,622 @@ def _add_docker_config_section(include_examples: bool) -> str:
         section += "CPU_LIMIT=\n\n"
 
     return section
+
+
+@app.command()
+def restore(
+    backup_file: Path = typer.Argument(
+        help="Backup file to restore from"
+    ),
+    confirm: bool = typer.Option(
+        False, "--confirm", "-y", help="Skip confirmation prompt"
+    ),
+) -> None:
+    """🔄 Restore configuration from backup.
+    
+    Restore system configuration from a previously created backup file.
+    This will replace current configuration settings.
+    """
+    if not backup_file.exists():
+        print_error(f"Backup file not found: {backup_file}")
+        return
+
+    if not confirm:
+        if not confirm_action(f"Restore configuration from '{backup_file}'? This will replace current settings."):
+            print_info("Restore cancelled")
+            return
+
+    backup_manager = ConfigBackupManager()
+    success = backup_manager.restore_full_backup(str(backup_file))
+
+    if success:
+        print_success("Configuration restored successfully")
+        print_info("You may need to restart services for changes to take effect")
+    else:
+        print_error("Failed to restore configuration")
+
+
+@app.command()
+def list_backups() -> None:
+    """📋 List available configuration backups.
+    
+    Display all available configuration backups including full system
+    backups and individual section/key backups.
+    """
+    backup_manager = ConfigBackupManager()
+    backups = backup_manager.list_backups()
+
+    # Display full backups
+    full_backups = backups.get("full_backups", [])
+    if full_backups:
+        table = Table(title="Full System Backups")
+        table.add_column("Timestamp", style="cyan")
+        table.add_column("File", style="green")
+        table.add_column("Variables", style="blue")
+        table.add_column("Age", style="yellow")
+
+        for backup in sorted(full_backups, key=lambda x: x["timestamp"], reverse=True):
+            timestamp = backup["timestamp"]
+            age_seconds = time.time() - timestamp
+
+            from ..utils import format_duration
+            age = format_duration(int(age_seconds))
+
+            table.add_row(
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp)),
+                Path(backup["file"]).name,
+                str(backup["env_vars_count"]),
+                age
+            )
+
+        console.print(table)
+
+    # Display section backups
+    section_backups = backups.get("section_backups", {})
+    if section_backups:
+        console.print("\n[bold]Section Backups:[/bold]")
+        for section, backup_data in section_backups.items():
+            timestamp = backup_data["timestamp"]
+            age_seconds = time.time() - timestamp
+
+            from ..utils import format_duration
+            age = format_duration(int(age_seconds))
+            var_count = len(backup_data["data"])
+
+            console.print(f"  • {section}: {var_count} variables, {age} ago")
+
+    # Display key backups
+    key_backups = backups.get("key_backups", {})
+    if key_backups:
+        console.print("\n[bold]Individual Key Backups:[/bold]")
+        for key, backup_data in key_backups.items():
+            timestamp = backup_data["timestamp"]
+            age_seconds = time.time() - timestamp
+
+            from ..utils import format_duration
+            age = format_duration(int(age_seconds))
+
+            console.print(f"  • {key}: {age} ago")
+
+    if not any([full_backups, section_backups, key_backups]):
+        print_info("No configuration backups found")
+
+
+@app.command()
+def diff(
+    config1: Path = typer.Argument(help="First configuration file or 'current' for current settings"),
+    config2: Path = typer.Argument(help="Second configuration file or 'defaults' for default settings"),
+    output_format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table, json, or unified"
+    ),
+) -> None:
+    """🔍 Compare configuration files or settings.
+    
+    Compare two configuration sources and show differences.
+    Use 'current' to compare against current runtime settings.
+    Use 'defaults' to compare against default values.
+    """
+    try:
+        # Load first configuration
+        if str(config1) == "current":
+            settings = get_settings()
+            config1_data = settings.model_dump()
+        elif str(config1) == "defaults":
+            # Create default settings without environment overrides
+            old_env = os.environ.copy()
+            # Temporarily clear ITS environment variables
+            prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+            for key in list(os.environ.keys()):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del os.environ[key]
+
+            try:
+                from ...core.config import Settings
+                default_settings = Settings()
+                config1_data = default_settings.model_dump()
+            finally:
+                os.environ.update(old_env)
+        else:
+            config1_data = _load_config_file(config1)
+
+        # Load second configuration
+        if str(config2) == "current":
+            settings = get_settings()
+            config2_data = settings.model_dump()
+        elif str(config2) == "defaults":
+            # Same as above for defaults
+            old_env = os.environ.copy()
+            prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+            for key in list(os.environ.keys()):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del os.environ[key]
+
+            try:
+                from ...core.config import Settings
+                default_settings = Settings()
+                config2_data = default_settings.model_dump()
+            finally:
+                os.environ.update(old_env)
+        else:
+            config2_data = _load_config_file(config2)
+
+        # Compare configurations
+        differences = _compare_configs(config1_data, config2_data)
+
+        if not differences:
+            print_success("Configurations are identical")
+            return
+
+        # Display differences based on format
+        if output_format == "table":
+            _display_config_diff_table(differences, str(config1), str(config2))
+        elif output_format == "json":
+            console.print_json(json.dumps(differences, indent=2, default=str))
+        elif output_format == "unified":
+            _display_config_diff_unified(differences, str(config1), str(config2))
+        else:
+            print_error(f"Invalid output format: {output_format}")
+
+    except Exception as e:
+        print_error(f"Failed to compare configurations: {e}")
+
+
+def _load_config_file(config_file: Path) -> dict[str, Any]:
+    """Load configuration from file."""
+    if not config_file.exists():
+        raise Exception(f"Configuration file not found: {config_file}")
+
+    if config_file.suffix.lower() == ".json":
+        with open(config_file) as f:
+            return json.load(f)
+    elif config_file.suffix.lower() in [".yaml", ".yml"]:
+        import yaml
+        with open(config_file) as f:
+            return yaml.safe_load(f) or {}
+    else:
+        raise Exception(f"Unsupported configuration file format: {config_file.suffix}")
+
+
+def _compare_configs(config1: dict[str, Any], config2: dict[str, Any], prefix: str = "") -> list[dict[str, Any]]:
+    """Compare two configuration dictionaries."""
+    differences = []
+
+    all_keys = set(config1.keys()) | set(config2.keys())
+
+    for key in sorted(all_keys):
+        current_path = f"{prefix}.{key}" if prefix else key
+
+        if key not in config1:
+            differences.append({
+                "key": current_path,
+                "type": "added",
+                "old_value": None,
+                "new_value": config2[key]
+            })
+        elif key not in config2:
+            differences.append({
+                "key": current_path,
+                "type": "removed",
+                "old_value": config1[key],
+                "new_value": None
+            })
+        else:
+            val1, val2 = config1[key], config2[key]
+
+            if isinstance(val1, dict) and isinstance(val2, dict):
+                # Recurse into nested dictionaries
+                nested_diffs = _compare_configs(val1, val2, current_path)
+                differences.extend(nested_diffs)
+            elif val1 != val2:
+                differences.append({
+                    "key": current_path,
+                    "type": "changed",
+                    "old_value": val1,
+                    "new_value": val2
+                })
+
+    return differences
+
+
+def _display_config_diff_table(differences: list[dict[str, Any]], config1_name: str, config2_name: str) -> None:
+    """Display configuration differences in table format."""
+    table = Table(title=f"Configuration Differences: {config1_name} vs {config2_name}")
+    table.add_column("Key", style="cyan")
+    table.add_column("Type", style="blue")
+    table.add_column(f"Value in {config1_name}", style="green")
+    table.add_column(f"Value in {config2_name}", style="yellow")
+
+    for diff in differences:
+        type_color = {
+            "changed": "yellow",
+            "added": "green",
+            "removed": "red"
+        }.get(diff["type"], "white")
+
+        old_val = str(diff["old_value"]) if diff["old_value"] is not None else "[dim]N/A[/dim]"
+        new_val = str(diff["new_value"]) if diff["new_value"] is not None else "[dim]N/A[/dim]"
+
+        table.add_row(
+            diff["key"],
+            f"[{type_color}]{diff['type'].title()}[/{type_color}]",
+            old_val,
+            new_val
+        )
+
+    console.print(table)
+    print_info(f"Found {len(differences)} differences")
+
+
+def _display_config_diff_unified(differences: list[dict[str, Any]], config1_name: str, config2_name: str) -> None:
+    """Display configuration differences in unified diff format."""
+    console.print(f"[bold]--- {config1_name}[/bold]")
+    console.print(f"[bold]+++ {config2_name}[/bold]")
+    console.print()
+
+    for diff in differences:
+        key = diff["key"]
+        diff_type = diff["type"]
+
+        if diff_type == "changed":
+            console.print(f"[red]- {key}: {diff['old_value']}[/red]")
+            console.print(f"[green]+ {key}: {diff['new_value']}[/green]")
+        elif diff_type == "removed":
+            console.print(f"[red]- {key}: {diff['old_value']}[/red]")
+        elif diff_type == "added":
+            console.print(f"[green]+ {key}: {diff['new_value']}[/green]")
+
+        console.print()
+
+
+class ConfigBackupManager:
+    """Manager for configuration backups and rollbacks."""
+
+    def __init__(self):
+        self.backup_dir = Path("config_backups")
+        self.backup_dir.mkdir(exist_ok=True)
+        self.backup_index_file = self.backup_dir / "backup_index.json"
+        self._load_backup_index()
+
+    def _load_backup_index(self) -> None:
+        """Load backup index from file."""
+        if self.backup_index_file.exists():
+            try:
+                with open(self.backup_index_file) as f:
+                    self.backup_index = json.load(f)
+            except Exception:
+                self.backup_index = {}
+        else:
+            self.backup_index = {}
+
+    def _save_backup_index(self) -> None:
+        """Save backup index to file."""
+        try:
+            with open(self.backup_index_file, 'w') as f:
+                json.dump(self.backup_index, f, indent=2)
+        except Exception as e:
+            print_error(f"Failed to save backup index: {e}")
+
+    def save_key_backup(self, key: str, value: str) -> None:
+        """Save backup for a specific key."""
+        timestamp = int(time.time())
+        backup_entry = {
+            "timestamp": timestamp,
+            "key": key,
+            "value": value
+        }
+
+        if "keys" not in self.backup_index:
+            self.backup_index["keys"] = {}
+
+        self.backup_index["keys"][key] = backup_entry
+        self._save_backup_index()
+
+    def restore_key_backup(self, key: str) -> str | None:
+        """Restore backup for a specific key."""
+        if "keys" not in self.backup_index:
+            return None
+
+        backup_entry = self.backup_index["keys"].get(key)
+        return backup_entry["value"] if backup_entry else None
+
+    def save_section_backup(self, section: str, data: dict[str, str]) -> None:
+        """Save backup for a configuration section."""
+        timestamp = int(time.time())
+        backup_entry = {
+            "timestamp": timestamp,
+            "section": section,
+            "data": data
+        }
+
+        if "sections" not in self.backup_index:
+            self.backup_index["sections"] = {}
+
+        self.backup_index["sections"][section] = backup_entry
+        self._save_backup_index()
+
+    def restore_section_backup(self, section: str) -> dict[str, str] | None:
+        """Restore backup for a configuration section."""
+        if "sections" not in self.backup_index:
+            return None
+
+        backup_entry = self.backup_index["sections"].get(section)
+        return backup_entry["data"] if backup_entry else None
+
+    def create_full_backup(self) -> str:
+        """Create a full system backup."""
+        timestamp = int(time.time())
+        backup_file = self.backup_dir / f"full_backup_{timestamp}.json"
+
+        # Collect all ITS-related environment variables
+        env_data = {}
+        prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+
+        for key, value in os.environ.items():
+            if any(key.startswith(prefix) for prefix in prefixes):
+                env_data[key] = value
+
+        backup_data = {
+            "timestamp": timestamp,
+            "type": "full_backup",
+            "environment": env_data
+        }
+
+        try:
+            with open(backup_file, 'w') as f:
+                json.dump(backup_data, f, indent=2)
+
+            # Update index
+            if "full_backups" not in self.backup_index:
+                self.backup_index["full_backups"] = []
+
+            self.backup_index["full_backups"].append({
+                "timestamp": timestamp,
+                "file": str(backup_file),
+                "env_vars_count": len(env_data)
+            })
+
+            self._save_backup_index()
+            return str(backup_file)
+
+        except Exception as e:
+            print_error(f"Failed to create full backup: {e}")
+            return ""
+
+    def restore_full_backup(self, backup_file: str) -> bool:
+        """Restore from a full system backup."""
+        try:
+            backup_path = Path(backup_file)
+            if not backup_path.exists():
+                print_error(f"Backup file not found: {backup_file}")
+                return False
+
+            with open(backup_path) as f:
+                backup_data = json.load(f)
+
+            if backup_data.get("type") != "full_backup":
+                print_error("Invalid backup file format")
+                return False
+
+            # Clear current ITS environment variables
+            prefixes = ["ITS_", "DATABASE_", "REDIS_", "ML_", "API_", "SECURITY_", "MONITORING_"]
+            cleared_vars = []
+
+            for key in list(os.environ.keys()):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del os.environ[key]
+                    cleared_vars.append(key)
+
+            # Restore from backup
+            env_data = backup_data.get("environment", {})
+            for key, value in env_data.items():
+                os.environ[key] = value
+
+            print_success(f"Restored {len(env_data)} environment variables from backup")
+            print_info(f"Cleared {len(cleared_vars)} existing variables")
+            return True
+
+        except Exception as e:
+            print_error(f"Failed to restore from backup: {e}")
+            return False
+
+    def list_backups(self) -> dict[str, Any]:
+        """List all available backups."""
+        return {
+            "full_backups": self.backup_index.get("full_backups", []),
+            "section_backups": self.backup_index.get("sections", {}),
+            "key_backups": self.backup_index.get("keys", {})
+        }
+
+
+def _update_json_config(config_file: Path, key: str, value: str) -> None:
+    """Update JSON configuration file."""
+    try:
+        with open(config_file) as f:
+            config_data = json.load(f)
+
+        # Navigate to the key using dot notation
+        keys = key.split(".")
+        current = config_data
+
+        # Navigate to parent of target key
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+
+        # Convert value to appropriate type
+        final_key = keys[-1]
+        try:
+            # Try to parse as JSON for complex types
+            parsed_value = json.loads(value)
+        except json.JSONDecodeError:
+            # Use as string if not valid JSON
+            parsed_value = value
+
+        current[final_key] = parsed_value
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            json.dump(config_data, f, indent=2)
+
+    except Exception as e:
+        raise Exception(f"Failed to update JSON config: {e}")
+
+
+def _update_yaml_config(config_file: Path, key: str, value: str) -> None:
+    """Update YAML configuration file."""
+    try:
+        import yaml
+
+        with open(config_file) as f:
+            config_data = yaml.safe_load(f) or {}
+
+        # Navigate to the key using dot notation
+        keys = key.split(".")
+        current = config_data
+
+        # Navigate to parent of target key
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+
+        # Convert value to appropriate type
+        final_key = keys[-1]
+        try:
+            # Try to parse as YAML for proper type conversion
+            parsed_value = yaml.safe_load(value)
+        except yaml.YAMLError:
+            parsed_value = value
+
+        current[final_key] = parsed_value
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            yaml.dump(config_data, f, default_flow_style=False)
+
+    except ImportError:
+        raise Exception("PyYAML not installed. Please install it to update YAML files.")
+    except Exception as e:
+        raise Exception(f"Failed to update YAML config: {e}")
+
+
+def _update_env_config(config_file: Path, key: str, value: str) -> None:
+    """Update .env configuration file."""
+    try:
+        # Convert dot notation to environment variable format
+        env_key = "__".join(key.split(".")).upper()
+
+        lines = []
+        key_found = False
+
+        if config_file.exists():
+            with open(config_file) as f:
+                lines = f.readlines()
+
+        # Update existing key or add new one
+        for i, line in enumerate(lines):
+            if line.strip() and not line.strip().startswith('#'):
+                if '=' in line:
+                    existing_key = line.split('=', 1)[0].strip()
+                    if existing_key == env_key:
+                        lines[i] = f"{env_key}={value}\n"
+                        key_found = True
+                        break
+
+        if not key_found:
+            lines.append(f"{env_key}={value}\n")
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            f.writelines(lines)
+
+    except Exception as e:
+        raise Exception(f"Failed to update .env config: {e}")
+
+
+def _update_ini_config(config_file: Path, key: str, value: str) -> None:
+    """Update INI configuration file."""
+    try:
+        import configparser
+
+        config = configparser.ConfigParser()
+        config.read(config_file)
+
+        # Parse key (section.option format)
+        if '.' in key:
+            section, option = key.split('.', 1)
+        else:
+            section = 'DEFAULT'
+            option = key
+
+        if section not in config:
+            config.add_section(section)
+
+        config.set(section, option, value)
+
+        # Write back to file
+        with open(config_file, 'w') as f:
+            config.write(f)
+
+    except Exception as e:
+        raise Exception(f"Failed to update INI config: {e}")
+
+
+def _validate_updated_config(config_file: Path, key: str, value: str) -> None:
+    """Validate configuration after update."""
+    try:
+        # Basic validation - check if file is still valid
+        if config_file.suffix.lower() == ".json":
+            with open(config_file) as f:
+                json.load(f)  # Will raise exception if invalid JSON
+        elif config_file.suffix.lower() in [".yaml", ".yml"]:
+            import yaml
+            with open(config_file) as f:
+                yaml.safe_load(f)  # Will raise exception if invalid YAML
+
+        # Additional validation based on key type
+        if "port" in key.lower():
+            try:
+                port_val = int(value)
+                if not (1 <= port_val <= 65535):
+                    raise ValueError(f"Port {port_val} is out of valid range (1-65535)")
+            except ValueError as e:
+                raise Exception(f"Invalid port value: {e}")
+
+        elif "url" in key.lower():
+            # Basic URL validation
+            if not (value.startswith('http://') or value.startswith('https://') or
+                   value.startswith('postgresql://') or value.startswith('redis://')):
+                print_warning(f"URL value '{value}' may not be properly formatted")
+
+        elif "timeout" in key.lower():
+            try:
+                timeout_val = float(value)
+                if timeout_val < 0:
+                    raise ValueError("Timeout cannot be negative")
+            except ValueError:
+                raise Exception(f"Invalid timeout value: {value}")
+
+    except Exception as e:
+        raise Exception(f"Configuration validation failed: {e}")

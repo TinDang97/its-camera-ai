@@ -1,6 +1,6 @@
 """User model for authentication and authorization."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -126,7 +126,7 @@ class SecurityAuditLog(BaseModel):
     details: Mapped[str | None] = mapped_column(Text)  # JSON details
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
 
     # Relationships
@@ -146,10 +146,10 @@ class UserSession(BaseModel):
     device_fingerprint: Mapped[str | None] = mapped_column(String(255))
     mfa_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
     last_activity: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

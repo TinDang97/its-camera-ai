@@ -4,7 +4,7 @@ Optimized for 3000+ inserts/second with proper indexing,
 partitioning, and batch operations support.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -235,7 +235,7 @@ class FrameMetadata(BaseModel):
     def start_processing(self) -> None:
         """Mark frame as processing started."""
         self.status = ProcessingStatus.PROCESSING
-        self.processing_started_at = datetime.utcnow()
+        self.processing_started_at = datetime.now(UTC)
 
     def complete_processing(
         self,
@@ -255,7 +255,7 @@ class FrameMetadata(BaseModel):
             quality_score: Frame quality score (0.0-1.0)
         """
         self.status = ProcessingStatus.COMPLETED
-        self.processing_completed_at = datetime.utcnow()
+        self.processing_completed_at = datetime.now(UTC)
         self.processing_time_ms = processing_time_ms
         self.has_detections = has_detections
         self.detection_count = detection_count
@@ -273,7 +273,7 @@ class FrameMetadata(BaseModel):
             increment_retry: Whether to increment retry counter
         """
         self.status = ProcessingStatus.FAILED
-        self.processing_completed_at = datetime.utcnow()
+        self.processing_completed_at = datetime.now(UTC)
         self.error_message = error_message
 
         if increment_retry:

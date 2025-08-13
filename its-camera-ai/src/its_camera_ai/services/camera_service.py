@@ -4,7 +4,7 @@ Provides high-performance camera operations with optimized queries,
 batch operations, and real-time status updates for 100+ concurrent cameras.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -241,7 +241,7 @@ class CameraService(BaseAsyncService[Camera]):
             for key, value in update_dict.items():
                 setattr(camera, key, value)
 
-            camera.updated_at = datetime.utcnow()
+            camera.updated_at = datetime.now(UTC)
 
             await self.session.commit()
 
@@ -285,7 +285,7 @@ class CameraService(BaseAsyncService[Camera]):
             camera.status = status.value
 
             if status in (CameraStatus.ONLINE, CameraStatus.STREAMING):
-                camera.last_seen_at = datetime.utcnow()
+                camera.last_seen_at = datetime.now(UTC)
 
             # Handle performance metrics update
             if performance_metrics:
@@ -306,7 +306,7 @@ class CameraService(BaseAsyncService[Camera]):
                     camera.config["errors"] = []
                 camera.config["errors"].append(
                     {
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "message": error_message,
                         "status": status.value,
                     }
@@ -465,7 +465,7 @@ class CameraService(BaseAsyncService[Camera]):
                 raise NotFoundError("Camera not found")
 
             # Calculate health metrics
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             last_seen_minutes = None
             if camera.last_seen_at:
                 last_seen_minutes = (now - camera.last_seen_at).total_seconds() / 60
@@ -512,7 +512,7 @@ class CameraService(BaseAsyncService[Camera]):
             List of offline cameras
         """
         try:
-            threshold_time = datetime.utcnow() - timedelta(minutes=threshold_minutes)
+            threshold_time = datetime.now(UTC) - timedelta(minutes=threshold_minutes)
 
             query = (
                 select(Camera)

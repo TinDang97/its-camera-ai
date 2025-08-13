@@ -1,0 +1,190 @@
+# Alert Service Configuration Example
+# Copy this file to your environment-specific config and customize
+
+# Email Configuration
+email:
+  smtp_server: "smtp.gmail.com"  # Gmail SMTP
+  # smtp_server: "smtp-mail.outlook.com"  # Outlook SMTP
+  # smtp_server: "smtp.mailgun.org"  # Mailgun SMTP
+  smtp_port: 587  # TLS port (use 465 for SSL, 25 for unencrypted)
+  smtp_username: "your-email@gmail.com"
+  smtp_password: "your-app-password"  # Use app-specific passwords for Gmail
+  smtp_from_email: "its-alerts@your-domain.com"
+  smtp_timeout: 30
+  smtp_max_retries: 3
+  smtp_retry_delay: 2.0  # Base delay in seconds
+  smtp_html_template: true  # Enable HTML email formatting
+  smtp_ssl_verify: true  # Verify SSL certificates
+  smtp_no_tls: false  # Set to true to disable TLS
+
+# Webhook Configuration
+webhook:
+  webhook_url: "https://your-api.com/webhooks/its-alerts"
+  webhook_timeout: 30
+  webhook_connect_timeout: 10
+  webhook_max_retries: 3
+  webhook_retry_delay: 1.5
+  webhook_ssl_verify: true
+  webhook_follow_redirects: false
+  
+  # Authentication options (choose one)
+  webhook_auth_type: "bearer"  # Options: bearer, api_key, basic, none
+  webhook_auth_token: "your-bearer-token"  # For bearer auth
+  
+  # Alternative authentication methods:
+  # webhook_auth_type: "api_key"
+  # webhook_api_key: "your-api-key"
+  # webhook_api_key_header: "X-API-Key"  # Custom header name
+  
+  # webhook_auth_type: "basic"
+  # webhook_username: "webhook-user"
+  # webhook_password: "webhook-password"
+  
+  # Webhook security (optional)
+  webhook_secret: "your-webhook-secret-for-hmac-signing"
+
+# SMS Configuration (optional)
+sms:
+  sms_api_url: "https://api.twilio.com/2010-04-01/Accounts/{AccountSid}/Messages.json"
+  sms_api_key: "your-twilio-auth-token"
+  sms_from_number: "+1234567890"
+  sms_provider: "twilio"  # Options: twilio, nexmo, generic
+  sms_timeout: 30
+  sms_connect_timeout: 10
+  sms_max_retries: 3
+  sms_retry_delay: 1.0
+  sms_max_length: 160  # SMS character limit
+  
+  # For Nexmo/Vonage:
+  # sms_api_url: "https://rest.nexmo.com/sms/json"
+  # sms_provider: "nexmo"
+  
+  # For generic HTTP SMS providers:
+  # sms_api_url: "https://your-sms-provider.com/api/send"
+  # sms_provider: "generic"
+
+# Alert Rules Configuration
+alert_rules:
+  violation_alerts:
+    enabled: true
+    severity_thresholds:
+      low: false      # Don't alert on low severity violations
+      medium: true    # Alert on medium severity
+      high: true      # Alert on high severity  
+      critical: true  # Alert on critical severity
+    cooldown_minutes: 5     # Cooldown between similar alerts
+    batch_alerts: true      # Batch similar alerts together
+    batch_window_minutes: 10
+    
+  anomaly_alerts:
+    enabled: true
+    score_threshold: 0.7    # Only alert on anomaly scores >= 0.7
+    severity_thresholds:
+      low: false
+      medium: false
+      high: true
+      critical: true
+    cooldown_minutes: 15
+    consecutive_anomalies: 2  # Require 2 consecutive anomalies
+    
+  pattern_alerts:
+    enabled: true
+    traffic_spike_threshold: 3.0    # 3x normal traffic
+    congestion_duration_minutes: 10
+    speed_drop_threshold: 0.5       # 50% speed drop
+
+# Notification Recipients
+recipients:
+  # Email recipients for different alert types
+  email_recipients:
+    violations:
+      - "traffic-ops@your-domain.com"
+      - "security@your-domain.com"
+    anomalies:
+      - "traffic-analysis@your-domain.com"
+      - "ops-team@your-domain.com"
+    critical:
+      - "emergency-response@your-domain.com"
+      - "supervisor@your-domain.com"
+      
+  # SMS recipients for critical alerts only
+  sms_recipients:
+    critical:
+      - "+1234567890"  # On-call supervisor
+      - "+1987654321"  # Emergency contact
+      
+  # Webhook endpoints (system-to-system integration)
+  webhook_recipients:
+    all:
+      - "traffic-management-system"
+      - "incident-response-system"
+      - "analytics-dashboard"
+
+# Channel Selection by Priority
+channel_routing:
+  low:
+    - "email"        # Low priority: email only
+  medium:
+    - "email"        # Medium priority: email only
+    - "webhook"
+  high:
+    - "email"        # High priority: email + webhook
+    - "webhook"
+  critical:
+    - "email"        # Critical: all channels
+    - "webhook"
+    - "sms"
+
+# Monitoring and Logging
+monitoring:
+  alert_metrics_enabled: true
+  delivery_tracking: true
+  audit_logging: true
+  performance_monitoring: true
+  
+  # Alert if delivery failure rate exceeds threshold
+  delivery_failure_threshold: 0.1  # 10%
+  alert_on_delivery_failures: true
+  
+  # Monitoring dashboard webhook
+  metrics_webhook: "https://your-monitoring.com/api/metrics/alerts"
+
+# Environment-specific overrides
+production:
+  # Production-specific settings
+  smtp_server: "smtp.company.com"
+  webhook_url: "https://prod-api.company.com/webhooks/alerts"
+  sms_provider: "twilio"  # Use reliable provider in production
+  
+staging:
+  # Staging environment settings
+  webhook_url: "https://staging-api.company.com/webhooks/alerts"
+  sms_api_url: null  # Disable SMS in staging
+  
+development:
+  # Development settings
+  smtp_server: "localhost"
+  smtp_port: 1025  # MailHog or similar
+  webhook_url: "http://localhost:8080/webhooks/test"
+  sms_api_url: null  # Disable SMS in development
+
+# Security Settings
+security:
+  # Encrypt sensitive configuration values
+  encrypt_passwords: true
+  password_encryption_key: "${ALERT_CONFIG_ENCRYPTION_KEY}"
+  
+  # Rate limiting to prevent spam
+  rate_limiting:
+    enabled: true
+    max_alerts_per_minute: 10
+    max_alerts_per_hour: 100
+    
+  # IP filtering for webhook callbacks
+  webhook_ip_whitelist:
+    - "192.168.1.0/24"
+    - "10.0.0.0/8"
+    
+  # TLS/SSL settings
+  tls_min_version: "1.2"
+  verify_certificates: true

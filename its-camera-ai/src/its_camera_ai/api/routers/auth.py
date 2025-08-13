@@ -7,8 +7,8 @@ MFA setup, and profile management functionality.
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -99,26 +99,64 @@ def create_refresh_token(data: dict[str, Any], settings: Settings) -> str:
     return encoded_jwt
 
 
-async def send_verification_email(email: str, token: str) -> None:
+async def send_verification_email(
+    email: str, token: str, username: str, full_name: str | None = None
+) -> None:
     """Send email verification message.
 
     Args:
         email: User email address
         token: Verification token
+        username: Username
+        full_name: User's full name
     """
-    # TODO: Implement email sending
-    logger.info("Verification email sent", email=email, token=token)
+    from ...core.config import get_settings
+    from ...services.email_service import EmailService
+
+    settings = get_settings()
+    email_service = EmailService(settings)
+
+    success = await email_service.send_verification_email(
+        to_email=email,
+        username=username,
+        verification_token=token,
+        full_name=full_name
+    )
+
+    if success:
+        logger.info("Verification email sent successfully", email=email, username=username)
+    else:
+        logger.error("Failed to send verification email", email=email, username=username)
 
 
-async def send_password_reset_email(email: str, token: str) -> None:
+async def send_password_reset_email(
+    email: str, token: str, username: str, full_name: str | None = None
+) -> None:
     """Send password reset email.
 
     Args:
         email: User email address
         token: Reset token
+        username: Username
+        full_name: User's full name
     """
-    # TODO: Implement email sending
-    logger.info("Password reset email sent", email=email, token=token)
+    from ...core.config import get_settings
+    from ...services.email_service import EmailService
+
+    settings = get_settings()
+    email_service = EmailService(settings)
+
+    success = await email_service.send_password_reset_email(
+        to_email=email,
+        username=username,
+        reset_token=token,
+        full_name=full_name
+    )
+
+    if success:
+        logger.info("Password reset email sent successfully", email=email, username=username)
+    else:
+        logger.error("Failed to send password reset email", email=email, username=username)
 
 
 @router.post(
@@ -198,7 +236,11 @@ async def register(
 
         # Send verification email in background
         background_tasks.add_task(
-            send_verification_email, str(user_data.email), verification_token
+            send_verification_email,
+            str(user_data.email),
+            verification_token,
+            user.username,
+            user.full_name
         )
 
         logger.info(
@@ -405,27 +447,77 @@ async def refresh_token(
     description="Logout user and invalidate tokens.",
 )
 async def logout(
+    request: Request,
     current_user: User = Depends(get_current_user),
-    _cache: CacheService = Depends(get_cache_service),
+    cache: CacheService = Depends(get_cache_service),
+    settings: Settings = Depends(get_settings),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> SuccessResponse:
     """Logout user and invalidate tokens.
 
     Args:
+        request: HTTP request object
         current_user: Currently authenticated user
         cache: Cache service
+        settings: Application settings
+        credentials: Bearer token credentials
+        db: Database session
+        auth_service: Authentication service
 
     Returns:
         SuccessResponse: Logout confirmation
     """
-    # TODO: Implement token blacklisting
-    # For now, just log the logout
-    logger.info("User logged out", user_id=current_user.id)
+    from ...services.token_service import TokenService
 
-    return SuccessResponse(
-        success=True,
-        message="Logged out successfully",
-        data={"user_id": current_user.id},
-    )
+    try:
+        token_service = TokenService(cache, settings.security)
+
+        # Blacklist current token if provided
+        if credentials and credentials.credentials:
+            await token_service.blacklist_token(
+                credentials.credentials,
+                reason="user_logout"
+            )
+
+        # Get client information for audit log
+        client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+        user_agent = request.headers.get("User-Agent")
+
+        # Create security audit log
+        await auth_service.create_security_audit_log(
+            db,
+            event_type="user_logout",
+            user_id=current_user.id,
+            username=current_user.username,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            details={"logout_type": "user_initiated"}
+        )
+
+        logger.info(
+            "User logged out successfully",
+            user_id=current_user.id,
+            username=current_user.username,
+            ip_address=client_ip
+        )
+
+        return SuccessResponse(
+            success=True,
+            message="Logged out successfully",
+            data={"user_id": current_user.id},
+        )
+
+    except Exception as e:
+        logger.error("Logout failed", user_id=current_user.id, error=str(e))
+        # Still return success to avoid information leakage
+        return SuccessResponse(
+            success=True,
+            message="Logged out successfully",
+            data={"user_id": current_user.id},
+        )
 
 
 @router.post(
@@ -538,7 +630,11 @@ async def request_password_reset(
 
         # Send reset email in background
         background_tasks.add_task(
-            send_password_reset_email, str(reset_data.email), reset_token
+            send_password_reset_email,
+            str(reset_data.email),
+            reset_token,
+            user.username,
+            user.full_name
         )
 
         logger.info(
@@ -794,6 +890,9 @@ async def change_password(
 async def setup_mfa(
     mfa_data: MFASetupRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    cache: CacheService = Depends(get_cache_service),
+    settings: Settings = Depends(get_settings),
     _rate_limit: None = Depends(rate_limit_strict),
 ) -> MFASetupResponse:
     """Setup multi-factor authentication.
@@ -801,31 +900,66 @@ async def setup_mfa(
     Args:
         mfa_data: MFA setup data
         current_user: Currently authenticated user
+        db: Database session
+        cache: Cache service
+        settings: Application settings
         _rate_limit: Rate limiting dependency
 
     Returns:
         MFASetupResponse: MFA setup information
     """
-    # TODO: Implement proper MFA setup with TOTP/SMS
-    logger.info("MFA setup requested", user_id=current_user.id, method=mfa_data.method)
+    from ...services.mfa_service import MFAService
 
-    # Generate backup codes
-    import secrets
+    try:
+        mfa_service = MFAService(cache, settings.security)
 
-    backup_codes = [secrets.token_hex(4).upper() for _ in range(10)]
+        if current_user.mfa_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MFA is already enabled for this user"
+            )
 
-    # Generate proper TOTP secret instead of hardcoded value
-    totp_secret = secrets.token_urlsafe(32) if mfa_data.method == "totp" else None
+        if mfa_data.method == "totp":
+            setup_info = await mfa_service.setup_totp(db, current_user)
 
-    return MFASetupResponse(
-        secret=totp_secret,
-        backup_codes=backup_codes,
-        qr_code_url=(
-            f"otpauth://totp/ITS-Camera-AI:{current_user.username}?secret={totp_secret}&issuer=ITS-Camera-AI"
-            if mfa_data.method == "totp" and totp_secret
-            else None
-        ),
-    )
+            logger.info(
+                "TOTP MFA setup initiated",
+                user_id=current_user.id,
+                username=current_user.username
+            )
+
+            return MFASetupResponse(
+                secret=setup_info["secret"],
+                backup_codes=setup_info["backup_codes"],
+                qr_code_url=setup_info["qr_code_url"]
+            )
+
+        elif mfa_data.method == "sms":
+            # SMS MFA setup (placeholder for future implementation)
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="SMS MFA not yet implemented"
+            )
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported MFA method: {mfa_data.method}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "MFA setup failed",
+            user_id=current_user.id,
+            method=mfa_data.method,
+            error=str(e)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MFA setup failed"
+        ) from e
 
 
 @router.post(
@@ -835,23 +969,169 @@ async def setup_mfa(
     description="Verify multi-factor authentication code.",
 )
 async def verify_mfa(
-    _mfa_data: MFAVerifyRequest,
+    mfa_data: MFAVerifyRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    cache: CacheService = Depends(get_cache_service),
+    settings: Settings = Depends(get_settings),
 ) -> SuccessResponse:
     """Verify MFA code.
 
     Args:
         mfa_data: MFA verification data
         current_user: Currently authenticated user
+        db: Database session
+        cache: Cache service
+        settings: Application settings
 
     Returns:
         SuccessResponse: MFA verification confirmation
     """
-    # TODO: Implement proper MFA verification
-    logger.info("MFA verification attempted", user_id=current_user.id)
+    from ...services.mfa_service import MFAService
 
-    return SuccessResponse(
-        success=True,
-        message="MFA verified successfully",
-        data={"user_id": current_user.id},
-    )
+    try:
+        mfa_service = MFAService(cache, settings.security)
+
+        if not current_user.mfa_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MFA is not enabled for this user"
+            )
+
+        is_valid = False
+
+        # Try backup code first if provided
+        if mfa_data.backup_code:
+            is_valid = await mfa_service.verify_backup_code(
+                db, current_user, mfa_data.backup_code
+            )
+            verification_method = "backup_code"
+        else:
+            # Verify TOTP code
+            is_valid = await mfa_service.verify_totp(current_user, mfa_data.code)
+            verification_method = "totp"
+
+        if is_valid:
+            logger.info(
+                "MFA verification successful",
+                user_id=current_user.id,
+                method=verification_method
+            )
+
+            return SuccessResponse(
+                success=True,
+                message="MFA verified successfully",
+                data={
+                    "user_id": current_user.id,
+                    "method": verification_method
+                },
+            )
+        else:
+            logger.warning(
+                "MFA verification failed",
+                user_id=current_user.id,
+                method=verification_method
+            )
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid MFA code"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "MFA verification error",
+            user_id=current_user.id,
+            error=str(e)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MFA verification failed"
+        ) from e
+
+
+@router.post(
+    "/mfa/complete-setup",
+    response_model=SuccessResponse,
+    summary="Complete MFA setup",
+    description="Complete MFA setup by verifying initial code.",
+)
+async def complete_mfa_setup(
+    verification_data: MFAVerifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    cache: CacheService = Depends(get_cache_service),
+    settings: Settings = Depends(get_settings),
+) -> SuccessResponse:
+    """Complete MFA setup by verifying the initial code.
+    
+    Args:
+        verification_data: MFA verification data
+        current_user: Currently authenticated user
+        db: Database session
+        cache: Cache service
+        settings: Application settings
+        
+    Returns:
+        SuccessResponse: Setup completion confirmation
+    """
+    from ...services.email_service import EmailService
+    from ...services.mfa_service import MFAService
+
+    try:
+        mfa_service = MFAService(cache, settings.security)
+
+        if current_user.mfa_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MFA is already enabled for this user"
+            )
+
+        # Verify setup code
+        is_valid = await mfa_service.verify_totp_setup(
+            db, current_user, verification_data.code
+        )
+
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification code"
+            )
+
+        # Send notification email
+        email_service = EmailService(settings)
+        await email_service.send_mfa_enabled_email(
+            to_email=current_user.email,
+            username=current_user.username,
+            mfa_method="TOTP",
+            setup_time=datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
+            backup_codes_count=settings.security.mfa_backup_codes_count,
+            full_name=current_user.full_name
+        )
+
+        logger.info(
+            "MFA setup completed successfully",
+            user_id=current_user.id,
+            username=current_user.username
+        )
+
+        return SuccessResponse(
+            success=True,
+            message="MFA enabled successfully",
+            data={"user_id": current_user.id}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "MFA setup completion failed",
+            user_id=current_user.id,
+            error=str(e)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MFA setup completion failed"
+        ) from e

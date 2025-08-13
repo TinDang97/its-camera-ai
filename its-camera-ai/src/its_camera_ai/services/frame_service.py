@@ -4,7 +4,7 @@ Optimized for high-throughput operations handling 3000+ inserts/second
 with batch processing, efficient queries, and real-time updates.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, desc, func, select, text
@@ -59,7 +59,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
 
             # Set timestamp if not provided
             if not frame_dict.get("timestamp"):
-                frame_dict["timestamp"] = datetime.utcnow()
+                frame_dict["timestamp"] = datetime.now(UTC)
 
             # Initialize processing fields
             frame_dict.update({
@@ -110,7 +110,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         Raises:
             DatabaseError: If batch creation fails
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         successful_items = 0
         errors = []
 
@@ -123,7 +123,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
 
                     # Set timestamp if not provided
                     if not frame_dict.get("timestamp"):
-                        frame_dict["timestamp"] = datetime.utcnow()
+                        frame_dict["timestamp"] = datetime.now(UTC)
 
                     # Initialize processing fields
                     frame_dict.update({
@@ -152,7 +152,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
                 successful_items = len(frame_instances)
 
             # Calculate performance metrics
-            processing_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             items_per_second = successful_items / max(processing_time_ms / 1000, 0.001)
 
             logger.info(
@@ -208,9 +208,9 @@ class FrameService(BaseAsyncService[FrameMetadata]):
 
             # Update processing timestamp
             if update_data.status == ProcessingStatus.COMPLETED:
-                frame.processing_completed_at = datetime.utcnow()
+                frame.processing_completed_at = datetime.now(UTC)
             elif update_data.status == ProcessingStatus.PROCESSING:
-                frame.processing_started_at = datetime.utcnow()
+                frame.processing_started_at = datetime.now(UTC)
 
             await self.session.commit()
 
@@ -341,7 +341,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             Processing statistics dictionary
         """
         try:
-            start_time = datetime.utcnow() - timedelta(hours=time_window_hours)
+            start_time = datetime.now(UTC) - timedelta(hours=time_window_hours)
 
             # Base query with time filter
             base_query = select(FrameMetadata).where(
@@ -466,7 +466,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             Number of frames deleted
         """
         try:
-            cutoff_time = datetime.utcnow() - timedelta(days=retention_days)
+            cutoff_time = datetime.now(UTC) - timedelta(days=retention_days)
             total_deleted = 0
 
             while True:
@@ -536,7 +536,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
                     and_(
                         FrameMetadata.status == ProcessingStatus.COMPLETED,
                         FrameMetadata.has_detections == True,  # noqa: E712
-                        FrameMetadata.timestamp >= datetime.utcnow() - timedelta(minutes=5),
+                        FrameMetadata.timestamp >= datetime.now(UTC) - timedelta(minutes=5),
                     )
                 )
                 .options(selectinload(FrameMetadata.detection_results))
@@ -576,7 +576,7 @@ class DetectionService(BaseAsyncService[DetectionResult]):
         Returns:
             Batch operation result with performance metrics
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         successful_items = 0
         errors = []
 
@@ -620,7 +620,7 @@ class DetectionService(BaseAsyncService[DetectionResult]):
                 successful_items = len(detection_instances)
 
             # Calculate performance metrics
-            processing_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             items_per_second = successful_items / max(processing_time_ms / 1000, 0.001)
 
             logger.info(

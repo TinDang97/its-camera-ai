@@ -259,9 +259,10 @@ def require_permissions(*permissions: str):
     async def permission_dependency(
         current_user: User = Depends(get_current_user),
         auth_service: AuthService = Depends(get_auth_service),
+        db: AsyncSession = Depends(get_db),
     ) -> User:
         """Check if current user has required permissions."""
-        if not await auth_service.user_has_permissions(current_user, permissions):
+        if not await auth_service.user_has_permissions(db, current_user, permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required: {', '.join(permissions)}",
@@ -764,6 +765,33 @@ def handle_database_error(error: Exception) -> HTTPException:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+
+
+# Service dependencies for authentication
+async def get_token_service(
+    cache: CacheService = Depends(get_cache_service),
+    settings: Settings = Depends(get_settings),
+) -> "TokenService":
+    """Get token service dependency."""
+    from ..services.token_service import TokenService
+    return TokenService(cache, settings.security)
+
+
+async def get_mfa_service(
+    cache: CacheService = Depends(get_cache_service),
+    settings: Settings = Depends(get_settings),
+) -> "MFAService":
+    """Get MFA service dependency."""
+    from ..services.mfa_service import MFAService
+    return MFAService(cache, settings.security)
+
+
+async def get_email_service(
+    settings: Settings = Depends(get_settings),
+) -> "EmailService":
+    """Get email service dependency."""
+    from ..services.email_service import EmailService
+    return EmailService(settings)
 
 
 # Common rate limiters

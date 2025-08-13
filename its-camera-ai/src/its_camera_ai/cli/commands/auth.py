@@ -15,7 +15,7 @@ import asyncio
 import getpass
 import secrets
 import string
-from datetime import datetime
+from datetime import UTC, datetime
 
 import bcrypt
 import qrcode
@@ -780,7 +780,7 @@ def reset_password(
                 await auth_service.user_service.update_by_id(
                     user.id,
                     hashed_password=hashed_password,
-                    last_password_change=datetime.utcnow(),
+                    last_password_change=datetime.now(UTC),
                 )
 
                 # Invalidate all user sessions

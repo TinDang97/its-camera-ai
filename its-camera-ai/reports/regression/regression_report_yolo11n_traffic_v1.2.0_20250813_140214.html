@@ -1,0 +1,161 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Regression Test Report - yolo11n_traffic v1.2.0</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .header { background-color: #f4f4f4; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+        .status-passed { color: green; font-weight: bold; }
+        .status-warning { color: orange; font-weight: bold; }
+        .status-failed { color: red; font-weight: bold; }
+        .metrics-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .metrics-table th, .metrics-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        .metrics-table th { background-color: #f2f2f2; }
+        .improvement { color: green; }
+        .regression { color: red; }
+        .section { margin: 30px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Model Regression Test Report</h1>
+        <p><strong>Model:</strong> yolo11n_traffic v1.2.0</p>
+        <p><strong>Test Date:</strong> 2025-08-13 14:02:14</p>
+        <p><strong>Status:</strong> <span class="status-passed">PASSED</span></p>
+        <p><strong>Summary:</strong> Statistically significant improvements: mAP@0.5 improved by 0.020, Inference time improved by 4.0ms</p>
+    </div>
+    
+    <div class="section">
+        <h2>Performance Metrics Comparison</h2>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Baseline Model</th>
+                    <th>New Model</th>
+                    <th>Absolute Change</th>
+                    <th>Relative Change</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>mAP@0.5</td>
+                    <td>0.8500</td>
+                    <td>0.8700</td>
+                    <td class="improvement">
+                        +0.0200
+                    </td>
+                    <td class="improvement">
+                        +2.35%
+                    </td>
+                </tr>
+                <tr>
+                    <td>mAP@0.5:0.95</td>
+                    <td>0.6500</td>
+                    <td>0.6800</td>
+                    <td class="improvement">
+                        +0.0300
+                    </td>
+                    <td class="improvement">
+                        +4.62%
+                    </td>
+                </tr>
+                <tr>
+                    <td>Precision</td>
+                    <td>0.8800</td>
+                    <td>0.9000</td>
+                    <td class="improvement">
+                        +0.0200
+                    </td>
+                    <td class="improvement">
+                        +2.27%
+                    </td>
+                </tr>
+                <tr>
+                    <td>Recall</td>
+                    <td>0.8200</td>
+                    <td>0.8400</td>
+                    <td class="improvement">
+                        +0.0200
+                    </td>
+                    <td class="improvement">
+                        +2.44%
+                    </td>
+                </tr>
+                <tr>
+                    <td>F1 Score</td>
+                    <td>0.8500</td>
+                    <td>0.8700</td>
+                    <td class="improvement">
+                        +0.0200
+                    </td>
+                    <td class="improvement">
+                        +2.35%
+                    </td>
+                </tr>
+                <tr>
+                    <td>Mean IoU</td>
+                    <td>0.7500</td>
+                    <td>0.7700</td>
+                    <td class="improvement">
+                        +0.0200
+                    </td>
+                    <td class="improvement">
+                        +2.67%
+                    </td>
+                </tr>
+                <tr>
+                    <td>Avg Inference Time (ms)</td>
+                    <td>52.00</td>
+                    <td>48.00</td>
+                    <td class="improvement">
+                        -4.00
+                    </td>
+                    <td class="improvement">
+                        -7.69%
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="section">
+        <h2>Statistical Significance Analysis</h2>
+        <p><strong>Overall Significance:</strong> Statistically Significant</p>
+        <p><strong>Sample Size:</strong> 1000</p>
+        
+        <h3>F1 Score Comparison</h3>
+        <ul>
+            <li><strong>P-value:</strong> 0.023400</li>
+            <li><strong>Statistically Significant:</strong> Yes</li>
+            <li><strong>Effect Size (Cohen's d):</strong> 0.4500 (medium)</li>
+        </ul>
+        
+        <h3>Inference Latency Comparison</h3>
+        <ul>
+            <li><strong>P-value:</strong> 0.015600</li>
+            <li><strong>Statistically Significant:</strong> Yes</li>
+            <li><strong>Effect Size (Cohen's d):</strong> 0.6200 (medium)</li>
+        </ul>
+    </div>
+        
+    <div class="section">
+        <h2>Recommendations</h2>
+        <ul>
+<li><strong>IMPROVEMENTS:</strong> The following enhancements were detected:</li><li class='improvement'>• mAP@0.5 improved by 0.020</li><li class='improvement'>• Inference time improved by 4.0ms</li>
+        </ul>
+    </div>
+    
+    <div class="section">
+        <h2>Test Configuration</h2>
+        <ul>
+            <li><strong>Validation Samples:</strong> 1000</li>
+            <li><strong>IoU Threshold:</strong> 0.5</li>
+            <li><strong>Confidence Threshold:</strong> 0.25</li>
+            <li><strong>Statistical Significance Level:</strong> α = 0.05</li>
+        </ul>
+    </div>
+    
+</body>
+</html>

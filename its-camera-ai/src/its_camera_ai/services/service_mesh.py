@@ -21,7 +21,7 @@ import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -168,7 +168,7 @@ class CircuitBreaker:
         """Record failed operation."""
         self.failure_count += 1
         self.error_count += 1
-        self.last_failure_time = datetime.utcnow()
+        self.last_failure_time = datetime.now(UTC)
 
         if self.state == CircuitBreakerState.HALF_OPEN:
             self._trip_circuit()
@@ -189,7 +189,7 @@ class CircuitBreaker:
         if not self.last_failure_time:
             return True
 
-        time_since_failure = datetime.utcnow() - self.last_failure_time
+        time_since_failure = datetime.now(UTC) - self.last_failure_time
         return time_since_failure.total_seconds() >= self.config.timeout_duration
 
     def _trip_circuit(self):
@@ -237,7 +237,7 @@ class CorrelationContext:
             user_id=metadata_dict.get("user-id") or None,
             session_id=metadata_dict.get("session-id") or None,
             timestamp=datetime.fromisoformat(
-                metadata_dict.get("timestamp", datetime.utcnow().isoformat())
+                metadata_dict.get("timestamp", datetime.now(UTC).isoformat())
             ),
         )
 
@@ -265,7 +265,7 @@ class ServiceRegistry:
                 "protocol": endpoint.protocol,
                 "weight": endpoint.weight,
                 "status": endpoint.status.value,
-                "registered_at": datetime.utcnow().isoformat(),
+                "registered_at": datetime.now(UTC).isoformat(),
             }
 
             await self.redis.setex(service_key, ttl, json.dumps(service_data))
@@ -367,7 +367,7 @@ class ServiceRegistry:
             else:
                 endpoint.status = ServiceStatus.UNHEALTHY
 
-            endpoint.last_health_check = datetime.utcnow()
+            endpoint.last_health_check = datetime.now(UTC)
 
         except Exception as e:
             endpoint.status = ServiceStatus.UNHEALTHY
@@ -535,7 +535,7 @@ class EventBus:
         try:
             event_payload = {
                 "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "data": event_data,
             }
 

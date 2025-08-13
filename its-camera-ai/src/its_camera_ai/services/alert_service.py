@@ -7,9 +7,15 @@ notification channels and configurable alert rules.
 
 import asyncio
 import json
-from datetime import datetime, timedelta
+import random
+import ssl
+from datetime import UTC, datetime, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any
 
+import aiosmtplib
+import httpx
 from sqlalchemy import and_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,43 +88,174 @@ class EmailNotificationChannel(NotificationChannel):
         priority: str = "medium",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Send email notification."""
-        try:
-            # In a real implementation, this would use an actual email service
-            # For now, we'll simulate the email sending
+        """Send email notification with retry logic and HTML support."""
+        max_retries = self.config.get("max_retries", 3)
+        retry_delay_base = self.config.get("retry_delay_base", 1.0)
 
-            logger.info(
-                "Sending email alert",
-                recipient=recipient,
-                subject=subject,
-                priority=priority,
-            )
+        for attempt in range(max_retries + 1):
+            try:
+                # Create email message
+                msg = MIMEMultipart("alternative")
+                msg["From"] = self.from_email
+                msg["To"] = recipient
+                msg["Subject"] = subject
 
-            # Simulate email delivery
-            await asyncio.sleep(0.1)  # Simulate network delay
+                # Priority headers
+                if priority == "critical":
+                    msg["X-Priority"] = "1"
+                    msg["X-MSMail-Priority"] = "High"
+                elif priority == "high":
+                    msg["X-Priority"] = "2"
+                    msg["X-MSMail-Priority"] = "High"
 
-            return {
-                "status": "delivered",
-                "channel": "email",
-                "recipient": recipient,
-                "delivery_id": f"email_{datetime.utcnow().timestamp()}",
-                "delivered_at": datetime.utcnow(),
-                "details": {
-                    "subject": subject,
-                    "message_length": len(message),
-                    "priority": priority,
-                },
-            }
+                # Add plain text version
+                text_part = MIMEText(message, "plain")
+                msg.attach(text_part)
 
-        except Exception as e:
-            logger.error(f"Failed to send email notification: {e}")
-            return {
-                "status": "failed",
-                "channel": "email",
-                "recipient": recipient,
-                "error": str(e),
-                "failed_at": datetime.utcnow(),
-            }
+                # Add HTML version if enabled
+                if self.config.get("html_template", True):
+                    html_message = self._format_html_message(subject, message, priority)
+                    html_part = MIMEText(html_message, "html")
+                    msg.attach(html_part)
+
+                # Create SSL context
+                context = ssl.create_default_context()
+                if self.config.get("ssl_verify", True):
+                    context.check_hostname = True
+                    context.verify_mode = ssl.CERT_REQUIRED
+                else:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+
+                # Send email using SMTP
+                smtp_timeout = self.config.get("timeout", 30)
+
+                async with aiosmtplib.SMTP(
+                    hostname=self.smtp_server,
+                    port=self.smtp_port,
+                    timeout=smtp_timeout,
+                    tls_context=context,
+                ) as smtp:
+                    # Start TLS if required
+                    if self.smtp_port in [587, 25] and not self.config.get("no_tls", False):
+                        await smtp.starttls(tls_context=context)
+
+                    # Authenticate if credentials provided
+                    if self.username and self.password:
+                        await smtp.login(self.username, self.password)
+
+                    # Send message
+                    await smtp.send_message(msg)
+
+                delivery_id = f"email_{datetime.now(UTC).timestamp()}_{random.randint(1000, 9999)}"
+
+                logger.info(
+                    "Email alert sent successfully",
+                    recipient=recipient,
+                    subject=subject,
+                    priority=priority,
+                    delivery_id=delivery_id,
+                    attempt=attempt + 1,
+                )
+
+                return {
+                    "status": "delivered",
+                    "channel": "email",
+                    "recipient": recipient,
+                    "delivery_id": delivery_id,
+                    "delivered_at": datetime.now(UTC),
+                    "details": {
+                        "subject": subject,
+                        "message_length": len(message),
+                        "priority": priority,
+                        "smtp_server": self.smtp_server,
+                        "attempts": attempt + 1,
+                        "html_enabled": self.config.get("html_template", True),
+                    },
+                }
+
+            except (TimeoutError, aiosmtplib.SMTPException, OSError) as e:
+                logger.warning(
+                    f"Email delivery attempt {attempt + 1} failed: {e}",
+                    recipient=recipient,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                )
+
+                if attempt < max_retries:
+                    # Exponential backoff with jitter
+                    delay = retry_delay_base * (2 ** attempt) + random.uniform(0, 1)
+                    await asyncio.sleep(delay)
+                    continue
+
+                # All retries exhausted
+                logger.error(f"Failed to send email notification after {max_retries + 1} attempts: {e}")
+                return {
+                    "status": "failed",
+                    "channel": "email",
+                    "recipient": recipient,
+                    "error": str(e),
+                    "failed_at": datetime.now(UTC),
+                    "attempts": attempt + 1,
+                }
+
+            except Exception as e:
+                logger.error(f"Unexpected error sending email notification: {e}")
+                return {
+                    "status": "failed",
+                    "channel": "email",
+                    "recipient": recipient,
+                    "error": str(e),
+                    "failed_at": datetime.now(UTC),
+                }
+
+    def _format_html_message(self, subject: str, message: str, priority: str) -> str:
+        """Format message as HTML with proper styling."""
+        priority_colors = {
+            "critical": "#dc3545",  # Red
+            "high": "#fd7e14",     # Orange
+            "medium": "#ffc107",   # Yellow
+            "low": "#28a745",      # Green
+        }
+
+        priority_color = priority_colors.get(priority, "#6c757d")
+
+        return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{subject}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: {priority_color}; color: white; padding: 15px; border-radius: 5px 5px 0 0; }}
+        .content {{ background-color: #f8f9fa; padding: 20px; border-radius: 0 0 5px 5px; border: 1px solid #dee2e6; }}
+        .priority {{ font-weight: bold; color: {priority_color}; }}
+        .footer {{ margin-top: 20px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 0.9em; color: #6c757d; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>{subject}</h2>
+        </div>
+        <div class="content">
+            <p><strong>Priority:</strong> <span class="priority">{priority.upper()}</span></p>
+            <p><strong>Time:</strong> {datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")}</p>
+            <hr>
+            <pre>{message}</pre>
+        </div>
+        <div class="footer">
+            <p>This alert was generated by ITS Camera AI System.</p>
+            <p>Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>
+        """.strip()
 
 
 class WebhookNotificationChannel(NotificationChannel):
@@ -138,49 +275,331 @@ class WebhookNotificationChannel(NotificationChannel):
         priority: str = "medium",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Send webhook notification."""
-        try:
-            payload = {
-                "recipient": recipient,
-                "subject": subject,
+        """Send webhook notification with retry logic and authentication."""
+        max_retries = self.config.get("max_retries", 3)
+        retry_delay_base = self.config.get("retry_delay_base", 1.0)
+
+        payload = {
+            "recipient": recipient,
+            "subject": subject,
+            "message": message,
+            "priority": priority,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "metadata": metadata or {},
+            "source": "its-camera-ai",
+            "version": "1.0",
+        }
+
+        # Prepare headers
+        headers = dict(self.headers)
+        headers["User-Agent"] = "ITS-Camera-AI/1.0"
+
+        # Add authentication if configured
+        auth_type = self.config.get("auth_type")
+        if auth_type == "bearer" and self.config.get("auth_token"):
+            headers["Authorization"] = f"Bearer {self.config['auth_token']}"
+        elif auth_type == "api_key" and self.config.get("api_key"):
+            key_header = self.config.get("api_key_header", "X-API-Key")
+            headers[key_header] = self.config["api_key"]
+        elif auth_type == "basic" and self.config.get("username") and self.config.get("password"):
+            auth = httpx.BasicAuth(self.config["username"], self.config["password"])
+        else:
+            auth = None
+
+        # Add webhook signature if secret is configured
+        if self.config.get("webhook_secret"):
+            import hashlib
+            import hmac
+
+            payload_str = json.dumps(payload, sort_keys=True)
+            signature = hmac.new(
+                self.config["webhook_secret"].encode(),
+                payload_str.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(
+                    "Sending webhook alert",
+                    recipient=recipient,
+                    webhook_url=self.webhook_url,
+                    priority=priority,
+                    attempt=attempt + 1,
+                )
+
+                # Create HTTP client with timeout and SSL verification
+                timeout = httpx.Timeout(
+                    timeout=self.timeout,
+                    connect=self.config.get("connect_timeout", 10)
+                )
+
+                verify_ssl = self.config.get("verify_ssl", True)
+
+                async with httpx.AsyncClient(
+                    timeout=timeout,
+                    verify=verify_ssl,
+                    follow_redirects=self.config.get("follow_redirects", False)
+                ) as client:
+                    # Make POST request
+                    response = await client.post(
+                        self.webhook_url,
+                        json=payload,
+                        headers=headers,
+                        auth=auth if 'auth' in locals() else None,
+                    )
+
+                    # Check response status
+                    response.raise_for_status()
+
+                    delivery_id = f"webhook_{datetime.now(UTC).timestamp()}_{random.randint(1000, 9999)}"
+
+                    logger.info(
+                        "Webhook alert sent successfully",
+                        recipient=recipient,
+                        webhook_url=self.webhook_url,
+                        priority=priority,
+                        delivery_id=delivery_id,
+                        status_code=response.status_code,
+                        attempt=attempt + 1,
+                    )
+
+                    return {
+                        "status": "delivered",
+                        "channel": "webhook",
+                        "recipient": recipient,
+                        "delivery_id": delivery_id,
+                        "delivered_at": datetime.now(UTC),
+                        "details": {
+                            "webhook_url": self.webhook_url,
+                            "payload_size": len(json.dumps(payload)),
+                            "priority": priority,
+                            "status_code": response.status_code,
+                            "response_headers": dict(response.headers),
+                            "attempts": attempt + 1,
+                            "auth_type": auth_type,
+                        },
+                    }
+
+            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as e:
+                logger.warning(
+                    f"Webhook delivery attempt {attempt + 1} failed: {e}",
+                    recipient=recipient,
+                    webhook_url=self.webhook_url,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                )
+
+                if attempt < max_retries:
+                    # Exponential backoff with jitter
+                    delay = retry_delay_base * (2 ** attempt) + random.uniform(0, 1)
+                    await asyncio.sleep(delay)
+                    continue
+
+                # All retries exhausted
+                error_details = {
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+
+                if hasattr(e, 'response') and e.response is not None:
+                    error_details["status_code"] = e.response.status_code
+                    error_details["response_text"] = e.response.text[:500]  # Limit response text
+
+                logger.error(f"Failed to send webhook notification after {max_retries + 1} attempts: {e}")
+                return {
+                    "status": "failed",
+                    "channel": "webhook",
+                    "recipient": recipient,
+                    "error": str(e),
+                    "failed_at": datetime.now(UTC),
+                    "attempts": attempt + 1,
+                    "error_details": error_details,
+                }
+
+            except Exception as e:
+                logger.error(f"Unexpected error sending webhook notification: {e}")
+                return {
+                    "status": "failed",
+                    "channel": "webhook",
+                    "recipient": recipient,
+                    "error": str(e),
+                    "failed_at": datetime.now(UTC),
+                }
+
+
+class SMSNotificationChannel(NotificationChannel):
+    """SMS notification channel using HTTP API."""
+
+    def __init__(self, config: dict[str, Any]):
+        super().__init__("sms", config)
+        self.api_url = config.get("api_url")
+        self.api_key = config.get("api_key")
+        self.from_number = config.get("from_number")
+        self.provider = config.get("provider", "generic")  # twilio, nexmo, generic
+        self.timeout = config.get("timeout", 30)
+
+    async def send_notification(
+        self,
+        recipient: str,
+        subject: str,
+        message: str,
+        priority: str = "medium",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send SMS notification with retry logic."""
+        max_retries = self.config.get("max_retries", 3)
+        retry_delay_base = self.config.get("retry_delay_base", 1.0)
+
+        # Format message for SMS (160 char limit consideration)
+        sms_message = self._format_sms_message(subject, message, priority)
+
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(
+                    "Sending SMS alert",
+                    recipient=recipient,
+                    priority=priority,
+                    attempt=attempt + 1,
+                )
+
+                # Prepare payload based on provider
+                payload = self._prepare_sms_payload(recipient, sms_message)
+
+                # Prepare headers
+                headers = {"Content-Type": "application/json"}
+                if self.provider == "twilio" or self.provider == "nexmo":
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                else:  # generic
+                    headers["X-API-Key"] = self.api_key
+
+                timeout = httpx.Timeout(
+                    timeout=self.timeout,
+                    connect=self.config.get("connect_timeout", 10)
+                )
+
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        self.api_url,
+                        json=payload,
+                        headers=headers,
+                    )
+
+                    response.raise_for_status()
+
+                    delivery_id = f"sms_{datetime.now(UTC).timestamp()}_{random.randint(1000, 9999)}"
+
+                    logger.info(
+                        "SMS alert sent successfully",
+                        recipient=recipient,
+                        priority=priority,
+                        delivery_id=delivery_id,
+                        status_code=response.status_code,
+                        attempt=attempt + 1,
+                    )
+
+                    return {
+                        "status": "delivered",
+                        "channel": "sms",
+                        "recipient": recipient,
+                        "delivery_id": delivery_id,
+                        "delivered_at": datetime.now(UTC),
+                        "details": {
+                            "provider": self.provider,
+                            "message_length": len(sms_message),
+                            "priority": priority,
+                            "status_code": response.status_code,
+                            "attempts": attempt + 1,
+                        },
+                    }
+
+            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as e:
+                logger.warning(
+                    f"SMS delivery attempt {attempt + 1} failed: {e}",
+                    recipient=recipient,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                )
+
+                if attempt < max_retries:
+                    delay = retry_delay_base * (2 ** attempt) + random.uniform(0, 1)
+                    await asyncio.sleep(delay)
+                    continue
+
+                logger.error(f"Failed to send SMS notification after {max_retries + 1} attempts: {e}")
+                return {
+                    "status": "failed",
+                    "channel": "sms",
+                    "recipient": recipient,
+                    "error": str(e),
+                    "failed_at": datetime.now(UTC),
+                    "attempts": attempt + 1,
+                }
+
+            except Exception as e:
+                logger.error(f"Unexpected error sending SMS notification: {e}")
+                return {
+                    "status": "failed",
+                    "channel": "sms",
+                    "recipient": recipient,
+                    "error": str(e),
+                    "failed_at": datetime.now(UTC),
+                }
+
+    def _format_sms_message(self, subject: str, message: str, priority: str) -> str:
+        """Format message for SMS with length constraints."""
+        # SMS messages should be concise
+        priority_emoji = {
+            "critical": "🚨",
+            "high": "⚠️",
+            "medium": "ℹ️",
+            "low": "📝",
+        }
+
+        emoji = priority_emoji.get(priority, "ℹ️")
+
+        # Extract key info from message
+        lines = message.strip().split('\n')
+        key_info = []
+
+        for line in lines:
+            line = line.strip()
+            if line and any(keyword in line.lower() for keyword in
+                          ['type:', 'severity:', 'location:', 'time:', 'vehicle:', 'speed:']):
+                key_info.append(line)
+
+        if len(key_info) > 3:
+            key_info = key_info[:3]  # Limit to first 3 key pieces of info
+
+        sms_text = f"{emoji} {subject}\n" + "\n".join(key_info)
+
+        # Truncate if too long (SMS limit is typically 160 chars)
+        max_length = self.config.get("max_message_length", 160)
+        if len(sms_text) > max_length:
+            sms_text = sms_text[:max_length-3] + "..."
+
+        return sms_text
+
+    def _prepare_sms_payload(self, recipient: str, message: str) -> dict[str, Any]:
+        """Prepare SMS payload based on provider."""
+        if self.provider == "twilio":
+            return {
+                "From": self.from_number,
+                "To": recipient,
+                "Body": message,
+            }
+        elif self.provider == "nexmo":
+            return {
+                "from": self.from_number,
+                "to": recipient,
+                "text": message,
+            }
+        else:  # generic
+            return {
+                "from_number": self.from_number,
+                "to_number": recipient,
                 "message": message,
-                "priority": priority,
-                "timestamp": datetime.utcnow().isoformat(),
-                "metadata": metadata or {},
-            }
-
-            logger.info(
-                "Sending webhook alert",
-                recipient=recipient,
-                webhook_url=self.webhook_url,
-                priority=priority,
-            )
-
-            # In a real implementation, this would make an HTTP request
-            # For now, we'll simulate the webhook call
-            await asyncio.sleep(0.1)  # Simulate network delay
-
-            return {
-                "status": "delivered",
-                "channel": "webhook",
-                "recipient": recipient,
-                "delivery_id": f"webhook_{datetime.utcnow().timestamp()}",
-                "delivered_at": datetime.utcnow(),
-                "details": {
-                    "webhook_url": self.webhook_url,
-                    "payload_size": len(json.dumps(payload)),
-                    "priority": priority,
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to send webhook notification: {e}")
-            return {
-                "status": "failed",
-                "channel": "webhook",
-                "recipient": recipient,
-                "error": str(e),
-                "failed_at": datetime.utcnow(),
             }
 
 
@@ -303,23 +722,56 @@ class AlertService(BaseAsyncService):
         """Initialize available notification channels."""
         channels = {}
 
-        # Email channel
+        # Email channel with production-ready configuration
         email_config = {
-            "smtp_server": "localhost",
-            "smtp_port": 587,
-            "username": None,
-            "password": None,
-            "from_email": "alerts@its-camera-ai.local",
+            "smtp_server": self.settings.smtp_server if hasattr(self.settings, 'smtp_server') else "localhost",
+            "smtp_port": self.settings.smtp_port if hasattr(self.settings, 'smtp_port') else 587,
+            "username": self.settings.smtp_username if hasattr(self.settings, 'smtp_username') else None,
+            "password": self.settings.smtp_password if hasattr(self.settings, 'smtp_password') else None,
+            "from_email": self.settings.smtp_from_email if hasattr(self.settings, 'smtp_from_email') else "alerts@its-camera-ai.local",
+            "timeout": self.settings.smtp_timeout if hasattr(self.settings, 'smtp_timeout') else 30,
+            "max_retries": self.settings.smtp_max_retries if hasattr(self.settings, 'smtp_max_retries') else 3,
+            "retry_delay_base": self.settings.smtp_retry_delay if hasattr(self.settings, 'smtp_retry_delay') else 1.0,
+            "html_template": self.settings.smtp_html_template if hasattr(self.settings, 'smtp_html_template') else True,
+            "ssl_verify": self.settings.smtp_ssl_verify if hasattr(self.settings, 'smtp_ssl_verify') else True,
+            "no_tls": self.settings.smtp_no_tls if hasattr(self.settings, 'smtp_no_tls') else False,
         }
         channels["email"] = EmailNotificationChannel(email_config)
 
-        # Webhook channel
+        # Webhook channel with production-ready configuration
         webhook_config = {
-            "url": "http://localhost:8080/api/v1/webhooks/alerts",
+            "url": self.settings.webhook_url if hasattr(self.settings, 'webhook_url') else "http://localhost:8080/api/v1/webhooks/alerts",
             "headers": {"Content-Type": "application/json"},
-            "timeout": 30,
+            "timeout": self.settings.webhook_timeout if hasattr(self.settings, 'webhook_timeout') else 30,
+            "connect_timeout": self.settings.webhook_connect_timeout if hasattr(self.settings, 'webhook_connect_timeout') else 10,
+            "max_retries": self.settings.webhook_max_retries if hasattr(self.settings, 'webhook_max_retries') else 3,
+            "retry_delay_base": self.settings.webhook_retry_delay if hasattr(self.settings, 'webhook_retry_delay') else 1.0,
+            "auth_type": self.settings.webhook_auth_type if hasattr(self.settings, 'webhook_auth_type') else None,
+            "auth_token": self.settings.webhook_auth_token if hasattr(self.settings, 'webhook_auth_token') else None,
+            "api_key": self.settings.webhook_api_key if hasattr(self.settings, 'webhook_api_key') else None,
+            "api_key_header": self.settings.webhook_api_key_header if hasattr(self.settings, 'webhook_api_key_header') else "X-API-Key",
+            "username": self.settings.webhook_username if hasattr(self.settings, 'webhook_username') else None,
+            "password": self.settings.webhook_password if hasattr(self.settings, 'webhook_password') else None,
+            "webhook_secret": self.settings.webhook_secret if hasattr(self.settings, 'webhook_secret') else None,
+            "verify_ssl": self.settings.webhook_ssl_verify if hasattr(self.settings, 'webhook_ssl_verify') else True,
+            "follow_redirects": self.settings.webhook_follow_redirects if hasattr(self.settings, 'webhook_follow_redirects') else False,
         }
         channels["webhook"] = WebhookNotificationChannel(webhook_config)
+
+        # SMS channel (optional)
+        if hasattr(self.settings, 'sms_api_url') and self.settings.sms_api_url:
+            sms_config = {
+                "api_url": self.settings.sms_api_url,
+                "api_key": self.settings.sms_api_key if hasattr(self.settings, 'sms_api_key') else None,
+                "from_number": self.settings.sms_from_number if hasattr(self.settings, 'sms_from_number') else None,
+                "provider": self.settings.sms_provider if hasattr(self.settings, 'sms_provider') else "generic",
+                "timeout": self.settings.sms_timeout if hasattr(self.settings, 'sms_timeout') else 30,
+                "connect_timeout": self.settings.sms_connect_timeout if hasattr(self.settings, 'sms_connect_timeout') else 10,
+                "max_retries": self.settings.sms_max_retries if hasattr(self.settings, 'sms_max_retries') else 3,
+                "retry_delay_base": self.settings.sms_retry_delay if hasattr(self.settings, 'sms_retry_delay') else 1.0,
+                "max_message_length": self.settings.sms_max_length if hasattr(self.settings, 'sms_max_length') else 160,
+            }
+            channels["sms"] = SMSNotificationChannel(sms_config)
 
         return channels
 
@@ -497,7 +949,7 @@ class AlertService(BaseAsyncService):
 
             # Update attempt count
             notification.delivery_attempts += 1
-            notification.last_attempt_time = datetime.utcnow()
+            notification.last_attempt_time = datetime.now(UTC)
 
             # Send notification
             delivery_result = await channel.send_notification(
@@ -512,7 +964,7 @@ class AlertService(BaseAsyncService):
             if delivery_result.get("status") == "delivered":
                 notification.status = "delivered"
                 notification.sent_time = delivery_result.get(
-                    "delivered_at", datetime.utcnow()
+                    "delivered_at", datetime.now(UTC)
                 )
                 notification.external_id = delivery_result.get("delivery_id")
                 notification.delivery_details = delivery_result.get("details", {})
@@ -659,7 +1111,7 @@ Confidence: {anomaly.confidence:.1%}
     ) -> bool:
         """Check if alert type is in cooldown period for camera/event combination."""
         cooldown_period = self.rule_engine.get_cooldown_period(alert_type)
-        cutoff_time = datetime.utcnow() - cooldown_period
+        cutoff_time = datetime.now(UTC) - cooldown_period
 
         # Check for recent similar alerts
         query = select(AlertNotification).where(
@@ -823,7 +1275,7 @@ Confidence: {anomaly.confidence:.1%}
 
                     # Retry delivery
                     notification.delivery_attempts += 1
-                    notification.last_attempt_time = datetime.utcnow()
+                    notification.last_attempt_time = datetime.now(UTC)
 
                     delivery_result = await channel.send_notification(
                         recipient=notification.recipient,
@@ -836,7 +1288,7 @@ Confidence: {anomaly.confidence:.1%}
                     if delivery_result.get("status") == "delivered":
                         notification.status = "delivered"
                         notification.sent_time = delivery_result.get(
-                            "delivered_at", datetime.utcnow()
+                            "delivered_at", datetime.now(UTC)
                         )
                         notification.external_id = delivery_result.get("delivery_id")
                         notification.delivery_details = delivery_result.get(
@@ -908,7 +1360,7 @@ Confidence: {anomaly.confidence:.1%}
             if not notification:
                 return False
 
-            notification.acknowledged_time = datetime.utcnow()
+            notification.acknowledged_time = datetime.now(UTC)
             notification.acknowledged_by = acknowledged_by
             notification.response_action = response_action
             notification.response_notes = notes

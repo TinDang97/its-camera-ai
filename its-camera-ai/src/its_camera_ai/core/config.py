@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -325,7 +325,7 @@ class MinIOConfig(BaseModel):
     video_retention_days: int = Field(
         default=30, description="Video frame retention (days)"
     )
-    model_retention_days: int = Field(
+    retention_days: int = Field(
         default=365, description="Model artifact retention (days)"
     )
     log_retention_days: int = Field(default=90, description="Log retention (days)")
@@ -372,13 +372,16 @@ class Settings(BaseSettings):
         default=Path("temp"), description="Temporary files directory"
     )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        env_nested_delimiter = "__"
-        case_sensitive = False
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "env_nested_delimiter": "__",
+        "case_sensitive": False,
+        "extra": "ignore"
+    }
 
-    @validator("log_level")
+    @field_validator("log_level")
+    @classmethod
     def validate_log_level(cls, v: str) -> str:
         """Validate log level."""
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -386,7 +389,8 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
         return v.upper()
 
-    @validator("environment")
+    @field_validator("environment")
+    @classmethod
     def validate_environment(cls, v: str) -> str:
         """Validate environment."""
         valid_envs = {"development", "testing", "staging", "production"}

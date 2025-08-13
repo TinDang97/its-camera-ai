@@ -4,7 +4,7 @@ Provides comprehensive camera registry management with relationships,
 indexing, and optimizations for high-throughput operations.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -202,7 +202,7 @@ class Camera(BaseModel):
         self.total_frames_processed = frame_count
         self.avg_processing_time = avg_time
         self.uptime_percentage = uptime
-        self.last_seen_at = datetime.utcnow()
+        self.last_seen_at = datetime.now(UTC)
 
     def set_status(self, status: CameraStatus, error_message: str | None = None) -> None:
         """Update camera status with optional error information.
@@ -213,13 +213,13 @@ class Camera(BaseModel):
         """
         self.status = status.value
         if status in (CameraStatus.ONLINE, CameraStatus.STREAMING):
-            self.last_seen_at = datetime.utcnow()
+            self.last_seen_at = datetime.now(UTC)
 
         if error_message and "config" in self.__dict__:
             if "errors" not in self.config:
                 self.config["errors"] = []
             self.config["errors"].append({
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "message": error_message,
                 "status": status.value
             })

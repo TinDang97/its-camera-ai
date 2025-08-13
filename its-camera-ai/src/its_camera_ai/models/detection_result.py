@@ -4,7 +4,7 @@ Optimized for storing bounding boxes, classifications, and tracking
 information with efficient spatial and temporal queries.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -364,7 +364,7 @@ class DetectionResult(BaseModel):
             self.additional_attributes = {}
         self.additional_attributes.update({
             "verified_by": verified_by,
-            "verified_at": datetime.utcnow().isoformat()
+            "verified_at": datetime.now(UTC).isoformat()
         })
 
     @property

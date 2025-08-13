@@ -13,6 +13,7 @@ Tests enterprise-grade authentication features including:
 
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import bcrypt
 import jwt
@@ -22,22 +23,51 @@ import redis.asyncio as redis
 from cryptography.hazmat.primitives import serialization
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.its_camera_ai.core.config import SecurityConfig
-from src.its_camera_ai.core.exceptions import AuthenticationError
-from src.its_camera_ai.models.user import Role, User
-from src.its_camera_ai.services.auth_service import (
-    AuthenticationService,
-    AuthenticationStatus,
-    BruteForceProtection,
-    JWTManager,
-    MFAMethod,
-    PasswordPolicy,
-    SecurityAuditLogger,
-    SecurityEventType,
-    SessionManager,
-    UserCredentials,
-    create_auth_service,
-)
+# Import only what we need to avoid circular imports
+try:
+    from its_camera_ai.core.config import SecurityConfig
+    from its_camera_ai.core.exceptions import AuthenticationError
+    from its_camera_ai.core.logging import get_logger
+    from its_camera_ai.models.user import Role, User
+    from its_camera_ai.services.auth_service import (
+        AuthenticationService,
+        AuthenticationStatus,
+        BruteForceProtection,
+        JWTManager,
+        MFAMethod,
+        PasswordPolicy,
+        SecurityAuditLogger,
+        SecurityEventType,
+        SessionManager,
+        UserCredentials,
+        create_auth_service,
+    )
+except ImportError:
+    # For cases where there are circular imports or missing dependencies
+    # Import directly from the module path
+    import os
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+    from its_camera_ai.core.config import SecurityConfig
+    from its_camera_ai.core.exceptions import AuthenticationError
+    from its_camera_ai.core.logging import get_logger
+    from its_camera_ai.models.user import Role, User
+    from its_camera_ai.services.auth_service import (
+        AuthenticationService,
+        AuthenticationStatus,
+        BruteForceProtection,
+        JWTManager,
+        MFAMethod,
+        PasswordPolicy,
+        SecurityAuditLogger,
+        SecurityEventType,
+        SessionManager,
+        UserCredentials,
+        create_auth_service,
+    )
+
+logger = get_logger(__name__)
 
 
 class TestPasswordPolicy:
@@ -229,7 +259,7 @@ class TestSessionManager:
 
     async def test_create_session(self):
         """Test session creation."""
-        from src.its_camera_ai.services.auth_service import SessionInfo
+        from its_camera_ai.services.auth_service import SessionInfo
 
         session_info = SessionInfo(
             session_id="test_session",
@@ -530,7 +560,7 @@ class TestAuthenticationService:
         token = self.auth_service.jwt_manager.create_access_token(token_data)
 
         # Mock session
-        from src.its_camera_ai.services.auth_service import SessionInfo
+        from its_camera_ai.services.auth_service import SessionInfo
 
         mock_session = SessionInfo(
             session_id="session123",
@@ -571,7 +601,7 @@ class TestAuthenticationService:
         token = self.auth_service.jwt_manager.create_access_token(token_data)
 
         # Mock expired session
-        from src.its_camera_ai.services.auth_service import SessionInfo
+        from its_camera_ai.services.auth_service import SessionInfo
 
         expired_session = SessionInfo(
             session_id="session123",
@@ -602,7 +632,7 @@ class TestAuthenticationService:
         refresh_token = self.auth_service.jwt_manager.create_refresh_token(refresh_data)
 
         # Mock valid session
-        from src.its_camera_ai.services.auth_service import SessionInfo
+        from its_camera_ai.services.auth_service import SessionInfo
 
         mock_session = SessionInfo(
             session_id="session123",
@@ -756,7 +786,7 @@ class TestAuthenticationService:
 
     async def test_logout_success(self):
         """Test successful logout."""
-        from src.its_camera_ai.services.auth_service import SessionInfo
+        from its_camera_ai.services.auth_service import SessionInfo
 
         mock_session = SessionInfo(
             session_id="session123",
@@ -846,21 +876,569 @@ class TestCreateAuthService:
 class TestAuthenticationServiceIntegration:
     """Integration tests for authentication service with real components."""
 
-    async def test_full_authentication_flow(self):
-        """Test complete authentication flow."""
-        # This would require actual database and Redis connections
-        # Implementation would depend on test infrastructure setup
-        pass
+    @pytest.mark.asyncio
+    async def test_complete_authentication_flow(
+        self,
+        db_session: AsyncSession,
+        redis_client: redis.Redis,
+        test_settings,
+        test_user,
+        sample_user_data,
+    ):
+        """Test complete end-to-end authentication flow."""
+        # Create authentication service
+        security_config = SecurityConfig()
+        auth_service = AuthenticationService(db_session, redis_client, security_config)
 
-    async def test_concurrent_authentication_requests(self):
-        """Test handling of concurrent authentication requests."""
-        # Test race conditions and concurrent access
-        pass
+        # Mock user service with test data
+        from tests.conftest import MockUserService
+        auth_service.user_service = MockUserService(db_session)
 
-    async def test_session_cleanup_on_expiry(self):
+        # Create test user
+        await auth_service.user_service.create_test_user(**sample_user_data)
+
+        # Step 1: Authentication
+        credentials = UserCredentials(
+            username="testuser",
+            password="password123",
+            ip_address="192.168.1.100"
+        )
+
+        # Mock user lookup and password verification
+        with (
+            patch.object(
+                auth_service, "_get_user_by_username", return_value=test_user
+            ),
+            patch.object(
+                auth_service.brute_force_protection,
+                "is_blocked",
+                return_value=False,
+            ),
+            patch.object(
+                auth_service.brute_force_protection, "record_success"
+            ),
+            patch.object(
+                auth_service, "_create_user_session"
+            ) as mock_session,
+        ):
+            # Mock session creation
+            from its_camera_ai.services.auth_service import SessionInfo
+
+            mock_session_info = SessionInfo(
+                session_id="test_session_123",
+                user_id=test_user.id,
+                username=test_user.username,
+                roles=[],
+                permissions=[],
+                created_at=datetime.utcnow(),
+                last_activity=datetime.utcnow(),
+                expires_at=datetime.utcnow() + timedelta(hours=8),
+                mfa_verified=False,
+            )
+            mock_session.return_value = mock_session_info
+
+            # Authenticate
+            auth_result = await auth_service.authenticate(credentials)
+
+            # Verify authentication success
+            assert auth_result.success is True
+            assert auth_result.status == AuthenticationStatus.SUCCESS
+            assert auth_result.user_id == test_user.id
+            assert auth_result.access_token is not None
+            assert auth_result.refresh_token is not None
+
+            # Step 2: Token verification
+            token_result = await auth_service.verify_token(auth_result.access_token)
+            assert token_result.valid is True
+            assert token_result.user_id == test_user.id
+
+            # Step 3: Token refresh
+            refresh_result = await auth_service.refresh_token(auth_result.refresh_token)
+            assert refresh_result.access_token is not None
+            assert refresh_result.refresh_token is not None
+
+            # Step 4: Logout
+            logout_result = await auth_service.logout("test_session_123")
+            assert logout_result is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.performance
+    async def test_concurrent_authentication_requests(
+        self,
+        db_session: AsyncSession,
+        redis_client: redis.Redis,
+        test_settings,
+        test_user,
+        concurrent_users_count,
+    ):
+        """Test handling of concurrent authentication requests for race conditions."""
+        import asyncio
+        from time import time
+
+        # Create authentication service
+        security_config = SecurityConfig()
+        auth_service = AuthenticationService(db_session, redis_client, security_config)
+
+        # Mock user service
+        from tests.conftest import MockUserService
+        auth_service.user_service = MockUserService(db_session)
+
+        # Create test users
+        test_users = []
+        for i in range(concurrent_users_count):
+            user_data = {
+                "id": str(uuid4()),
+                "username": f"testuser_{i}",
+                "email": f"test{i}@example.com",
+                "hashed_password": bcrypt.hashpw(f"password{i}".encode(), bcrypt.gensalt()).decode(),
+                "is_active": True,
+                "is_verified": True,
+                "mfa_enabled": False,
+                "roles": [],
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            user = await auth_service.user_service.create_test_user(**user_data)
+            test_users.append(user)
+
+        async def authenticate_user(user_index: int) -> bool:
+            """Authenticate a single user."""
+            try:
+                credentials = UserCredentials(
+                    username=f"testuser_{user_index}",
+                    password=f"password{user_index}",
+                    ip_address=f"192.168.1.{100 + user_index}"
+                )
+
+                # Mock dependencies for this authentication
+                with (
+                    patch.object(
+                        auth_service, "_get_user_by_username", return_value=test_users[user_index]
+                    ),
+                    patch.object(
+                        auth_service.brute_force_protection,
+                        "is_blocked",
+                        return_value=False,
+                    ),
+                    patch.object(
+                        auth_service.brute_force_protection, "record_success"
+                    ),
+                    patch.object(
+                        auth_service, "_create_user_session"
+                    ) as mock_session,
+                ):
+                    from its_camera_ai.services.auth_service import SessionInfo
+
+                    mock_session.return_value = SessionInfo(
+                        session_id=f"session_{user_index}",
+                        user_id=test_users[user_index].id,
+                        username=test_users[user_index].username,
+                        roles=[],
+                        permissions=[],
+                        created_at=datetime.utcnow(),
+                        last_activity=datetime.utcnow(),
+                        expires_at=datetime.utcnow() + timedelta(hours=8),
+                        mfa_verified=False,
+                    )
+
+                    result = await auth_service.authenticate(credentials)
+                    return result.success
+            except Exception as e:
+                logger.error(f"Authentication failed for user {user_index}: {e}")
+                return False
+
+        # Measure performance
+        start_time = time()
+
+        # Run concurrent authentications
+        tasks = [authenticate_user(i) for i in range(concurrent_users_count)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        end_time = time()
+        total_time = end_time - start_time
+
+        # Verify results
+        successful_auths = sum(1 for r in results if r is True)
+        failed_auths = len(results) - successful_auths
+
+        # Performance assertions
+        avg_time_per_auth = total_time / concurrent_users_count
+
+        logger.info(
+            f"Concurrent auth test: {successful_auths}/{concurrent_users_count} successful, "
+            f"avg time: {avg_time_per_auth:.3f}s, total time: {total_time:.3f}s"
+        )
+
+        # Assert performance and correctness
+        assert successful_auths >= concurrent_users_count * 0.8  # At least 80% success rate
+        assert avg_time_per_auth < 1.0  # Less than 1 second per auth on average
+        assert total_time < 10.0  # Total time should be reasonable
+
+    @pytest.mark.asyncio
+    async def test_session_cleanup_on_expiry(
+        self,
+        db_session: AsyncSession,
+        redis_client: redis.Redis,
+        test_settings,
+        expired_session_data,
+        valid_session_data,
+    ):
         """Test automatic cleanup of expired sessions."""
-        # Test session expiration handling
-        pass
+        # Create authentication service
+        security_config = SecurityConfig()
+        auth_service = AuthenticationService(db_session, redis_client, security_config)
+
+        # Create expired session in Redis
+        expired_session_key = f"session:{expired_session_data['session_id']}"
+        await redis_client.hset(expired_session_key, mapping=expired_session_data)
+
+        # Create valid session in Redis
+        valid_session_key = f"session:{valid_session_data['session_id']}"
+        await redis_client.hset(valid_session_key, mapping=valid_session_data)
+        await redis_client.expire(valid_session_key, 28800)  # 8 hours
+
+        # Test expired session retrieval (should return None or handle expiry)
+        expired_session = await auth_service.session_manager.get_session(
+            expired_session_data['session_id']
+        )
+
+        # Expired session should be None or marked as expired
+        assert expired_session is None or expired_session.expires_at < datetime.utcnow()
+
+        # Test valid session retrieval
+        valid_session = await auth_service.session_manager.get_session(
+            valid_session_data['session_id']
+        )
+
+        # Valid session should exist and not be expired
+        assert valid_session is not None
+        assert valid_session.expires_at > datetime.utcnow()
+
+        # Test session cleanup functionality
+        # This would normally be done by a background task
+        cleanup_count = 0
+
+        # Simulate cleanup process
+        all_session_keys = await redis_client.keys("session:*")
+        for session_key in all_session_keys:
+            session_data = await redis_client.hgetall(session_key)
+            if session_data:
+                expires_at_str = session_data.get('expires_at')
+                if expires_at_str:
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at_str)
+                        if expires_at < datetime.utcnow():
+                            await redis_client.delete(session_key)
+                            cleanup_count += 1
+                    except ValueError:
+                        # Invalid date format, clean it up
+                        await redis_client.delete(session_key)
+                        cleanup_count += 1
+
+        # Verify cleanup occurred
+        assert cleanup_count >= 1  # At least the expired session should be cleaned
+
+        # Verify expired session is gone
+        expired_exists = await redis_client.exists(expired_session_key)
+        assert expired_exists == 0
+
+        # Verify valid session still exists
+        valid_exists = await redis_client.exists(valid_session_key)
+        assert valid_exists == 1
+
+
+@pytest.mark.integration
+@pytest.mark.performance
+class TestAuthenticationPerformance:
+    """Performance and stress tests for authentication service."""
+
+    @pytest.mark.asyncio
+    async def test_token_verification_performance(
+        self,
+        auth_service: AuthenticationService,
+        test_user: User,
+        performance_thresholds: dict,
+    ):
+        """Test JWT token verification performance."""
+        import time
+
+        # Create test token
+        token_data = {
+            "sub": test_user.id,
+            "username": test_user.username,
+            "session_id": str(uuid4()),
+            "roles": ["viewer"],
+            "permissions": ["cameras:read"],
+        }
+        token = auth_service.jwt_manager.create_access_token(token_data)
+
+        # Performance test: verify token multiple times
+        iterations = 100
+        start_time = time.time()
+
+        for _ in range(iterations):
+            payload = auth_service.jwt_manager.verify_token(token)
+            assert payload["sub"] == test_user.id
+
+        end_time = time.time()
+        avg_time = (end_time - start_time) / iterations
+
+        # Assert performance threshold
+        assert avg_time < performance_thresholds["token_verify_max_time"]
+        logger.info(f"Token verification avg time: {avg_time:.4f}s")
+
+    @pytest.mark.asyncio
+    @pytest.mark.slow
+    async def test_memory_usage_during_stress(
+        self,
+        auth_service: AuthenticationService,
+        stress_test_users: list[User],
+        performance_thresholds: dict,
+    ):
+        """Test memory usage during authentication stress test."""
+        import gc
+        import os
+
+        import psutil
+
+        # Get initial memory usage
+        process = psutil.Process(os.getpid())
+        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+
+        # Perform stress test
+        tasks = []
+        for i, user in enumerate(stress_test_users):
+            credentials = UserCredentials(
+                username=user.username,
+                password=f"stresspass{i}",
+                ip_address=f"192.168.1.{i % 255}"
+            )
+
+            # Mock authentication for performance testing
+            with (
+                patch.object(
+                    auth_service, "_get_user_by_username", return_value=user
+                ),
+                patch.object(
+                    auth_service.brute_force_protection,
+                    "is_blocked",
+                    return_value=False,
+                ),
+                patch.object(
+                    auth_service, "_create_user_session"
+                ) as mock_session,
+            ):
+                from its_camera_ai.services.auth_service import SessionInfo
+
+                mock_session.return_value = SessionInfo(
+                    session_id=f"stress_session_{i}",
+                    user_id=user.id,
+                    username=user.username,
+                    roles=[],
+                    permissions=[],
+                    created_at=datetime.utcnow(),
+                    last_activity=datetime.utcnow(),
+                    expires_at=datetime.utcnow() + timedelta(hours=8),
+                    mfa_verified=False,
+                )
+
+                tasks.append(auth_service.authenticate(credentials))
+
+        # Execute all authentications concurrently
+        import asyncio
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Force garbage collection
+        gc.collect()
+
+        # Get final memory usage
+        final_memory = process.memory_info().rss / 1024 / 1024  # MB
+        memory_growth = final_memory - initial_memory
+
+        logger.info(f"Memory usage: {initial_memory:.2f}MB -> {final_memory:.2f}MB (growth: {memory_growth:.2f}MB)")
+
+        # Assert memory growth is within acceptable limits
+        assert memory_growth < performance_thresholds["memory_growth_mb"]
+
+        # Verify results
+        successful_auths = sum(1 for r in results if hasattr(r, 'success') and r.success)
+        success_rate = successful_auths / len(results)
+
+        assert success_rate >= performance_thresholds["concurrent_success_rate"]
+
+
+@pytest.mark.integration
+class TestAuthenticationEdgeCases:
+    """Test edge cases and error scenarios for authentication service."""
+
+    @pytest.mark.asyncio
+    async def test_authentication_with_database_connection_failure(
+        self,
+        redis_client: redis.Redis,
+        test_settings,
+    ):
+        """Test authentication behavior when database connection fails."""
+        # Create a mock session that raises database errors
+        mock_session = AsyncMock(spec=AsyncSession)
+        mock_session.execute.side_effect = Exception("Database connection failed")
+
+        security_config = SecurityConfig()
+        auth_service = AuthenticationService(mock_session, redis_client, security_config)
+
+        credentials = UserCredentials(
+            username="testuser",
+            password="password123",
+            ip_address="192.168.1.1"
+        )
+
+        # Authentication should handle database errors gracefully
+        result = await auth_service.authenticate(credentials)
+
+        assert result.success is False
+        assert "error" in result.error_message.lower() or "failed" in result.error_message.lower()
+
+    @pytest.mark.asyncio
+    async def test_authentication_with_redis_connection_failure(
+        self,
+        db_session: AsyncSession,
+        test_settings,
+    ):
+        """Test authentication behavior when Redis connection fails."""
+        # Create a mock Redis client that raises connection errors
+        mock_redis = AsyncMock(spec=redis.Redis)
+        mock_redis.exists.side_effect = redis.ConnectionError("Redis connection failed")
+        mock_redis.incr.side_effect = redis.ConnectionError("Redis connection failed")
+
+        security_config = SecurityConfig()
+        auth_service = AuthenticationService(db_session, mock_redis, security_config)
+
+        credentials = UserCredentials(
+            username="testuser",
+            password="password123",
+            ip_address="192.168.1.1"
+        )
+
+        # Authentication should handle Redis errors gracefully
+        # The service should still work but without brute force protection
+        result = await auth_service.authenticate(credentials)
+
+        # The result depends on implementation - it might succeed or fail gracefully
+        # At minimum, it should not crash
+        assert isinstance(result.success, bool)
+
+    @pytest.mark.asyncio
+    async def test_session_cleanup_with_corrupted_data(
+        self,
+        db_session: AsyncSession,
+        redis_client: redis.Redis,
+        test_settings,
+    ):
+        """Test session cleanup with corrupted Redis data."""
+        auth_service = AuthenticationService(
+            db_session, redis_client, SecurityConfig()
+        )
+
+        # Add corrupted session data to Redis
+        corrupted_sessions = [
+            ("session:corrupt1", {"invalid": "data"}),
+            ("session:corrupt2", {"expires_at": "invalid-date-format"}),
+            ("session:corrupt3", {"expires_at": ""}),  # Empty expiry
+            ("session:corrupt4", {}),  # Empty session
+        ]
+
+        for session_key, session_data in corrupted_sessions:
+            await redis_client.hset(session_key, mapping=session_data)
+
+        # Session cleanup should handle corrupted data gracefully
+        cleanup_count = 0
+        all_session_keys = await redis_client.keys("session:*")
+
+        for session_key in all_session_keys:
+            try:
+                session_data = await redis_client.hgetall(session_key)
+                if not session_data or not session_data.get('expires_at'):
+                    await redis_client.delete(session_key)
+                    cleanup_count += 1
+                else:
+                    expires_at_str = session_data.get('expires_at')
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at_str)
+                        # This is just a test - normally you'd check if expired
+                    except (ValueError, TypeError):
+                        # Invalid date format, clean it up
+                        await redis_client.delete(session_key)
+                        cleanup_count += 1
+            except Exception as e:
+                logger.warning(f"Error processing session {session_key}: {e}")
+                await redis_client.delete(session_key)
+                cleanup_count += 1
+
+        # All corrupted sessions should be cleaned up
+        assert cleanup_count == len(corrupted_sessions)
+
+    @pytest.mark.asyncio
+    async def test_malformed_jwt_tokens(
+        self,
+        auth_service: AuthenticationService,
+    ):
+        """Test handling of malformed JWT tokens."""
+        malformed_tokens = [
+            "invalid.token.format",
+            "not-a-jwt-at-all",
+            "",  # Empty token
+            "header.payload",  # Missing signature
+            "too.many.parts.in.this.token",
+            "valid.header.eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.invalid-signature",
+        ]
+
+        for token in malformed_tokens:
+            with pytest.raises(AuthenticationError, match="Invalid token"):
+                auth_service.jwt_manager.verify_token(token)
+
+    @pytest.mark.asyncio
+    async def test_token_tampering_detection(
+        self,
+        auth_service: AuthenticationService,
+        test_user: User,
+    ):
+        """Test detection of tampered JWT tokens."""
+        # Create valid token
+        token_data = {
+            "sub": test_user.id,
+            "username": test_user.username,
+            "roles": ["viewer"],
+        }
+        valid_token = auth_service.jwt_manager.create_access_token(token_data)
+
+        # Verify the valid token works
+        payload = auth_service.jwt_manager.verify_token(valid_token)
+        assert payload["sub"] == test_user.id
+
+        # Tamper with the token
+        parts = valid_token.split(".")
+
+        # Modify the payload (should fail signature verification)
+        import base64
+        import json
+
+        # Decode payload
+        payload_bytes = base64.urlsafe_b64decode(parts[1] + "====")  # Add padding
+        payload_dict = json.loads(payload_bytes)
+
+        # Modify the payload
+        payload_dict["sub"] = "different-user-id"
+        payload_dict["roles"] = ["admin"]  # Escalate privileges
+
+        # Re-encode payload
+        new_payload_bytes = json.dumps(payload_dict).encode()
+        new_payload_b64 = base64.urlsafe_b64encode(new_payload_bytes).decode().rstrip("=")
+
+        # Create tampered token
+        tampered_token = f"{parts[0]}.{new_payload_b64}.{parts[2]}"
+
+        # Tampered token should be rejected
+        with pytest.raises(AuthenticationError, match="Invalid token"):
+            auth_service.jwt_manager.verify_token(tampered_token)
 
 
 if __name__ == "__main__":

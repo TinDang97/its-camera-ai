@@ -30,11 +30,16 @@ dependencies = [
     "asyncio-mqtt>=0.16.2",
     "aioredis>=2.0.1",
     "httpx>=0.28.1",
+    "aiosmtplib>=3.0.0",
     # gRPC & Protocol Buffers
     "grpcio>=1.68.1",
     "grpcio-tools>=1.68.1",
     "protobuf>=5.29.5",
     "grpcio-status>=1.68.1",
+    # WebRTC Support
+    "aiortc>=1.6.0",
+    "aioice>=0.9.0",
+    "pyav>=12.3.0",
     # Computer Vision & ML
     "torch>=2.8.0",
     "torchvision>=0.23.0",
@@ -60,6 +65,9 @@ dependencies = [
     "cryptography>=42.0.0",
     "PyJWT>=2.8.0",
     "bcrypt>=4.1.0",
+    "pyotp>=2.9.0",
+    "qrcode>=8.0.1",
+    "jinja2>=3.1.4",
     "requests>=2.31.0",
     "pyyaml>=6.0.1",
     # Configuration & Environment
@@ -87,6 +95,16 @@ dependencies = [
     "dependency-injector>=4.48.1",
     "alembic>=1.16.4",
     "psycopg2-binary>=2.9.10",
+    # HTTP Client & Docker
+    "aiohttp>=3.10.0",
+    "docker>=7.1.0",
+    # AWS Services
+    "boto3>=1.35.0",
+    "botocore>=1.35.0",
+    # Data Science & Visualization
+    "scikit-learn>=1.5.2",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.9.0",
 ]
 
 [dependency-groups]
@@ -121,6 +139,14 @@ dev = [
     "types-pyyaml>=6.0.12.20250809",
     "types-protobuf>=6.30.2.20250809",
     "grpc-stubs>=1.53.0.6",
+    # Additional type stubs
+    "types-python-jose>=3.3.4.20240106",
+    "types-psutil>=6.1.0.20250809",
+    "types-qrcode>=8.0.0.20241213",
+    "types-docker>=7.1.0.20250809",
+    "types-boto3>=1.0.2",
+    "types-aiofiles>=24.1.0.20240626",
+    "types-requests>=2.31.0.20250809",
 ]
 
 ml = [
@@ -248,6 +274,12 @@ exclude = [
     "build",
     "dist",
     "migrations",
+    "tests",
+    "scripts",
+    "reports",
+    "alembic",
+    ".ruff_cache",
+    ".serena",
 ]
 
 [tool.ruff.lint]

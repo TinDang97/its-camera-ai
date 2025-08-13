@@ -11,12 +11,12 @@ Provides comprehensive authentication endpoints:
 - Security audit endpoints
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis.asyncio as redis
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.config import get_settings
@@ -52,8 +52,8 @@ class LoginRequest(BaseModel):
     mfa_code: str | None = Field(None, min_length=6, max_length=8)
     remember_me: bool = Field(default=False)
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "username": "john.doe",
                 "password": "SecurePass123!",
@@ -61,6 +61,7 @@ class LoginRequest(BaseModel):
                 "remember_me": False,
             }
         }
+    }
 
 
 class LoginResponse(BaseModel):
@@ -76,8 +77,8 @@ class LoginResponse(BaseModel):
     mfa_required: bool = False
     mfa_methods: list[str] = []
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "success": True,
                 "message": "Login successful",
@@ -103,7 +104,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=12, max_length=128)
     full_name: str | None = Field(None, max_length=100)
 
-    @validator("password")
+    @field_validator("password")
+    @classmethod
     def validate_password(cls, v):
         """Validate password strength."""
         from ...services.auth_service import PasswordPolicy
@@ -115,8 +117,8 @@ class RegisterRequest(BaseModel):
             )
         return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "username": "john.doe",
                 "email": "john@example.com",
@@ -133,8 +135,8 @@ class RegisterResponse(BaseModel):
     message: str
     user_id: str | None = None
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "success": True,
                 "message": "User registered successfully",
@@ -148,8 +150,8 @@ class RefreshTokenRequest(BaseModel):
 
     refresh_token: str
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {"refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."}
         }
 
@@ -160,7 +162,8 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=12, max_length=128)
 
-    @validator("new_password")
+    @field_validator("new_password")
+    @classmethod
     def validate_new_password(cls, v):
         """Validate new password strength."""
         from ...services.auth_service import PasswordPolicy
@@ -172,8 +175,8 @@ class ChangePasswordRequest(BaseModel):
             )
         return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "current_password": "OldPassword123!",
                 "new_password": "NewSecureP@ssw0rd2024!",
@@ -186,8 +189,8 @@ class MFASetupRequest(BaseModel):
 
     method: MFAMethod = Field(default=MFAMethod.TOTP)
 
-    class Config:
-        schema_extra = {"example": {"method": "totp"}}
+    model_config = {
+        "json_schema_extra": {"example": {"method": "totp"}}
 
 
 class MFAVerifyRequest(BaseModel):
@@ -196,8 +199,8 @@ class MFAVerifyRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=8)
     method: MFAMethod = Field(default=MFAMethod.TOTP)
 
-    class Config:
-        schema_extra = {"example": {"code": "123456", "method": "totp"}}
+    model_config = {
+        "json_schema_extra": {"example": {"code": "123456", "method": "totp"}}
 
 
 class UserProfileResponse(BaseModel):
@@ -215,8 +218,8 @@ class UserProfileResponse(BaseModel):
     last_login: datetime | None
     created_at: datetime
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "username": "john.doe",
@@ -453,7 +456,39 @@ async def register(
             is_verified=False,  # Require email verification
         )
 
-        # TODO: Send verification email
+        # Send verification email
+        from ...services.email_service import EmailService
+        
+        settings = get_settings()
+        email_service = EmailService(settings)
+        
+        # Generate verification token
+        import secrets
+        verification_token = secrets.token_urlsafe(32)
+        
+        # Store verification token in cache
+        cache_key = f"email_verification:{verification_token}"
+        verification_data = {
+            "user_id": user.id,
+            "email": request.email,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Store for 24 hours
+        redis_client = redis.from_url(settings.redis.url)
+        cache = CacheService(redis_client)
+        await cache.set_json(cache_key, verification_data, 24 * 3600)
+        
+        # Send email in background
+        import asyncio
+        asyncio.create_task(
+            email_service.send_verification_email(
+                to_email=request.email,
+                username=request.username,
+                verification_token=verification_token,
+                full_name=request.full_name
+            )
+        )
 
         return RegisterResponse(
             success=True,

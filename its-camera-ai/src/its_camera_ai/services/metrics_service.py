@@ -4,7 +4,7 @@ Provides time-series data management, aggregation, and monitoring
 integration for performance tracking and alerting.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, delete, func, select
@@ -50,7 +50,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
             if timestamp:
                 metric_dict["timestamp"] = timestamp
             else:
-                metric_dict["timestamp"] = datetime.utcnow()
+                metric_dict["timestamp"] = datetime.now(UTC)
 
             metric = SystemMetrics(**metric_dict)
 
@@ -89,7 +89,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         """
         try:
             successful_count = 0
-            current_time = datetime.utcnow()
+            current_time = datetime.now(UTC)
 
             for metric_data in metrics_data:
                 try:
@@ -196,7 +196,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
             List of recent metrics
         """
         try:
-            start_time = datetime.utcnow() - timedelta(minutes=minutes)
+            start_time = datetime.now(UTC) - timedelta(minutes=minutes)
 
             query = (
                 select(SystemMetrics)
@@ -364,7 +364,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
             Total number of metrics deleted
         """
         try:
-            cutoff_time = datetime.utcnow() - timedelta(days=retention_days)
+            cutoff_time = datetime.now(UTC) - timedelta(days=retention_days)
             total_deleted = 0
 
             while True:
@@ -421,7 +421,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         try:
             if not target_hour:
                 # Default to previous complete hour
-                now = datetime.utcnow()
+                now = datetime.now(UTC)
                 target_hour = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
 
             period_start = target_hour
@@ -530,7 +530,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         """
         try:
             # Get metrics from last 5 minutes for health check
-            recent_time = datetime.utcnow() - timedelta(minutes=5)
+            recent_time = datetime.now(UTC) - timedelta(minutes=5)
 
             # Performance metrics
             performance_query = (
@@ -613,7 +613,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
             return {
                 "health_score": round(health_score, 1),
                 "health_status": health_status,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(UTC),
                 "metrics_summary": {
                     "avg_processing_time_ms": round(avg_processing_time or 0, 2),
                     "max_processing_time_ms": round(max_processing_time or 0, 2),

@@ -4,7 +4,7 @@ Tracks system performance, resource utilization, and operational
 metrics for monitoring and alerting integration.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -304,7 +304,7 @@ class SystemMetrics(BaseModel):
             value=value,
             source_type="camera",
             source_id=source_id,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
 
         if labels:
@@ -338,7 +338,7 @@ class SystemMetrics(BaseModel):
             value=value,
             source_type="system",
             hostname=hostname,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
 
     def __repr__(self) -> str:

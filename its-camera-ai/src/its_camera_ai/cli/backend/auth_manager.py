@@ -4,7 +4,7 @@ Provides authentication and authorization capabilities for CLI operations,
 integrating with the existing security framework.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -110,9 +110,9 @@ class CLIAuthManager:
         to_encode = data.copy()
 
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(
+            expire = datetime.now(UTC) + timedelta(
                 minutes=self.access_token_expire_minutes
             )
 
@@ -258,7 +258,7 @@ class CLIAuthManager:
         }
 
         access_token = self.create_access_token(token_data)
-        expires_at = datetime.utcnow() + timedelta(
+        expires_at = datetime.now(UTC) + timedelta(
             minutes=self.access_token_expire_minutes
         )
 
@@ -295,7 +295,7 @@ class CLIAuthManager:
             return None
 
         # Check if token is still valid
-        if self._token_expires_at and datetime.utcnow() > self._token_expires_at:
+        if self._token_expires_at and datetime.now(UTC) > self._token_expires_at:
             logger.warning("Access token expired")
             await self.logout()
             return None
@@ -321,7 +321,7 @@ class CLIAuthManager:
             }
 
             new_token = self.create_access_token(token_data)
-            new_expires_at = datetime.utcnow() + timedelta(
+            new_expires_at = datetime.now(UTC) + timedelta(
                 minutes=self.access_token_expire_minutes
             )
 
@@ -542,7 +542,7 @@ class CLIAuthManager:
             self._current_user is not None
             and self._access_token is not None
             and self._token_expires_at is not None
-            and datetime.utcnow() < self._token_expires_at
+            and datetime.now(UTC) < self._token_expires_at
         )
 
     def get_auth_headers(self) -> dict[str, str]:
@@ -566,8 +566,8 @@ class CLIAuthManager:
             "current_user": self._current_user,
             "token_expires_at": self._token_expires_at.isoformat() if self._token_expires_at else None,
             "time_until_expiry": (
-                (self._token_expires_at - datetime.utcnow()).total_seconds()
-                if self._token_expires_at and self._token_expires_at > datetime.utcnow()
+                (self._token_expires_at - datetime.now(UTC)).total_seconds()
+                if self._token_expires_at and self._token_expires_at > datetime.now(UTC)
                 else 0
             )
         }

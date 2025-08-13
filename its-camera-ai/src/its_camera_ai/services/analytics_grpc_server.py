@@ -6,7 +6,7 @@ handling detection processing, traffic metrics, violations, and anomalies.
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 import grpc
 
@@ -124,7 +124,7 @@ class AnalyticsServiceImpl(analytics_grpc.AnalyticsServiceServicer):
                     severity=violation.get("severity", ""),
                     camera_id=violation.get("camera_id", ""),
                     detection_time=violation.get(
-                        "detection_time", datetime.utcnow()
+                        "detection_time", datetime.now(UTC)
                     ).timestamp(),
                     measured_value=violation.get("measured_value", 0.0),
                     threshold_value=violation.get("threshold_value", 0.0),
@@ -141,7 +141,7 @@ class AnalyticsServiceImpl(analytics_grpc.AnalyticsServiceServicer):
                     anomaly_type="traffic_pattern",
                     severity=anomaly.get("severity", ""),
                     camera_id=request.camera_id,
-                    detection_time=datetime.utcnow().timestamp(),
+                    detection_time=datetime.now(UTC).timestamp(),
                     score=anomaly.get("anomaly_score", 0.0),
                     confidence=anomaly.get("confidence", 0.0),
                     probable_cause=anomaly.get("probable_cause", ""),

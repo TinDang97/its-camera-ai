@@ -21,7 +21,7 @@ Security Features:
 
 import secrets
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -114,8 +114,7 @@ class Permission(BaseModel):
     action: str
     description: str | None = None
 
-    class Config:
-        frozen = True
+    model_config = {"frozen": True}
 
 
 # ============================
@@ -393,12 +392,12 @@ class JWTManager:
     ) -> str:
         """Create JWT access token."""
         to_encode = data.copy()
-        expire = datetime.utcnow() + (expires_delta or self.access_token_expire)
+        expire = datetime.now(UTC) + (expires_delta or self.access_token_expire)
 
         to_encode.update(
             {
                 "exp": expire,
-                "iat": datetime.utcnow(),
+                "iat": datetime.now(UTC),
                 "type": "access",
                 "jti": str(uuid4()),  # JWT ID for blacklisting
             }
@@ -415,12 +414,12 @@ class JWTManager:
     def create_refresh_token(self, data: dict[str, Any]) -> str:
         """Create JWT refresh token."""
         to_encode = data.copy()
-        expire = datetime.utcnow() + self.refresh_token_expire
+        expire = datetime.now(UTC) + self.refresh_token_expire
 
         to_encode.update(
             {
                 "exp": expire,
-                "iat": datetime.utcnow(),
+                "iat": datetime.now(UTC),
                 "type": "refresh",
                 "jti": str(uuid4()),
             }
@@ -519,7 +518,7 @@ class SessionManager:
         """Update session last activity timestamp."""
         session_key = f"session:{session_id}"
         await self.redis.hset(
-            session_key, "last_activity", datetime.utcnow().isoformat()
+            session_key, "last_activity", datetime.now(UTC).isoformat()
         )
         await self.redis.expire(session_key, self.session_ttl)
 
@@ -553,7 +552,7 @@ class SessionManager:
 
         for session_id in session_ids:
             session = await self.get_session(session_id)
-            if not session or session.expires_at < datetime.utcnow():
+            if not session or session.expires_at < datetime.now(UTC):
                 await self.delete_session(session_id)
 
 
@@ -717,7 +716,7 @@ class AuthenticationService:
             username=credentials.username,
             ip_address=credentials.ip_address,
             success=False,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             risk_score=30,
         )
 
@@ -821,7 +820,7 @@ class AuthenticationService:
             await self.brute_force_protection.record_success(identifier)
 
             # Update user last login
-            await self.user_service.update_by_id(user.id, last_login=datetime.utcnow())
+            await self.user_service.update_by_id(user.id, last_login=datetime.now(UTC))
 
             # Log successful authentication
             audit_event.event_type = SecurityEventType.LOGIN_SUCCESS
@@ -878,7 +877,7 @@ class AuthenticationService:
             # Check if session is still valid
             if session_id:
                 session = await self.session_manager.get_session(session_id)
-                if not session or session.expires_at < datetime.utcnow():
+                if not session or session.expires_at < datetime.now(UTC):
                     return TokenValidation(valid=False, error_message="Session expired")
 
                 # Update session activity
@@ -926,7 +925,7 @@ class AuthenticationService:
             # Verify session is still active
             if session_id:
                 session = await self.session_manager.get_session(session_id)
-                if not session or session.expires_at < datetime.utcnow():
+                if not session or session.expires_at < datetime.now(UTC):
                     raise AuthenticationError("Session expired")
 
             # Get updated user data
@@ -1005,7 +1004,7 @@ class AuthenticationService:
                     user_id=user_id,
                     username=user.username,
                     success=True,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     details={"method": method.value},
                 )
                 await self.audit_logger.log_event(audit_event)
@@ -1055,7 +1054,7 @@ class AuthenticationService:
                 else SecurityEventType.MFA_FAILED,
                 user_id=user_id,
                 success=is_valid,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 risk_score=20 if is_valid else 60,
                 details={"method": method.value},
             )
@@ -1109,7 +1108,7 @@ class AuthenticationService:
                 resource=resource,
                 action=action,
                 success=has_permission,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 risk_score=10 if has_permission else 40,
                 details={"required_permission": required_permission},
             )
@@ -1149,7 +1148,7 @@ class AuthenticationService:
                     username=session.username,
                     session_id=session_id,
                     success=True,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     risk_score=5,
                 )
                 await self.audit_logger.log_event(audit_event)
@@ -1208,7 +1207,7 @@ class AuthenticationService:
                 user_id=user_id,
                 username=user.username,
                 success=True,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 risk_score=20,
             )
             await self.audit_logger.log_event(audit_event)
@@ -1285,7 +1284,7 @@ class AuthenticationService:
     ) -> SessionInfo:
         """Create new user session."""
         session_id = str(uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         expires_at = now + timedelta(seconds=self.session_manager.session_ttl)
 
         session_info = SessionInfo(
