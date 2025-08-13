@@ -4,6 +4,16 @@ Provides SQLAlchemy 2.0 models for high-throughput camera registry,
 frame metadata processing, detection results, and system monitoring.
 """
 
+from .analytics import (
+    AlertNotification,
+    AnomalyType,
+    CongestionLevel,
+    RuleViolation,
+    TrafficAnomaly,
+    TrafficMetrics,
+    VehicleTrajectory,
+    ViolationType,
+)
 from .base import BaseModel
 from .camera import Camera, CameraSettings, CameraStatus, CameraType, StreamProtocol
 from .database import DatabaseManager, create_database_engine, get_database_session
@@ -18,30 +28,34 @@ __all__ = [
     "DatabaseManager",
     "create_database_engine",
     "get_database_session",
-
     # User management
     "User",
-
     # Camera registry
     "Camera",
     "CameraSettings",
     "CameraStatus",
     "CameraType",
     "StreamProtocol",
-
     # Frame processing
     "FrameMetadata",
     "FrameQuality",
     "ProcessingStatus",
-
     # Detection results
     "DetectionResult",
     "DetectionClass",
     "VehicleType",
-
     # System monitoring
     "SystemMetrics",
     "AggregatedMetrics",
     "MetricType",
     "MetricUnit",
+    # Analytics models
+    "TrafficMetrics",
+    "RuleViolation",
+    "VehicleTrajectory",
+    "TrafficAnomaly",
+    "AlertNotification",
+    "ViolationType",
+    "AnomalyType",
+    "CongestionLevel",
 ]

@@ -107,21 +107,138 @@ class MonitoringConfig(BaseModel):
 class SecurityConfig(BaseModel):
     """Security configuration settings."""
 
+    # JWT Settings
     secret_key: str = Field(
         default="change-me-in-production",
         min_length=32,
         description="Secret key for JWT tokens",
     )
-    algorithm: str = Field(default="HS256", description="JWT algorithm")
-    access_token_expire_minutes: int = Field(
-        default=30, description="Access token expiration time in minutes"
+    algorithm: str = Field(
+        default="RS256", description="JWT algorithm (RS256 recommended for production)"
     )
+    access_token_expire_minutes: int = Field(
+        default=15, description="Access token expiration time in minutes"
+    )
+    refresh_token_expire_days: int = Field(
+        default=7, description="Refresh token expiration time in days"
+    )
+
+    # CORS Settings
     enable_cors: bool = Field(default=True, description="Enable CORS")
     allowed_origins: list[str] = Field(
         default=["*"], description="Allowed CORS origins"
     )
+
+    # Rate Limiting
     rate_limit_per_minute: int = Field(
         default=100, description="Rate limit per minute per IP"
+    )
+    auth_rate_limit_per_minute: int = Field(
+        default=5, description="Authentication rate limit per minute per IP"
+    )
+
+    # Password Policy
+    password_min_length: int = Field(default=12, description="Minimum password length")
+    password_require_uppercase: bool = Field(
+        default=True, description="Require uppercase in password"
+    )
+    password_require_lowercase: bool = Field(
+        default=True, description="Require lowercase in password"
+    )
+    password_require_digits: bool = Field(
+        default=True, description="Require digits in password"
+    )
+    password_require_special: bool = Field(
+        default=True, description="Require special characters in password"
+    )
+    password_history_size: int = Field(
+        default=12, description="Number of previous passwords to remember"
+    )
+
+    # MFA Settings
+    mfa_issuer_name: str = Field(
+        default="ITS Camera AI", description="MFA issuer name for TOTP"
+    )
+    mfa_totp_window: int = Field(
+        default=1, description="TOTP time window (30s intervals)"
+    )
+    mfa_backup_codes_count: int = Field(
+        default=8, description="Number of MFA backup codes to generate"
+    )
+
+    # Session Management
+    session_timeout_minutes: int = Field(
+        default=480, description="Session timeout in minutes (8 hours)"
+    )
+    max_sessions_per_user: int = Field(
+        default=5, description="Maximum concurrent sessions per user"
+    )
+    session_sliding_expiration: bool = Field(
+        default=True, description="Enable sliding session expiration"
+    )
+
+    # Brute Force Protection
+    max_login_attempts: int = Field(
+        default=5, description="Maximum failed login attempts"
+    )
+    lockout_duration_minutes: int = Field(
+        default=15, description="Account lockout duration in minutes"
+    )
+    attempt_window_minutes: int = Field(
+        default=5, description="Time window for counting failed attempts"
+    )
+
+    # Security Headers
+    enable_security_headers: bool = Field(
+        default=True, description="Enable security headers"
+    )
+    hsts_max_age: int = Field(
+        default=31536000, description="HSTS max age in seconds (1 year)"
+    )
+
+    # Audit Logging
+    enable_audit_logging: bool = Field(
+        default=True, description="Enable security audit logging"
+    )
+    audit_log_retention_days: int = Field(
+        default=365, description="Audit log retention in days"
+    )
+    high_risk_alert_threshold: int = Field(
+        default=80, description="Risk score threshold for alerts"
+    )
+
+    # Encryption
+    enable_at_rest_encryption: bool = Field(
+        default=True, description="Enable data encryption at rest"
+    )
+    enable_in_transit_encryption: bool = Field(
+        default=True, description="Enable data encryption in transit"
+    )
+    encryption_key_rotation_days: int = Field(
+        default=90, description="Encryption key rotation period"
+    )
+
+    # OAuth2/OIDC
+    enable_oauth2: bool = Field(
+        default=False, description="Enable OAuth2/OIDC integration"
+    )
+    oauth2_provider_url: str | None = Field(
+        default=None, description="OAuth2 provider URL"
+    )
+    oauth2_client_id: str | None = Field(default=None, description="OAuth2 client ID")
+    oauth2_client_secret: str | None = Field(
+        default=None, description="OAuth2 client secret"
+    )
+
+    # Zero Trust
+    enable_zero_trust: bool = Field(
+        default=True, description="Enable zero trust architecture"
+    )
+    require_device_verification: bool = Field(
+        default=False, description="Require device verification"
+    )
+    enable_continuous_verification: bool = Field(
+        default=True, description="Enable continuous security verification"
     )
 
 
@@ -276,6 +393,21 @@ class Settings(BaseSettings):
         if v.lower() not in valid_envs:
             raise ValueError(f"Invalid environment: {v}. Must be one of {valid_envs}")
         return v.lower()
+
+    def get_security_headers(self) -> dict[str, str]:
+        """Get security headers configuration."""
+        if not self.security.enable_security_headers:
+            return {}
+
+        return {
+            "Strict-Transport-Security": f"max-age={self.security.hsts_max_age}; includeSubDomains",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-XSS-Protection": "1; mode=block",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+            "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+        }
 
     def create_directories(self) -> None:
         """Create necessary directories if they don't exist."""

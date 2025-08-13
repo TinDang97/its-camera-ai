@@ -55,21 +55,22 @@ def test_frame():
 @pytest.fixture
 def test_frames():
     """Generate batch of test frames."""
-    return [
-        np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
-        for _ in range(4)
-    ]
+    return [np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8) for _ in range(4)]
 
 
 @pytest.fixture
 def mock_yolo_model():
     """Mock YOLO model for testing."""
     mock_model = Mock()
-    mock_model.predict = Mock(return_value=[Mock(
-        boxes=np.array([[100, 100, 200, 200], [300, 150, 400, 250]]),
-        conf=np.array([0.85, 0.92]),
-        cls=np.array([2, 7]),  # car, truck
-    )])
+    mock_model.predict = Mock(
+        return_value=[
+            Mock(
+                boxes=np.array([[100, 100, 200, 200], [300, 150, 400, 250]]),
+                conf=np.array([0.85, 0.92]),
+                cls=np.array([2, 7]),  # car, truck
+            )
+        ]
+    )
     return mock_model
 
 
@@ -141,17 +142,17 @@ class TestFrameProcessor:
         assert processed_frame.dtype == np.uint8
 
         # Check metadata
-        assert 'original_shape' in metadata
-        assert 'scale_factor' in metadata
-        assert 'padding' in metadata
-        assert 'quality_score' in metadata
-        assert 'processing_time_ms' in metadata
+        assert "original_shape" in metadata
+        assert "scale_factor" in metadata
+        assert "padding" in metadata
+        assert "quality_score" in metadata
+        assert "processing_time_ms" in metadata
 
         # Quality score should be between 0 and 1
-        assert 0 <= metadata['quality_score'] <= 1
+        assert 0 <= metadata["quality_score"] <= 1
 
         # Processing time should be positive
-        assert metadata['processing_time_ms'] > 0
+        assert metadata["processing_time_ms"] > 0
 
     def test_batch_preprocessing(self, test_config, test_frames):
         """Test batch preprocessing."""
@@ -165,8 +166,8 @@ class TestFrameProcessor:
 
         # All metadata should have required fields
         for metadata in metadata_list:
-            assert 'quality_score' in metadata
-            assert 'processing_time_ms' in metadata
+            assert "quality_score" in metadata
+            assert "processing_time_ms" in metadata
 
     def test_invalid_frame_handling(self, test_config):
         """Test handling of invalid frames."""
@@ -187,12 +188,12 @@ class TestFrameProcessor:
         # Test high quality frame (good contrast, brightness)
         high_quality_frame = np.random.randint(100, 200, (480, 640, 3), dtype=np.uint8)
         _, metadata = processor.preprocess_frame(high_quality_frame)
-        high_quality_score = metadata['quality_score']
+        high_quality_score = metadata["quality_score"]
 
         # Test low quality frame (very dark)
         low_quality_frame = np.full((480, 640, 3), 10, dtype=np.uint8)
         _, metadata = processor.preprocess_frame(low_quality_frame)
-        low_quality_score = metadata['quality_score']
+        low_quality_score = metadata["quality_score"]
 
         # High quality should score better than low quality
         assert high_quality_score > low_quality_score
@@ -207,10 +208,10 @@ class TestFrameProcessor:
 
         stats = processor.get_preprocessing_stats()
 
-        assert 'avg_processing_time_ms' in stats
-        assert 'p95_processing_time_ms' in stats
-        assert 'avg_quality_score' in stats
-        assert stats['avg_processing_time_ms'] > 0
+        assert "avg_processing_time_ms" in stats
+        assert "p95_processing_time_ms" in stats
+        assert "avg_quality_score" in stats
+        assert stats["avg_processing_time_ms"] > 0
 
 
 class TestPostProcessor:
@@ -224,7 +225,7 @@ class TestPostProcessor:
         assert len(processor.vehicle_class_mapping) > 0
         assert VehicleClass.CAR in processor.vehicle_class_mapping.values()
 
-    @patch('its_camera_ai.ml.inference_optimizer.DetectionResult')
+    @patch("its_camera_ai.ml.inference_optimizer.DetectionResult")
     def test_detection_processing(self, mock_detection_result, test_config):
         """Test detection result processing."""
         processor = PostProcessor(test_config)
@@ -247,12 +248,14 @@ class TestPostProcessor:
         mock_result.gpu_memory_used_mb = 1024.0
 
         preprocessing_metadata = {
-            'scale_factor': 1.0,
-            'padding': (0, 0),
-            'quality_score': 0.9,
+            "scale_factor": 1.0,
+            "padding": (0, 0),
+            "quality_score": 0.9,
         }
 
-        vision_result = processor.process_detections(mock_result, preprocessing_metadata)
+        vision_result = processor.process_detections(
+            mock_result, preprocessing_metadata
+        )
 
         # Check result structure
         assert isinstance(vision_result, VisionResult)
@@ -271,12 +274,16 @@ class TestPostProcessor:
         processor = PostProcessor(test_config)
 
         # Mix of vehicle and non-vehicle classes
-        boxes = np.array([[100, 100, 200, 200], [300, 150, 400, 250], [500, 200, 600, 300]])
+        boxes = np.array(
+            [[100, 100, 200, 200], [300, 150, 400, 250], [500, 200, 600, 300]]
+        )
         scores = np.array([0.85, 0.92, 0.78])
         classes = np.array([2, 15, 7])  # car, person, truck
 
-        filtered_boxes, filtered_scores, filtered_classes = processor._filter_vehicle_detections(
-            Mock(boxes=boxes, scores=scores, classes=classes)
+        filtered_boxes, filtered_scores, filtered_classes = (
+            processor._filter_vehicle_detections(
+                Mock(boxes=boxes, scores=scores, classes=classes)
+            )
         )
 
         # Should only keep vehicle classes (2=car, 7=truck)
@@ -290,16 +297,18 @@ class TestPostProcessor:
         processor = PostProcessor(test_config)
 
         # Create detections with various sizes
-        boxes = np.array([
-            [100, 100, 110, 105],  # Very small (10x5)
-            [200, 200, 280, 250],  # Normal car size (80x50)
-            [300, 300, 600, 600],  # Very large (300x300)
-        ])
+        boxes = np.array(
+            [
+                [100, 100, 110, 105],  # Very small (10x5)
+                [200, 200, 280, 250],  # Normal car size (80x50)
+                [300, 300, 600, 600],  # Very large (300x300)
+            ]
+        )
         scores = np.array([0.85, 0.92, 0.78])
         classes = np.array([2, 2, 2])  # All cars
 
-        filtered_boxes, filtered_scores, filtered_classes = processor._apply_size_filtering(
-            (boxes, scores, classes)
+        filtered_boxes, filtered_scores, filtered_classes = (
+            processor._apply_size_filtering((boxes, scores, classes))
         )
 
         # Very small and very large should be filtered out
@@ -313,8 +322,8 @@ class TestPostProcessor:
         # Test with scaling and padding
         box = np.array([100, 100, 200, 200])  # Processed coordinates
         metadata = {
-            'scale_factor': 0.5,  # Image was scaled down
-            'padding': (50, 25),  # Padding added
+            "scale_factor": 0.5,  # Image was scaled down
+            "padding": (50, 25),  # Padding added
         }
 
         original_box = processor._convert_to_original_coordinates(box, metadata)
@@ -326,8 +335,7 @@ class TestPostProcessor:
         expected_y2 = (200 - 25) / 0.5
 
         np.testing.assert_array_almost_equal(
-            original_box,
-            [expected_x1, expected_y1, expected_x2, expected_y2]
+            original_box, [expected_x1, expected_y1, expected_x2, expected_y2]
         )
 
 
@@ -406,20 +414,20 @@ class TestPerformanceMonitor:
         metrics = monitor.get_performance_metrics()
 
         # Check structure
-        assert 'latency' in metrics
-        assert 'quality' in metrics
-        assert 'system' in metrics
+        assert "latency" in metrics
+        assert "quality" in metrics
+        assert "system" in metrics
 
         # Check latency metrics
-        latency = metrics['latency']
-        assert 'avg_ms' in latency
-        assert 'p95_ms' in latency
-        assert 'target_ms' in latency
-        assert 'meets_target' in latency
+        latency = metrics["latency"]
+        assert "avg_ms" in latency
+        assert "p95_ms" in latency
+        assert "target_ms" in latency
+        assert "meets_target" in latency
 
         # Values should be reasonable
-        assert latency['avg_ms'] > 50  # Should be > base latency
-        assert latency['p95_ms'] >= latency['avg_ms']
+        assert latency["avg_ms"] > 50  # Should be > base latency
+        assert latency["p95_ms"] >= latency["avg_ms"]
 
     def test_alert_generation(self, test_config):
         """Test performance alert generation."""
@@ -454,17 +462,17 @@ class TestPerformanceMonitor:
         # Should generate alerts for high latency and low quality
         assert len(alerts) > 0
 
-        alert_types = [alert['type'] for alert in alerts]
-        assert any('latency' in alert_type for alert_type in alert_types)
+        alert_types = [alert["type"] for alert in alerts]
+        assert any("latency" in alert_type for alert_type in alert_types)
 
         # Check alert structure
         for alert in alerts:
-            assert 'type' in alert
-            assert 'severity' in alert
-            assert 'message' in alert
-            assert 'current_value' in alert
-            assert 'threshold' in alert
-            assert 'timestamp' in alert
+            assert "type" in alert
+            assert "severity" in alert
+            assert "message" in alert
+            assert "current_value" in alert
+            assert "threshold" in alert
+            assert "timestamp" in alert
 
 
 @pytest.mark.asyncio
@@ -482,7 +490,7 @@ class TestCoreVisionEngine:
         assert isinstance(engine.post_processor, PostProcessor)
         assert isinstance(engine.performance_monitor, PerformanceMonitor)
 
-    @patch('its_camera_ai.ml.core_vision_engine.ModelManager')
+    @patch("its_camera_ai.ml.core_vision_engine.ModelManager")
     async def test_engine_lifecycle(self, mock_model_manager, test_config):
         """Test engine initialization and cleanup lifecycle."""
         # Mock the model manager
@@ -501,8 +509,10 @@ class TestCoreVisionEngine:
         assert not engine.initialized
         mock_manager_instance.cleanup.assert_called_once()
 
-    @patch('its_camera_ai.ml.core_vision_engine.ModelManager')
-    async def test_single_frame_processing(self, mock_model_manager, test_config, test_frame):
+    @patch("its_camera_ai.ml.core_vision_engine.ModelManager")
+    async def test_single_frame_processing(
+        self, mock_model_manager, test_config, test_frame
+    ):
         """Test single frame processing."""
         # Mock model manager
         mock_manager_instance = AsyncMock()
@@ -510,6 +520,7 @@ class TestCoreVisionEngine:
 
         # Mock detection result
         from its_camera_ai.ml.inference_optimizer import DetectionResult
+
         mock_detection = DetectionResult(
             boxes=np.array([[100, 100, 200, 200]]),
             scores=np.array([0.85]),
@@ -540,7 +551,7 @@ class TestCoreVisionEngine:
         assert result.detection_count >= 0
         assert result.total_processing_time_ms > 0
 
-    @patch('its_camera_ai.ml.core_vision_engine.ModelManager')
+    @patch("its_camera_ai.ml.core_vision_engine.ModelManager")
     async def test_batch_processing(self, mock_model_manager, test_config, test_frames):
         """Test batch frame processing."""
         # Mock model manager
@@ -549,6 +560,7 @@ class TestCoreVisionEngine:
 
         # Mock batch detection results
         from its_camera_ai.ml.inference_optimizer import DetectionResult
+
         mock_detections = []
         for i in range(len(test_frames)):
             mock_detection = DetectionResult(
@@ -557,7 +569,7 @@ class TestCoreVisionEngine:
                 classes=np.array([2]),
                 class_names=["car"],
                 frame_id=f"batch_frame_{i}",
-                camera_id=f"camera_{i%2}",
+                camera_id=f"camera_{i % 2}",
                 timestamp=time.time(),
                 inference_time_ms=45.0,
                 preprocessing_time_ms=8.0,
@@ -575,14 +587,14 @@ class TestCoreVisionEngine:
         engine.initialized = True
 
         frame_ids = [f"batch_frame_{i}" for i in range(len(test_frames))]
-        camera_ids = [f"camera_{i%2}" for i in range(len(test_frames))]
+        camera_ids = [f"camera_{i % 2}" for i in range(len(test_frames))]
 
         results = await engine.process_batch(test_frames, frame_ids, camera_ids)
 
         assert len(results) == len(test_frames)
         for i, result in enumerate(results):
             assert result.frame_id == f"batch_frame_{i}"
-            assert result.camera_id == f"camera_{i%2}"
+            assert result.camera_id == f"camera_{i % 2}"
 
     async def test_error_handling(self, test_config, test_frame):
         """Test error handling in processing."""
@@ -599,7 +611,7 @@ class TestCoreVisionEngine:
         # Test with invalid config
         invalid_config = VisionConfig(
             target_latency_ms=-10,  # Invalid
-            target_accuracy=1.5,    # Invalid
+            target_accuracy=1.5,  # Invalid
             max_concurrent_cameras=0,  # Invalid
         )
         engine.config = invalid_config
@@ -607,7 +619,7 @@ class TestCoreVisionEngine:
         with pytest.raises(ValueError):
             engine._validate_configuration()
 
-    @patch('its_camera_ai.ml.core_vision_engine.ModelManager')
+    @patch("its_camera_ai.ml.core_vision_engine.ModelManager")
     async def test_performance_metrics(self, mock_model_manager, test_config):
         """Test performance metrics collection."""
         mock_manager_instance = AsyncMock()
@@ -621,17 +633,17 @@ class TestCoreVisionEngine:
 
         metrics = engine.get_performance_metrics()
 
-        assert 'engine' in metrics
-        assert 'model' in metrics
-        assert 'preprocessing' in metrics
-        assert 'performance' in metrics
+        assert "engine" in metrics
+        assert "model" in metrics
+        assert "preprocessing" in metrics
+        assert "performance" in metrics
 
-        engine_metrics = metrics['engine']
-        assert 'initialized' in engine_metrics
-        assert 'uptime_seconds' in engine_metrics
-        assert 'total_frames_processed' in engine_metrics
+        engine_metrics = metrics["engine"]
+        assert "initialized" in engine_metrics
+        assert "uptime_seconds" in engine_metrics
+        assert "total_frames_processed" in engine_metrics
 
-    @patch('its_camera_ai.ml.core_vision_engine.ModelManager')
+    @patch("its_camera_ai.ml.core_vision_engine.ModelManager")
     async def test_health_status(self, mock_model_manager, test_config):
         """Test health status reporting."""
         mock_manager_instance = AsyncMock()
@@ -665,24 +677,24 @@ class TestCoreVisionEngine:
 
         health = engine.get_health_status()
 
-        assert 'health_score' in health
-        assert 'status' in health
-        assert 'alerts' in health
-        assert 'requirements_met' in health
-        assert 'timestamp' in health
+        assert "health_score" in health
+        assert "status" in health
+        assert "alerts" in health
+        assert "requirements_met" in health
+        assert "timestamp" in health
 
         # Health score should be between 0 and 1
-        assert 0 <= health['health_score'] <= 1
+        assert 0 <= health["health_score"] <= 1
 
         # Status should be valid
-        assert health['status'] in ['healthy', 'warning', 'critical']
+        assert health["status"] in ["healthy", "warning", "critical"]
 
 
 @pytest.mark.asyncio
 class TestBenchmarking:
     """Test benchmarking and performance validation."""
 
-    @patch('its_camera_ai.ml.core_vision_engine.CoreVisionEngine')
+    @patch("its_camera_ai.ml.core_vision_engine.CoreVisionEngine")
     async def test_benchmark_engine(self, mock_engine_class):
         """Test engine benchmarking."""
         # Mock engine instance
@@ -717,24 +729,24 @@ class TestBenchmarking:
         }
         mock_engine.get_health_status.return_value = {
             "health_score": 0.95,
-            "status": "healthy"
+            "status": "healthy",
         }
 
         config = VisionConfig()
         results = await benchmark_engine(config, num_frames=20, frame_size=(640, 640))
 
-        assert 'configuration' in results
-        assert 'single_frame_performance' in results
-        assert 'batch_performance' in results
-        assert 'system_metrics' in results
-        assert 'health_status' in results
-        assert 'benchmark_summary' in results
+        assert "configuration" in results
+        assert "single_frame_performance" in results
+        assert "batch_performance" in results
+        assert "system_metrics" in results
+        assert "health_status" in results
+        assert "benchmark_summary" in results
 
         # Check performance metrics
-        single_perf = results['single_frame_performance']
-        assert 'avg_latency_ms' in single_perf
-        assert 'throughput_fps' in single_perf
-        assert 'meets_latency_target' in single_perf
+        single_perf = results["single_frame_performance"]
+        assert "avg_latency_ms" in single_perf
+        assert "throughput_fps" in single_perf
+        assert "meets_latency_target" in single_perf
 
     def test_config_factory_functions(self):
         """Test configuration factory functions."""
@@ -761,7 +773,7 @@ class TestIntegration:
     """Integration tests for the complete vision pipeline."""
 
     @pytest.mark.slow
-    @patch('torch.cuda.is_available', return_value=False)  # Force CPU mode
+    @patch("torch.cuda.is_available", return_value=False)  # Force CPU mode
     async def test_end_to_end_processing(self, mock_cuda, test_config):
         """Test complete end-to-end processing pipeline."""
         # Use CPU-friendly configuration
@@ -777,13 +789,15 @@ class TestIntegration:
         engine = CoreVisionEngine(cpu_config)
 
         # This would require actual model files, so we'll mock the critical parts
-        with patch.object(engine.model_manager, 'initialize') as mock_init, \
-             patch.object(engine.model_manager, 'predict_single') as mock_predict:
-
+        with (
+            patch.object(engine.model_manager, "initialize") as mock_init,
+            patch.object(engine.model_manager, "predict_single") as mock_predict,
+        ):
             mock_init.return_value = None
 
             # Mock prediction result
             from its_camera_ai.ml.inference_optimizer import DetectionResult
+
             mock_detection = DetectionResult(
                 boxes=np.array([[100, 100, 200, 200], [300, 150, 400, 250]]),
                 scores=np.array([0.85, 0.92]),
@@ -809,7 +823,9 @@ class TestIntegration:
             test_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
 
             # Process frame
-            result = await engine.process_frame(test_frame, "integration_test", "integration_camera")
+            result = await engine.process_frame(
+                test_frame, "integration_test", "integration_camera"
+            )
 
             # Validate results
             assert isinstance(result, VisionResult)
@@ -830,13 +846,16 @@ class TestIntegration:
 class TestPerformanceBenchmarks:
     """Performance benchmark tests."""
 
-    @pytest.mark.parametrize("model_type,expected_max_latency", [
-        (ModelType.NANO, 80),    # Very fast
-        (ModelType.SMALL, 120),  # Balanced
-    ])
+    @pytest.mark.parametrize(
+        "model_type,expected_max_latency",
+        [
+            (ModelType.NANO, 80),  # Very fast
+            (ModelType.SMALL, 120),  # Balanced
+        ],
+    )
     async def test_latency_benchmarks(self, model_type, expected_max_latency):
         """Benchmark latency for different model types."""
-        config = VisionConfig(
+        VisionConfig(
             model_type=model_type,
             batch_size=1,  # Single frame for latency test
             device_ids=[],  # CPU for consistent testing
@@ -852,14 +871,17 @@ class TestPerformanceBenchmarks:
         measured_latency = expected_latency[model_type]
         assert measured_latency <= expected_max_latency
 
-    @pytest.mark.parametrize("batch_size,expected_min_throughput", [
-        (1, 15),   # Single frame
-        (4, 45),   # Small batch
-        (8, 75),   # Large batch
-    ])
+    @pytest.mark.parametrize(
+        "batch_size,expected_min_throughput",
+        [
+            (1, 15),  # Single frame
+            (4, 45),  # Small batch
+            (8, 75),  # Large batch
+        ],
+    )
     async def test_throughput_benchmarks(self, batch_size, expected_min_throughput):
         """Benchmark throughput for different batch sizes."""
-        config = VisionConfig(
+        VisionConfig(
             model_type=ModelType.NANO,
             batch_size=batch_size,
             device_ids=[],

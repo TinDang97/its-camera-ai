@@ -6,6 +6,15 @@ queries, batch operations, and high-throughput processing capabilities.
 
 # Import safe services first
 from .auth import AuthService
+from .auth_service import (
+    AuthenticationService,
+    BruteForceProtection,
+    JWTManager,
+    PasswordPolicy,
+    SecurityAuditLogger,
+    SessionManager,
+    create_auth_service,
+)
 from .base_service import BaseAsyncService
 from .cache import CacheService
 from .metrics_service import MetricsService
@@ -31,6 +40,38 @@ except ImportError as e:
     import warnings
 
     warnings.warn(f"Streaming service imports failed: {e}", stacklevel=2)
+
+# Import analytics service components (safe imports)
+try:
+    from .alert_service import (
+        AlertRuleEngine,
+        AlertService,
+        EmailNotificationChannel,
+        NotificationChannel,
+        WebhookNotificationChannel,
+    )
+    from .analytics_container import (
+        AnalyticsContainer,
+        AnalyticsContext,
+        AnalyticsPerformanceMonitor,
+        BatchAnalyticsProcessor,
+        create_analytics_container,
+        get_alert_service,
+        get_analytics_service,
+        get_analytics_session,
+        initialize_analytics_container,
+    )
+    from .analytics_service import (
+        AnalyticsService,
+        AnomalyDetector,
+        RuleEngine,
+        SpeedCalculator,
+    )
+except ImportError as e:
+    # Handle import errors gracefully during development
+    import warnings
+
+    warnings.warn(f"Analytics service imports failed: {e}", stacklevel=2)
 
 
 # Delayed imports to avoid circular dependencies
@@ -68,6 +109,13 @@ __all__ = [
     "BaseAsyncService",
     # Authentication and caching
     "AuthService",
+    "AuthenticationService",
+    "BruteForceProtection",
+    "JWTManager",
+    "PasswordPolicy",
+    "SecurityAuditLogger",
+    "SessionManager",
+    "create_auth_service",
     "CacheService",
     # Database services (lazy-loaded)
     "CameraService",
@@ -86,4 +134,23 @@ __all__ = [
     "StreamingContainer",
     "create_streaming_container",
     "initialize_streaming_container",
+    # Analytics services
+    "AnalyticsService",
+    "AlertService",
+    "RuleEngine",
+    "SpeedCalculator",
+    "AnomalyDetector",
+    "AlertRuleEngine",
+    "NotificationChannel",
+    "EmailNotificationChannel",
+    "WebhookNotificationChannel",
+    "AnalyticsContainer",
+    "AnalyticsContext",
+    "AnalyticsPerformanceMonitor",
+    "BatchAnalyticsProcessor",
+    "create_analytics_container",
+    "initialize_analytics_container",
+    "get_analytics_service",
+    "get_alert_service",
+    "get_analytics_session",
 ]

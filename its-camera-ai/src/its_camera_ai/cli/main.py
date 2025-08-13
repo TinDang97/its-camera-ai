@@ -28,6 +28,9 @@ from . import (
 
 # Import CLI command groups
 from .commands import (
+    auth as auth_commands,
+)
+from .commands import (
     config as config_commands,
 )
 from .commands import (
@@ -64,18 +67,31 @@ app = typer.Typer(
 )
 
 # Add command groups
-app.add_typer(service_commands.app, name="service", help="🚀 Service management commands")
+app.add_typer(
+    service_commands.app, name="service", help="🚀 Service management commands"
+)
+app.add_typer(
+    auth_commands.app, name="auth", help="🔐 Authentication and user management"
+)
 app.add_typer(ml_commands.app, name="ml", help="🤖 ML operations and model management")
 app.add_typer(data_commands.app, name="data", help="📊 Data pipeline control")
-app.add_typer(security_commands.app, name="security", help="🔒 Security and authentication")
-app.add_typer(monitoring_commands.app, name="monitor", help="📈 System monitoring and health")
+app.add_typer(
+    security_commands.app, name="security", help="🔒 Security and authentication"
+)
+app.add_typer(
+    monitoring_commands.app, name="monitor", help="📈 System monitoring and health"
+)
 app.add_typer(config_commands.app, name="config", help="⚙️ Configuration management")
 
 # Add enhanced CLI features
 app.add_typer(completion.app, name="completion", help="🔧 Shell completion management")
-app.add_typer(dashboard.app, name="dashboard", help="📊 Interactive dashboard and monitoring")
+app.add_typer(
+    dashboard.app, name="dashboard", help="📊 Interactive dashboard and monitoring"
+)
 app.add_typer(history.app, name="history", help="📚 Command history and favorites")
-app.add_typer(interactive.app, name="interactive", help="🧙‍♂️ Interactive mode and wizards")
+app.add_typer(
+    interactive.app, name="interactive", help="🧙‍♂️ Interactive mode and wizards"
+)
 app.add_typer(cli_logging.app, name="logging", help="📋 Advanced logging and debugging")
 app.add_typer(plugins.app, name="plugin", help="🔌 Plugin management system")
 app.add_typer(profiles.app, name="profile", help="🎭 Configuration profile management")
@@ -102,10 +118,10 @@ def main(
     ),
 ) -> None:
     """🎥 ITS Camera AI - Intelligent Traffic Monitoring System.
-    
+
     A comprehensive AI-powered camera traffic monitoring system for real-time
     traffic analytics and vehicle tracking using computer vision.
-    
+
     Key Features:
     • Real-time video processing with YOLO11 models
     • Edge-cloud hybrid architecture
@@ -130,6 +146,7 @@ def main(
         # Load plugins automatically
         try:
             from .plugins import plugin_manager
+
             plugin_count = plugin_manager.load_all_plugins()
             if plugin_count > 0:
                 print_info(f"Loaded {plugin_count} plugins")
@@ -157,11 +174,13 @@ def info() -> None:
     info_text.append("Platform: ", style="bold")
     info_text.append(f"{sys.platform}\n", style="magenta")
 
-    console.print(Panel(
-        info_text,
-        title="🎥 ITS Camera AI System Information",
-        border_style="blue",
-    ))
+    console.print(
+        Panel(
+            info_text,
+            title="🎥 ITS Camera AI System Information",
+            border_style="blue",
+        )
+    )
 
 
 @app.command()
@@ -169,13 +188,16 @@ def version() -> None:
     """📦 Show version information."""
     from ..__init__ import __version__
 
-    console.print(f"[bold green]ITS Camera AI[/bold green] version [bold]{__version__}[/bold]")
+    console.print(
+        f"[bold green]ITS Camera AI[/bold green] version [bold]{__version__}[/bold]"
+    )
 
 
 @app.command()
 def status() -> None:
     """⚡ Show quick system status overview."""
     from .dashboard import QuickStatusChecker
+
     QuickStatusChecker.show_compact_status()
 
 
@@ -187,6 +209,7 @@ def setup() -> None:
     # Install shell completion
     try:
         from .completion import detect_shell, install_completion
+
         shell = detect_shell()
         if shell:
             print_info(f"Installing shell completion for {shell}...")
@@ -200,12 +223,15 @@ def setup() -> None:
     # Set up default profile
     try:
         from .profiles import profile_manager
+
         current = profile_manager.get_current_profile()
         print_success(f"Using profile: {current}")
     except Exception as e:
         print_warning(f"Profile setup failed: {e}")
 
-    print_success("Setup completed! Try 'its-camera-ai interactive start' for guided workflows.")
+    print_success(
+        "Setup completed! Try 'its-camera-ai interactive start' for guided workflows."
+    )
 
 
 if __name__ == "__main__":

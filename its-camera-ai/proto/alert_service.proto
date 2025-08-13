@@ -1,0 +1,195 @@
+syntax = "proto3";
+
+package its_camera_ai.alert;
+
+option py_generic_services = true;
+
+// Alert service for violation and anomaly notifications
+service AlertService {
+  // Process violation alert
+  rpc ProcessViolationAlert(ViolationAlertRequest) returns (AlertResponse);
+  
+  // Process anomaly alert
+  rpc ProcessAnomalyAlert(AnomalyAlertRequest) returns (AlertResponse);
+  
+  // Send custom alert
+  rpc SendAlert(CustomAlertRequest) returns (AlertResponse);
+  
+  // Get alert statistics
+  rpc GetAlertStatistics(AlertStatisticsRequest) returns (AlertStatisticsResponse);
+  
+  // Retry failed alerts
+  rpc RetryFailedAlerts(RetryRequest) returns (RetryResponse);
+  
+  // Acknowledge alert
+  rpc AcknowledgeAlert(AcknowledgeRequest) returns (AcknowledgeResponse);
+  
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Request messages
+message ViolationAlertRequest {
+  ViolationInfo violation = 1;
+  repeated string recipients = 2;
+  repeated string notification_channels = 3;
+  string correlation_id = 4;
+}
+
+message ViolationInfo {
+  string id = 1;
+  string violation_type = 2;
+  string severity = 3;
+  string camera_id = 4;
+  double detection_time = 5;
+  double measured_value = 6;
+  double threshold_value = 7;
+  string license_plate = 8;
+  double confidence = 9;
+  string vehicle_type = 10;
+  string zone_id = 11;
+}
+
+message AnomalyAlertRequest {
+  AnomalyInfo anomaly = 1;
+  repeated string recipients = 2;
+  repeated string notification_channels = 3;
+  string correlation_id = 4;
+}
+
+message AnomalyInfo {
+  string id = 1;
+  string anomaly_type = 2;
+  string severity = 3;
+  string camera_id = 4;
+  double detection_time = 5;
+  double score = 6;
+  double confidence = 7;
+  string probable_cause = 8;
+  double baseline_value = 9;
+  double observed_value = 10;
+  double deviation_magnitude = 11;
+  string zone_id = 12;
+  string detection_method = 13;
+}
+
+message CustomAlertRequest {
+  string alert_type = 1;
+  string subject = 2;
+  string message = 3;
+  string priority = 4;
+  repeated string recipients = 5;
+  repeated string notification_channels = 6;
+  map<string, string> metadata = 7;
+  string correlation_id = 8;
+}
+
+message AlertStatisticsRequest {
+  double start_time = 1;
+  double end_time = 2;
+  string camera_id = 3;
+}
+
+message RetryRequest {
+  int32 max_retries = 1;
+}
+
+message AcknowledgeRequest {
+  string notification_id = 1;
+  string acknowledged_by = 2;
+  string response_action = 3;
+  string notes = 4;
+}
+
+message HealthCheckRequest {
+  string service_name = 1;
+}
+
+// Response messages
+message AlertResponse {
+  bool success = 1;
+  repeated DeliveryResult delivery_results = 2;
+  string message = 3;
+  string correlation_id = 4;
+}
+
+message DeliveryResult {
+  string notification_id = 1;
+  string alert_type = 2;
+  string channel = 3;
+  string recipient = 4;
+  string status = 5;
+  string error = 6;
+  double delivered_at = 7;
+  map<string, string> details = 8;
+}
+
+message AlertStatisticsResponse {
+  bool success = 1;
+  StatisticsSummary summary = 2;
+  map<string, ChannelStats> by_channel = 3;
+  map<string, PriorityStats> by_priority = 4;
+  TimeRange time_range = 5;
+  string message = 6;
+}
+
+message StatisticsSummary {
+  int32 total_alerts = 1;
+  int32 delivered_alerts = 2;
+  int32 failed_alerts = 3;
+  int32 pending_alerts = 4;
+  double delivery_rate = 5;
+}
+
+message ChannelStats {
+  int32 total = 1;
+  int32 delivered = 2;
+  int32 failed = 3;
+  int32 pending = 4;
+}
+
+message PriorityStats {
+  int32 total = 1;
+  int32 delivered = 2;
+  int32 failed = 3;
+  int32 pending = 4;
+}
+
+message TimeRange {
+  double start = 1;
+  double end = 2;
+}
+
+message RetryResponse {
+  bool success = 1;
+  int32 total_retried = 2;
+  int32 successful_retries = 3;
+  int32 failed_retries = 4;
+  repeated RetryResult results = 5;
+  string message = 6;
+}
+
+message RetryResult {
+  string notification_id = 1;
+  string status = 2;
+  int32 attempts = 3;
+  string error = 4;
+}
+
+message AcknowledgeResponse {
+  bool success = 1;
+  string notification_id = 2;
+  string message = 3;
+}
+
+message HealthCheckResponse {
+  enum Status {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+    SERVICE_UNKNOWN = 3;
+  }
+  Status status = 1;
+  string message = 2;
+  double response_time_ms = 3;
+}

@@ -1,0 +1,210 @@
+syntax = "proto3";
+
+package its_camera_ai.analytics;
+
+import "processed_frame.proto";
+
+option py_generic_services = true;
+
+// Analytics service for traffic data processing and insights
+service AnalyticsService {
+  // Process detections and generate analytics
+  rpc ProcessDetections(DetectionRequest) returns (AnalyticsResponse);
+  
+  // Get traffic metrics for time range
+  rpc GetTrafficMetrics(TrafficMetricsRequest) returns (TrafficMetricsResponse);
+  
+  // Get active violations
+  rpc GetActiveViolations(ViolationsRequest) returns (ViolationsResponse);
+  
+  // Get traffic anomalies
+  rpc GetTrafficAnomalies(AnomaliesRequest) returns (AnomaliesResponse);
+  
+  // Generate analytics report
+  rpc GenerateReport(ReportRequest) returns (ReportResponse);
+  
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Request messages
+message DetectionRequest {
+  repeated Detection detections = 1;
+  string camera_id = 2;
+  double frame_timestamp = 3;
+  string correlation_id = 4;
+}
+
+message Detection {
+  string id = 1;
+  string class_name = 2;
+  double confidence = 3;
+  BoundingBox bbox = 4;
+  string track_id = 5;
+  string vehicle_type = 6;
+  string license_plate = 7;
+  double velocity_magnitude = 8;
+  bool is_vehicle = 9;
+  double detection_quality = 10;
+  string detection_zone = 11;
+}
+
+message BoundingBox {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+  double center_x = 5;
+  double center_y = 6;
+}
+
+message TrafficMetricsRequest {
+  string camera_id = 1;
+  double start_time = 2;
+  double end_time = 3;
+  string aggregation_period = 4;
+}
+
+message ViolationsRequest {
+  string camera_id = 1;
+  string violation_type = 2;
+  string severity = 3;
+  int32 limit = 4;
+}
+
+message AnomaliesRequest {
+  string camera_id = 1;
+  string anomaly_type = 2;
+  double min_score = 3;
+  double start_time = 4;
+  double end_time = 5;
+  int32 limit = 6;
+}
+
+message ReportRequest {
+  repeated string camera_ids = 1;
+  double start_time = 2;
+  double end_time = 3;
+  string report_type = 4;
+}
+
+message HealthCheckRequest {
+  string service_name = 1;
+}
+
+// Response messages
+message AnalyticsResponse {
+  bool success = 1;
+  string camera_id = 2;
+  double timestamp = 3;
+  int32 vehicle_count = 4;
+  TrafficMetrics metrics = 5;
+  repeated Violation violations = 6;
+  repeated Anomaly anomalies = 7;
+  double processing_time_ms = 8;
+  string correlation_id = 9;
+  string message = 10;
+}
+
+message TrafficMetrics {
+  int32 total_vehicles = 1;
+  map<string, int32> vehicle_breakdown = 2;
+  double average_speed = 3;
+  double traffic_density = 4;
+  string congestion_level = 5;
+  double timestamp = 6;
+}
+
+message Violation {
+  string id = 1;
+  string violation_type = 2;
+  string severity = 3;
+  string camera_id = 4;
+  double detection_time = 5;
+  double measured_value = 6;
+  double threshold_value = 7;
+  string license_plate = 8;
+  double confidence = 9;
+  string track_id = 10;
+}
+
+message Anomaly {
+  string id = 1;
+  string anomaly_type = 2;
+  string severity = 3;
+  string camera_id = 4;
+  double detection_time = 5;
+  double score = 6;
+  double confidence = 7;
+  string probable_cause = 8;
+  string status = 9;
+}
+
+message TrafficMetricsResponse {
+  bool success = 1;
+  repeated TrafficMetricsPeriod metrics = 2;
+  string message = 3;
+}
+
+message TrafficMetricsPeriod {
+  string camera_id = 1;
+  double period_start = 2;
+  double period_end = 3;
+  int32 total_vehicles = 4;
+  map<string, int32> vehicle_breakdown = 5;
+  map<string, int32> directional_flow = 6;
+  double avg_speed = 7;
+  double occupancy_rate = 8;
+  string congestion_level = 9;
+  double queue_length = 10;
+}
+
+message ViolationsResponse {
+  bool success = 1;
+  repeated Violation violations = 2;
+  int32 total_count = 3;
+  string message = 4;
+}
+
+message AnomaliesResponse {
+  bool success = 1;
+  repeated Anomaly anomalies = 2;
+  int32 total_count = 3;
+  string message = 4;
+}
+
+message ReportResponse {
+  bool success = 1;
+  string report_id = 2;
+  string report_type = 3;
+  ReportSummary summary = 4;
+  repeated CameraSummary camera_summaries = 5;
+  double generated_at = 6;
+  string message = 7;
+}
+
+message ReportSummary {
+  int32 total_vehicles = 1;
+  int32 total_violations = 2;
+  int32 total_anomalies = 3;
+  int32 cameras_analyzed = 4;
+}
+
+message CameraSummary {
+  string camera_id = 1;
+  int32 total_vehicles = 2;
+  int32 violations = 3;
+  int32 anomalies = 4;
+}
+
+message HealthCheckResponse {
+  enum Status {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+    SERVICE_UNKNOWN = 3;
+  }
+  Status status = 1;
+  string message = 2;
+  double response_time_ms = 3;
+}
