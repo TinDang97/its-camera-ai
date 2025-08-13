@@ -10,7 +10,6 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.logging import get_logger
 from ...models.user import User
@@ -19,7 +18,6 @@ from ..dependencies import (
     RateLimiter,
     get_cache_service,
     get_current_user,
-    get_db,
     rate_limit_normal,
     require_permissions,
 )
@@ -164,7 +162,6 @@ async def generate_mock_incidents(
 async def get_real_time_analytics(
     camera_id: str,
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
     cache: CacheService = Depends(get_cache_service),
 ) -> AnalyticsResponse:
     """Get real-time analytics for a camera.
@@ -172,7 +169,6 @@ async def get_real_time_analytics(
     Args:
         camera_id: Camera identifier
         current_user: Current user
-        db: Database session
         cache: Cache service
 
     Returns:
@@ -287,7 +283,6 @@ async def list_incidents(
     start_time: datetime | None = Query(None, description="Filter by start time"),
     end_time: datetime | None = Query(None, description="Filter by end time"),
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(rate_limit_normal),
 ) -> PaginatedResponse[IncidentAlert]:
@@ -303,7 +298,6 @@ async def list_incidents(
         start_time: Filter by start time
         end_time: Filter by end time
         current_user: Current user
-        db: Database session
         cache: Cache service
         _rate_limit: Rate limiting dependency
 
@@ -423,14 +417,12 @@ async def list_incidents(
 async def get_incident(
     incident_id: str,
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
 ) -> IncidentAlert:
     """Get incident by ID.
 
     Args:
         incident_id: Incident identifier
         current_user: Current user
-        db: Database session
 
     Returns:
         IncidentAlert: Incident details
@@ -465,7 +457,6 @@ async def update_incident(
     status_update: str = Query(description="New incident status"),
     notes: str | None = Query(None, description="Additional notes"),
     current_user: User = Depends(require_permissions("incidents:update")),
-    _db: AsyncSession = Depends(get_db),
     _rate_limit: None = Depends(rate_limit_normal),
 ) -> IncidentAlert:
     """Update incident status.
@@ -475,7 +466,6 @@ async def update_incident(
         status_update: New status
         notes: Additional notes
         current_user: Current user with permissions
-        db: Database session
         _rate_limit: Rate limiting dependency
 
     Returns:
@@ -520,7 +510,6 @@ async def generate_report(
     report_request: ReportRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("reports:create")),
-    _db: AsyncSession = Depends(get_db),
     _rate_limit: None = Depends(report_rate_limit),
 ) -> ReportResponse:
     """Generate analytics report.
@@ -529,7 +518,6 @@ async def generate_report(
         report_request: Report generation parameters
         background_tasks: Background task manager
         current_user: Current user with permissions
-        db: Database session
         _rate_limit: Rate limiting dependency
 
     Returns:
@@ -644,7 +632,6 @@ async def list_reports(
     status: str | None = Query(None, description="Filter by status"),
     report_type: str | None = Query(None, description="Filter by report type"),
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
 ) -> PaginatedResponse[ReportResponse]:
     """List user's reports.
 
@@ -654,7 +641,6 @@ async def list_reports(
         status: Filter by status
         report_type: Filter by report type
         current_user: Current user
-        db: Database session
 
     Returns:
         PaginatedResponse[ReportResponse]: Paginated report list
@@ -723,14 +709,12 @@ async def list_reports(
 async def get_report(
     report_id: str,
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
 ) -> ReportResponse:
     """Get report status.
 
     Args:
         report_id: Report identifier
         current_user: Current user
-        db: Database session
 
     Returns:
         ReportResponse: Report status and details
@@ -783,7 +767,6 @@ async def get_report(
 async def query_historical_data(
     query: HistoricalQuery,
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(query_rate_limit),
 ) -> PaginatedResponse[HistoricalData]:
@@ -792,7 +775,6 @@ async def query_historical_data(
     Args:
         query: Historical data query parameters
         current_user: Current user
-        db: Database session
         cache: Cache service
         _rate_limit: Rate limiting dependency
 

@@ -275,17 +275,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         return None
 
     def _check_route_permissions(
-        self, path: str, user_roles: list[str], user_permissions: list[str]
+        self, path: str, user_roles: list[str], _user_permissions: list[str]
     ) -> bool:
         """Check if user has permissions for the route."""
         # Check specific route permissions
         for route_pattern, required_roles in self.protected_routes.items():
             if route_pattern in path:
                 # Check if user has any of the required roles
-                if any(role in user_roles for role in required_roles):
-                    return True
-                # If no role match, check permissions
-                return False
+                return any(role in user_roles for role in required_roles)
 
         # For unspecified routes, any authenticated user has access
         return True

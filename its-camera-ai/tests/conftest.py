@@ -112,11 +112,44 @@ def sample_camera_data() -> dict:
     }
 
 
-# Markers for different test types
-pytest.main.add_option(
-    "--integration", action="store_true", help="Run integration tests"
-)
+# Test markers are defined in pyproject.toml
+# This ensures consistent marker definitions across the project
 
-pytest.main.add_option(
-    "--performance", action="store_true", help="Run performance tests"
-)
+def pytest_configure(config):
+    """Configure pytest markers and settings."""
+    config.addinivalue_line(
+        "markers", "integration: marks tests as integration tests"
+    )
+    config.addinivalue_line(
+        "markers", "performance: marks tests as performance tests"
+    )
+    config.addinivalue_line(
+        "markers", "gpu: marks tests that require GPU"
+    )
+    config.addinivalue_line(
+        "markers", "ml: marks tests for ML models"
+    )
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow"
+    )
+    config.addinivalue_line(
+        "markers", "e2e: marks tests as end-to-end tests"
+    )
+    config.addinivalue_line(
+        "markers", "benchmark: marks performance benchmark tests"
+    )
+
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    parser.addoption(
+        "--integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests"
+    )
+    parser.addoption(
+        "--performance",
+        action="store_true",
+        default=False,
+        help="Run performance tests"
+    )

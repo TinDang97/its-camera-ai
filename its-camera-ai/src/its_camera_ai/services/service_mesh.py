@@ -32,7 +32,7 @@ from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
 from ..core.config import Settings, get_settings
-from ..core.exceptions import ServiceMeshError
+from ..core.exceptions import CircuitBreakerError, ServiceMeshError
 from ..core.logging import get_logger
 from ..proto import streaming_service_pb2 as streaming_pb
 from ..proto import streaming_service_pb2_grpc as streaming_grpc
@@ -138,7 +138,12 @@ class CircuitBreaker:
                 self.state = CircuitBreakerState.HALF_OPEN
                 logger.info(f"Circuit breaker half-open for {self.service_name}")
             else:
-                raise ServiceMeshError(f"Circuit breaker open for {self.service_name}")
+                raise CircuitBreakerError(
+                    f"Circuit breaker open for {self.service_name}",
+                    service_name=self.service_name,
+                    state="open",
+                    failure_count=self.failure_count,
+                )
 
         self.request_count += 1
 
@@ -894,7 +899,7 @@ class ServiceOrchestrator:
     async def process_camera_frame_workflow(
         self,
         camera_id: str,
-        frame_data: Any,
+        _frame_data: Any,
         correlation_context: CorrelationContext | None = None,
     ) -> dict[str, Any]:
         """Orchestrate complete camera frame processing workflow."""

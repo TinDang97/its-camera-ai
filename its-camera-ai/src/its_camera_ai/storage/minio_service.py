@@ -755,9 +755,9 @@ class MinIOService:
     async def _upload_single_part(
         self,
         request: UploadRequest,
-        upload_id: str,
+        _upload_id: str,
         metadata: dict[str, str],
-        progress: UploadProgress
+        _progress: UploadProgress
     ) -> dict[str, Any]:
         """Upload object as single part."""
         try:
@@ -954,7 +954,7 @@ class MinIOService:
     async def download_object(
         self,
         request: DownloadRequest,
-        progress_callback: Callable[[int, int], None] | None = None
+        _progress_callback: Callable[[int, int], None] | None = None
     ) -> bytes | str:
         """Download object from MinIO storage.
 
@@ -1322,9 +1322,8 @@ class MinIOService:
                         pass  # Continue without metadata
 
                 # Filter by object types if specified
-                if request.object_types and item.object_type:
-                    if item.object_type not in request.object_types:
-                        continue
+                if request.object_types and item.object_type and item.object_type not in request.object_types:
+                    continue
 
                 items.append(item)
                 count += 1

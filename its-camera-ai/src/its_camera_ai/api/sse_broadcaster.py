@@ -60,14 +60,12 @@ class SSEConnection:
             return True
 
         # Camera ID filter
-        if "camera_ids" in self.filters:
-            if event.camera_id not in self.filters["camera_ids"]:
-                return False
+        if "camera_ids" in self.filters and event.camera_id not in self.filters["camera_ids"]:
+            return False
 
         # Event type filter
-        if "event_types" in self.filters:
-            if event.event_type not in self.filters["event_types"]:
-                return False
+        if "event_types" in self.filters and event.event_type not in self.filters["event_types"]:
+            return False
 
         # Zone filter
         if "zones" in self.filters and "zone_id" in event.data:

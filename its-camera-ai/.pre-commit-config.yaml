@@ -30,25 +30,29 @@ repos:
   #       types_or: [python, pyi]
   #       args: [--profile=black]
 
-  # MyPy - Static type checker - temporary disable
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.17.1
-  #   hooks:
-  #     - id: mypy
-  #       additional_dependencies:
-  #         - types-redis
-  #         - types-passlib
-  #         - sqlalchemy[mypy]
-  #         - pydantic
-  #         - pydantic-settings
-  #         - fastapi
-  #       exclude: ^(migrations/|tests/)
-  #       args:
-  #         [
-  #           --ignore-missing-imports,
-  #           --scripts-are-modules,
-  #           --disable-error-code=unused-ignore,
-  #         ]
+  # MyPy - Static type checker
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-redis
+          - types-passlib
+          - sqlalchemy[mypy]
+          - pydantic
+          - pydantic-settings
+          - fastapi
+          - types-pyyaml
+          - types-protobuf
+          - grpc-stubs
+        exclude: ^(migrations/|tests/|src/its_camera_ai/proto/.*_pb2.*\.py$)
+        args:
+          [
+            --ignore-missing-imports,
+            --scripts-are-modules,
+            --disable-error-code=unused-ignore,
+            --no-error-summary,
+          ]
 
   # Built-in pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -82,8 +86,10 @@ repos:
     rev: 1.8.0
     hooks:
       - id: bandit
-        args: [-r, -x, tests/, --skip, B101]
+        args: [-r, -x, tests/, --skip, B101, --severity-level, medium]
         exclude: ^tests/
+        # Fail on high/critical security issues
+        fail_fast: true
 
   # Safety - Check for known security vulnerabilities
   - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
@@ -120,16 +126,56 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
-  # Pytest hooks for testing
+  # Quality gates - local hooks
   - repo: local
     hooks:
-      - id: pytest-check
-        name: pytest-check
+      # Fast unit tests for pre-commit
+      - id: pytest-unit
+        name: pytest-unit-tests
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: false
+        args: ["--tb=short", "-x", "-q", "tests/unit/", "--maxfail=1", "-m", "not slow"]
+        stages: [pre-commit]
+      
+      # Full test suite for pre-push
+      - id: pytest-full
+        name: pytest-full-suite
         entry: pytest
         language: system
         pass_filenames: false
         always_run: true
-        args: ["--tb=short", "-x", "-q", "tests/unit/", "--maxfail=1"]
+        args: [
+          "--cov=src/its_camera_ai",
+          "--cov-fail-under=90",
+          "--tb=short",
+          "-x",
+          "--maxfail=1"
+        ]
+        stages: [pre-push]
+      
+      # Security check with fail on P0 issues
+      - id: security-check
+        name: security-p0-check
+        entry: bash
+        language: system
+        pass_filenames: false
+        always_run: true
+        args: [
+          "-c",
+          "bandit -r src/ -f json -o /tmp/bandit.json && jq '.results[] | select(.issue_severity == \"HIGH\" or .issue_severity == \"CRITICAL\")' /tmp/bandit.json | grep -q . && echo 'P0 security issues found' && exit 1 || echo 'No P0 security issues'"
+        ]
+        stages: [pre-push]
+      
+      # Code complexity check
+      - id: complexity-check
+        name: code-complexity-check
+        entry: radon
+        language: system
+        args: ["cc", "src/", "--min", "C", "--show-complexity"]
+        pass_filenames: false
+        always_run: true
         stages: [pre-push]
 
 # Global settings

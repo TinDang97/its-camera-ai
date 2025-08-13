@@ -9,10 +9,13 @@ Streaming Service implementation, ensuring it meets the performance requirements
 """
 
 import asyncio
+import contextlib
+import gc
 import time
 from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
+import psutil
 import pytest
 
 from src.its_camera_ai.data.redis_queue_manager import (
@@ -507,9 +510,12 @@ class TestStreamingServicePerformance:
         # Use higher limits for performance testing
         self.processor = StreamingDataProcessor(
             redis_client=self.mock_redis,
-            max_concurrent_streams=100,
+            max_concurrent_streams=150,  # Test beyond 100 requirement
             frame_processing_timeout=0.01,  # 10ms target
         )
+
+        # Track initial memory usage
+        self.initial_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
 
     @pytest.mark.asyncio
     @pytest.mark.performance
@@ -682,11 +688,308 @@ class TestStreamingServicePerformance:
 
         await self.processor.stop()
 
+    @pytest.mark.asyncio
+    @pytest.mark.performance
+    async def test_memory_usage_under_load(self):
+        """Test memory usage stays under 4GB requirement during high load."""
+        await self.processor.start()
+
+        # Force garbage collection to get baseline
+        gc.collect()
+        baseline_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+
+        configs = []
+        for i in range(100):  # 100 concurrent streams
+            config = CameraConfig(
+                camera_id=f"memory_test_camera_{i:03d}",
+                stream_url=f"test://stream_{i}",
+                resolution=(1280, 720),
+                fps=30,
+                protocol=StreamProtocol.HTTP,
+            )
+            configs.append(config)
+
+        with patch.object(
+            self.processor.connection_manager, "connect_camera", return_value=True
+        ):
+            # Register all cameras
+            tasks = [self.processor.register_camera(config) for config in configs]
+            registrations = await asyncio.gather(*tasks)
+
+            # Process frames for each camera
+            frame_batches = []
+            for i in range(100):  # 100 frames per camera
+                batch = []
+                for config in configs:
+                    frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
+                    batch.append((config.camera_id, frame, config))
+                frame_batches.append(batch)
+
+            # Process all frames
+            for batch in frame_batches:
+                tasks = [
+                    self.processor._process_single_frame(camera_id, frame, config)
+                    for camera_id, frame, config in batch
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Check memory usage
+            gc.collect()  # Force cleanup
+            peak_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+            memory_increase = peak_memory - baseline_memory
+
+            print("\nMemory Usage Analysis:")
+            print(f"Baseline memory: {baseline_memory:.1f} MB")
+            print(f"Peak memory: {peak_memory:.1f} MB")
+            print(f"Memory increase: {memory_increase:.1f} MB")
+
+            # Memory should stay under 4GB (4096 MB)
+            assert peak_memory < 4096, f"Memory usage {peak_memory:.1f} MB exceeds 4GB limit"
+
+            # Memory increase should be reasonable for 100 streams
+            assert memory_increase < 2048, f"Memory increase {memory_increase:.1f} MB too high"
+
+        await self.processor.stop()
+
+    @pytest.mark.asyncio
+    @pytest.mark.performance
+    @pytest.mark.benchmark
+    async def test_concurrent_stream_load(self, benchmark):
+        """Benchmark concurrent stream processing for 100+ streams."""
+        await self.processor.start()
+
+        async def process_concurrent_streams():
+            # Test with 120 concurrent streams (above requirement)
+            configs = []
+            for i in range(120):
+                config = CameraConfig(
+                    camera_id=f"load_test_camera_{i:03d}",
+                    stream_url=f"test://stream_{i}",
+                    resolution=(1280, 720),
+                    fps=30,
+                    protocol=StreamProtocol.HTTP,
+                )
+                configs.append(config)
+
+            with patch.object(
+                self.processor.connection_manager, "connect_camera", return_value=True
+            ):
+                # Register all cameras concurrently
+                start_time = time.perf_counter()
+                tasks = [self.processor.register_camera(config) for config in configs]
+                registrations = await asyncio.gather(*tasks)
+                registration_time = time.perf_counter() - start_time
+
+                # Verify all succeeded
+                successful = sum(1 for reg in registrations if reg.success)
+
+                # Process frames for all cameras simultaneously
+                frames = [
+                    np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
+                    for _ in range(120)
+                ]
+
+                frame_start_time = time.perf_counter()
+                frame_tasks = [
+                    self.processor._process_single_frame(config.camera_id, frames[i], config)
+                    for i, config in enumerate(configs)
+                ]
+                frame_results = await asyncio.gather(*frame_tasks, return_exceptions=True)
+                frame_processing_time = time.perf_counter() - frame_start_time
+
+                # Calculate metrics
+                successful_frames = sum(1 for r in frame_results if r is not None and not isinstance(r, Exception))
+                success_rate = successful_frames / len(frame_results)
+
+                return {
+                    "registration_time": registration_time,
+                    "frame_processing_time": frame_processing_time,
+                    "successful_registrations": successful,
+                    "successful_frames": successful_frames,
+                    "success_rate": success_rate,
+                    "total_streams": 120
+                }
+
+        result = await benchmark.pedantic(process_concurrent_streams, rounds=1)
+
+        print("\nConcurrent Load Test Results:")
+        print(f"Total streams: {result['total_streams']}")
+        print(f"Successful registrations: {result['successful_registrations']}")
+        print(f"Registration time: {result['registration_time']:.3f}s")
+        print(f"Frame processing time: {result['frame_processing_time']:.3f}s")
+        print(f"Success rate: {result['success_rate']*100:.1f}%")
+
+        # Performance requirements validation
+        assert result['successful_registrations'] >= 120, "Failed to register all streams"
+        assert result['success_rate'] >= 0.999, f"Success rate {result['success_rate']*100:.1f}% below 99.9%"
+        assert result['frame_processing_time'] < 2.0, f"Frame processing too slow: {result['frame_processing_time']:.3f}s"
+
+        await self.processor.stop()
+
+    @pytest.mark.asyncio
+    @pytest.mark.performance
+    async def test_latency_consistency_under_load(self):
+        """Test that latency remains consistent under varying load conditions."""
+        await self.processor.start()
+
+        config = CameraConfig(
+            camera_id="latency_test_camera",
+            stream_url="test://stream",
+            resolution=(1280, 720),
+            fps=30,
+            protocol=StreamProtocol.HTTP,
+        )
+
+        with patch.object(
+            self.processor.connection_manager, "connect_camera", return_value=True
+        ):
+            await self.processor.register_camera(config)
+
+            # Test latency at different load levels
+            load_levels = [1, 10, 50, 100]  # Concurrent frames
+            latency_results = {}
+
+            for load_level in load_levels:
+                latencies = []
+
+                # Process multiple batches at this load level
+                for _ in range(10):  # 10 batches per load level
+                    frames = [
+                        np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
+                        for _ in range(load_level)
+                    ]
+
+                    start_time = time.perf_counter()
+                    tasks = [
+                        self.processor._process_single_frame(
+                            "latency_test_camera", frame, config
+                        )
+                        for frame in frames
+                    ]
+                    await asyncio.gather(*tasks)
+                    end_time = time.perf_counter()
+
+                    # Calculate per-frame latency
+                    batch_latency = (end_time - start_time) / load_level * 1000  # ms
+                    latencies.append(batch_latency)
+
+                # Calculate statistics
+                avg_latency = sum(latencies) / len(latencies)
+                p95_latency = sorted(latencies)[int(0.95 * len(latencies))]
+
+                latency_results[load_level] = {
+                    "avg": avg_latency,
+                    "p95": p95_latency,
+                    "max": max(latencies),
+                    "min": min(latencies)
+                }
+
+            print("\nLatency Consistency Results:")
+            for load_level, metrics in latency_results.items():
+                print(f"Load {load_level:3d}: Avg={metrics['avg']:.2f}ms, "
+                      f"P95={metrics['p95']:.2f}ms, Max={metrics['max']:.2f}ms")
+
+            # Validate latency requirements
+            for load_level, metrics in latency_results.items():
+                assert metrics['avg'] < 10.0, (
+                    f"Average latency {metrics['avg']:.2f}ms exceeds 10ms at load {load_level}"
+                )
+                assert metrics['p95'] < 15.0, (
+                    f"P95 latency {metrics['p95']:.2f}ms exceeds 15ms at load {load_level}"
+                )
+
+            # Latency should not degrade significantly with load
+            latency_degradation = (
+                latency_results[100]['avg'] - latency_results[1]['avg']
+            ) / latency_results[1]['avg']
+
+            assert latency_degradation < 2.0, (
+                f"Latency degradation {latency_degradation*100:.1f}% too high under load"
+            )
+
+        await self.processor.stop()
+
+    @pytest.mark.asyncio
+    @pytest.mark.performance
+    async def test_error_recovery_performance(self):
+        """Test system performance during error conditions and recovery."""
+        await self.processor.start()
+
+        config = CameraConfig(
+            camera_id="error_recovery_camera",
+            stream_url="test://stream",
+            resolution=(1280, 720),
+            fps=30,
+            protocol=StreamProtocol.HTTP,
+        )
+
+        with patch.object(
+            self.processor.connection_manager, "connect_camera", return_value=True
+        ):
+            await self.processor.register_camera(config)
+
+            # Simulate error conditions with frame processing
+            error_rates = [0.0, 0.1, 0.2, 0.5]  # 0%, 10%, 20%, 50% error rates
+            performance_metrics = {}
+
+            for error_rate in error_rates:
+                successful_frames = 0
+                total_frames = 100
+                latencies = []
+
+                for i in range(total_frames):
+                    frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
+
+                    # Inject errors based on error rate
+                    if np.random.random() < error_rate:
+                        # Simulate corrupted frame (wrong dimensions)
+                        frame = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+
+                    start_time = time.perf_counter()
+                    with contextlib.suppress(Exception):
+                        result = await self.processor._process_single_frame(
+                            "error_recovery_camera", frame, config
+                        )
+                        if result is not None:
+                            successful_frames += 1
+
+                    end_time = time.perf_counter()
+                    latencies.append((end_time - start_time) * 1000)  # ms
+
+                success_rate = successful_frames / total_frames
+                avg_latency = sum(latencies) / len(latencies)
+
+                performance_metrics[error_rate] = {
+                    "success_rate": success_rate,
+                    "avg_latency": avg_latency,
+                    "successful_frames": successful_frames
+                }
+
+            print("\nError Recovery Performance:")
+            for error_rate, metrics in performance_metrics.items():
+                print(f"Error rate {error_rate*100:3.0f}%: Success={metrics['success_rate']*100:.1f}%, "
+                      f"Latency={metrics['avg_latency']:.2f}ms")
+
+            # System should maintain performance even with errors
+            for error_rate, metrics in performance_metrics.items():
+                expected_success_rate = 1.0 - error_rate
+                assert metrics['success_rate'] >= expected_success_rate * 0.95, (
+                    f"Success rate too low at {error_rate*100}% error rate"
+                )
+                assert metrics['avg_latency'] < 20.0, (
+                    f"Latency too high during error conditions: {metrics['avg_latency']:.2f}ms"
+                )
+
+        await self.processor.stop()
+
 
 # Pytest configuration for performance tests
 def pytest_configure(config):
     """Configure pytest markers."""
     config.addinivalue_line("markers", "performance: mark test as a performance test")
+    config.addinivalue_line("markers", "benchmark: mark test as a benchmark test")
+    config.addinivalue_line("markers", "load: mark test as a load test")
+    config.addinivalue_line("markers", "memory: mark test as a memory profiling test")
 
 
 if __name__ == "__main__":

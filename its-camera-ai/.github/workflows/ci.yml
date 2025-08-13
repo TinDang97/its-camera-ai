@@ -5,10 +5,19 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (for emergency deployments)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.4.29"
+  COVERAGE_THRESHOLD: "90"
+  SECURITY_SCAN_FAIL_ON: "high"
 
 jobs:
   test:
@@ -58,11 +67,38 @@ jobs:
     - name: Run pre-commit hooks
       run: uv run pre-commit run --all-files
 
-    - name: Run tests
-      run: uv run pytest --cov=src/its_camera_ai --cov-report=xml --cov-report=term-missing
+    - name: Run tests with quality gates
+      run: |
+        uv run pytest \
+          --cov=src/its_camera_ai \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --cov-report=html \
+          --cov-fail-under=${{ env.COVERAGE_THRESHOLD }} \
+          --junit-xml=test-results.xml \
+          --tb=short \
+          -x
       env:
         DATABASE_URL: postgresql+asyncpg://its_user:its_password@localhost:5432/its_camera_ai_test
         REDIS_URL: redis://localhost:6379/0
+    
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: test-results.xml
+        check_name: "Unit Test Results"
+        comment_mode: create new
+        fail_on: "test failures"
+    
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-reports
+        path: |
+          coverage.xml
+          htmlcov/
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
@@ -90,10 +126,41 @@ jobs:
       run: uv sync --group dev
 
     - name: Run Bandit security scan
-      run: uv run bandit -r src/ -f json -o bandit-report.json || true
-
+      run: |
+        uv run bandit -r src/ -f json -o bandit-report.json
+        uv run bandit -r src/ -f txt -o bandit-report.txt
+        
+        # Check for high/critical issues
+        HIGH_ISSUES=$(jq '[.results[] | select(.issue_severity == "HIGH" or .issue_severity == "CRITICAL")] | length' bandit-report.json)
+        if [ "$HIGH_ISSUES" -gt 0 ]; then
+          echo "❌ Found $HIGH_ISSUES high/critical security issues"
+          cat bandit-report.txt
+          exit 1
+        fi
+        echo "✅ No high/critical security issues found"
+    
     - name: Run Safety check
-      run: uv run safety check --json --output safety-report.json || true
+      run: |
+        uv run safety check --json --output safety-report.json
+        # Safety returns non-zero for vulnerabilities, so we check manually
+        VULNERABILITIES=$(jq '.vulnerabilities | length' safety-report.json 2>/dev/null || echo "0")
+        if [ "$VULNERABILITIES" -gt 0 ]; then
+          echo "❌ Found $VULNERABILITIES known vulnerabilities"
+          uv run safety check
+          exit 1
+        fi
+        echo "✅ No known vulnerabilities found"
+    
+    - name: Run pip-audit
+      run: |
+        uv run pip-audit --format=json --output=pip-audit-report.json
+        AUDIT_ISSUES=$(jq '.vulnerabilities | length' pip-audit-report.json 2>/dev/null || echo "0")
+        if [ "$AUDIT_ISSUES" -gt 0 ]; then
+          echo "❌ Found $AUDIT_ISSUES security vulnerabilities"
+          uv run pip-audit
+          exit 1
+        fi
+        echo "✅ No security vulnerabilities found"
 
     - name: Upload security reports
       uses: actions/upload-artifact@v4
@@ -152,3 +219,55 @@ jobs:
       with:
         name: benchmark-results
         path: benchmark.json
+    
+    - name: Validate performance benchmarks
+      run: |
+        # Check if any benchmarks exceed thresholds
+        FAILED_BENCHMARKS=$(jq '.benchmarks[] | select(.stats.mean > 0.1) | .name' benchmark.json | wc -l)
+        if [ "$FAILED_BENCHMARKS" -gt 0 ]; then
+          echo "❌ $FAILED_BENCHMARKS benchmarks exceeded 100ms threshold"
+          jq '.benchmarks[] | select(.stats.mean > 0.1) | {name, mean: .stats.mean}' benchmark.json
+          exit 1
+        fi
+        echo "✅ All benchmarks within performance thresholds"
+
+  # New job: Pipeline metrics collection
+  pipeline-metrics:
+    name: Pipeline Metrics
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [test, security, docker, performance]
+    
+    steps:
+    - name: Collect pipeline metrics
+      run: |
+        # Calculate pipeline success rate
+        JOBS_TOTAL=4
+        JOBS_SUCCESS=0
+        
+        if [[ "${{ needs.test.result }}" == "success" ]]; then ((JOBS_SUCCESS++)); fi
+        if [[ "${{ needs.security.result }}" == "success" ]]; then ((JOBS_SUCCESS++)); fi
+        if [[ "${{ needs.docker.result }}" == "success" ]]; then ((JOBS_SUCCESS++)); fi
+        if [[ "${{ needs.performance.result }}" == "success" || "${{ needs.performance.result }}" == "skipped" ]]; then ((JOBS_SUCCESS++)); fi
+        
+        SUCCESS_RATE=$(echo "scale=2; $JOBS_SUCCESS * 100 / $JOBS_TOTAL" | bc)
+        
+        echo "Pipeline Success Rate: $SUCCESS_RATE%"
+        echo "TARGET_SUCCESS_RATE=95" >> $GITHUB_ENV
+        echo "ACTUAL_SUCCESS_RATE=$SUCCESS_RATE" >> $GITHUB_ENV
+        
+        # Send metrics to monitoring system (placeholder)
+        curl -X POST "$WEBHOOK_URL" \
+          -H "Content-Type: application/json" \
+          -d "{\"pipeline_success_rate\": $SUCCESS_RATE, \"commit\": \"$GITHUB_SHA\", \"branch\": \"$GITHUB_REF_NAME\"}" || true
+      env:
+        WEBHOOK_URL: ${{ secrets.PIPELINE_METRICS_WEBHOOK_URL }}
+    
+    - name: Check pipeline success rate SLA
+      run: |
+        if (( $(echo "$ACTUAL_SUCCESS_RATE < $TARGET_SUCCESS_RATE" | bc -l) )); then
+          echo "❌ Pipeline success rate ($ACTUAL_SUCCESS_RATE%) below target ($TARGET_SUCCESS_RATE%)"
+          echo "::warning::Pipeline reliability below SLA threshold"
+        else
+          echo "✅ Pipeline success rate ($ACTUAL_SUCCESS_RATE%) meets target ($TARGET_SUCCESS_RATE%)"
+        fi

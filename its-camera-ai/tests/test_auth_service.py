@@ -391,20 +391,22 @@ class TestAuthenticationService:
         )
 
         # Mock user lookup
-        with patch.object(
-            self.auth_service, "_get_user_by_username", return_value=self.test_user
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service, "_get_user_by_username", return_value=self.test_user
+            ),
+            patch.object(
                 self.auth_service.brute_force_protection,
                 "is_blocked",
                 return_value=False,
-            ):
-                with patch.object(
-                    self.auth_service.brute_force_protection, "record_success"
-                ):
-                    with patch.object(
-                        self.auth_service, "_create_user_session"
-                    ) as mock_session:
+            ),
+            patch.object(
+                self.auth_service.brute_force_protection, "record_success"
+            ),
+            patch.object(
+                self.auth_service, "_create_user_session"
+            ) as mock_session,
+        ):
                         mock_session.return_value.session_id = "session123"
 
                         result = await self.auth_service.authenticate(credentials)
@@ -422,22 +424,24 @@ class TestAuthenticationService:
             username="testuser", password="wrongpassword", ip_address="192.168.1.100"
         )
 
-        with patch.object(
-            self.auth_service, "_get_user_by_username", return_value=self.test_user
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service, "_get_user_by_username", return_value=self.test_user
+            ),
+            patch.object(
                 self.auth_service.brute_force_protection,
                 "is_blocked",
                 return_value=False,
-            ):
-                with patch.object(
-                    self.auth_service.brute_force_protection, "record_failure"
-                ):
-                    result = await self.auth_service.authenticate(credentials)
+            ),
+            patch.object(
+                self.auth_service.brute_force_protection, "record_failure"
+            ),
+        ):
+            result = await self.auth_service.authenticate(credentials)
 
-                    assert result.success is False
-                    assert result.status == AuthenticationStatus.FAILED
-                    assert result.error_message == "Invalid credentials"
+            assert result.success is False
+            assert result.status == AuthenticationStatus.FAILED
+            assert result.error_message == "Invalid credentials"
 
     async def test_authenticate_user_not_found(self):
         """Test authentication with non-existent user."""
@@ -445,21 +449,23 @@ class TestAuthenticationService:
             username="nonexistent", password="password123", ip_address="192.168.1.100"
         )
 
-        with patch.object(
-            self.auth_service, "_get_user_by_username", return_value=None
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service, "_get_user_by_username", return_value=None
+            ),
+            patch.object(
                 self.auth_service.brute_force_protection,
                 "is_blocked",
                 return_value=False,
-            ):
-                with patch.object(
-                    self.auth_service.brute_force_protection, "record_failure"
-                ):
-                    result = await self.auth_service.authenticate(credentials)
+            ),
+            patch.object(
+                self.auth_service.brute_force_protection, "record_failure"
+            ),
+        ):
+            result = await self.auth_service.authenticate(credentials)
 
-                    assert result.success is False
-                    assert result.status == AuthenticationStatus.FAILED
+            assert result.success is False
+            assert result.status == AuthenticationStatus.FAILED
 
     async def test_authenticate_account_blocked(self):
         """Test authentication with blocked account."""
@@ -494,20 +500,22 @@ class TestAuthenticationService:
             username="testuser", password="password123", ip_address="192.168.1.100"
         )
 
-        with patch.object(
-            self.auth_service, "_get_user_by_username", return_value=mfa_user
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service, "_get_user_by_username", return_value=mfa_user
+            ),
+            patch.object(
                 self.auth_service.brute_force_protection,
                 "is_blocked",
                 return_value=False,
-            ):
-                result = await self.auth_service.authenticate(credentials)
+            ),
+        ):
+            result = await self.auth_service.authenticate(credentials)
 
-                assert result.success is False
-                assert result.status == AuthenticationStatus.MFA_REQUIRED
-                assert result.mfa_required is True
-                assert MFAMethod.TOTP in result.mfa_methods
+            assert result.success is False
+            assert result.status == AuthenticationStatus.MFA_REQUIRED
+            assert result.mfa_required is True
+            assert MFAMethod.TOTP in result.mfa_methods
 
     async def test_verify_valid_token(self):
         """Test JWT token verification."""
@@ -536,19 +544,21 @@ class TestAuthenticationService:
             mfa_verified=False,
         )
 
-        with patch.object(
-            self.auth_service.session_manager, "get_session", return_value=mock_session
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service.session_manager, "get_session", return_value=mock_session
+            ),
+            patch.object(
                 self.auth_service.session_manager, "update_session_activity"
-            ):
-                result = await self.auth_service.verify_token(token)
+            ),
+        ):
+            result = await self.auth_service.verify_token(token)
 
-                assert result.valid is True
-                assert result.user_id == "user123"
-                assert result.session_id == "session123"
-                assert result.roles == ["viewer"]
-                assert result.permissions == ["cameras:read"]
+            assert result.valid is True
+            assert result.user_id == "user123"
+            assert result.session_id == "session123"
+            assert result.roles == ["viewer"]
+            assert result.permissions == ["cameras:read"]
 
     async def test_verify_expired_session(self):
         """Test token verification with expired session."""
@@ -606,36 +616,40 @@ class TestAuthenticationService:
             mfa_verified=False,
         )
 
-        with patch.object(
-            self.auth_service.session_manager, "get_session", return_value=mock_session
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service.session_manager, "get_session", return_value=mock_session
+            ),
+            patch.object(
                 self.auth_service.user_service, "get_by_id", return_value=self.test_user
-            ):
-                with patch.object(
-                    self.auth_service,
-                    "_get_user_permissions",
-                    return_value=["cameras:read"],
-                ):
-                    result = await self.auth_service.refresh_token(refresh_token)
+            ),
+            patch.object(
+                self.auth_service,
+                "_get_user_permissions",
+                return_value=["cameras:read"],
+            ),
+        ):
+            result = await self.auth_service.refresh_token(refresh_token)
 
-                    assert result.access_token is not None
-                    assert result.refresh_token is not None
-                    assert result.expires_in > 0
+            assert result.access_token is not None
+            assert result.refresh_token is not None
+            assert result.expires_in > 0
 
     async def test_enroll_totp_mfa(self):
         """Test TOTP MFA enrollment."""
-        with patch.object(
-            self.auth_service.user_service, "get_by_id", return_value=self.test_user
+        with (
+            patch.object(
+                self.auth_service.user_service, "get_by_id", return_value=self.test_user
+            ),
+            patch.object(self.auth_service.user_service, "update_by_id"),
         ):
-            with patch.object(self.auth_service.user_service, "update_by_id"):
-                result = await self.auth_service.enroll_mfa("user123", MFAMethod.TOTP)
+            result = await self.auth_service.enroll_mfa("user123", MFAMethod.TOTP)
 
-                assert result.success is True
-                assert result.method == MFAMethod.TOTP
-                assert result.secret is not None
-                assert result.qr_code_url is not None
-                assert len(result.backup_codes) == 8
+            assert result.success is True
+            assert result.method == MFAMethod.TOTP
+            assert result.secret is not None
+            assert result.qr_code_url is not None
+            assert len(result.backup_codes) == 8
 
     async def test_verify_totp_mfa(self):
         """Test TOTP MFA verification."""
@@ -675,19 +689,21 @@ class TestAuthenticationService:
             roles=[role],
         )
 
-        with patch.object(
-            self.auth_service, "_get_user_with_roles", return_value=user_with_roles
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service, "_get_user_with_roles", return_value=user_with_roles
+            ),
+            patch.object(
                 self.auth_service,
                 "_get_user_permissions",
                 return_value=["cameras:read"],
-            ):
-                result = await self.auth_service.check_permission(
-                    "user123", "cameras", "read"
-                )
+            ),
+        ):
+            result = await self.auth_service.check_permission(
+                "user123", "cameras", "read"
+            )
 
-                assert result is True
+            assert result is True
 
     async def test_check_permission_denied(self):
         """Test permission denied."""
@@ -701,19 +717,21 @@ class TestAuthenticationService:
             roles=[role],
         )
 
-        with patch.object(
-            self.auth_service, "_get_user_with_roles", return_value=user_with_roles
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                self.auth_service, "_get_user_with_roles", return_value=user_with_roles
+            ),
+            patch.object(
                 self.auth_service,
                 "_get_user_permissions",
                 return_value=["cameras:read"],
-            ):
-                result = await self.auth_service.check_permission(
-                    "user123", "users", "delete"
-                )
+            ),
+        ):
+            result = await self.auth_service.check_permission(
+                "user123", "users", "delete"
+            )
 
-                assert result is False
+            assert result is False
 
     async def test_superuser_has_all_permissions(self):
         """Test that superuser has all permissions."""
@@ -752,28 +770,32 @@ class TestAuthenticationService:
             mfa_verified=False,
         )
 
-        with patch.object(
-            self.auth_service.session_manager, "get_session", return_value=mock_session
+        with (
+            patch.object(
+                self.auth_service.session_manager, "get_session", return_value=mock_session
+            ),
+            patch.object(self.auth_service.session_manager, "delete_session"),
         ):
-            with patch.object(self.auth_service.session_manager, "delete_session"):
-                result = await self.auth_service.logout("session123")
+            result = await self.auth_service.logout("session123")
 
-                assert result is True
+            assert result is True
 
     async def test_change_password_success(self):
         """Test successful password change."""
-        with patch.object(
-            self.auth_service.user_service, "get_by_id", return_value=self.test_user
+        with (
+            patch.object(
+                self.auth_service.user_service, "get_by_id", return_value=self.test_user
+            ),
+            patch.object(self.auth_service.user_service, "update_by_id"),
+            patch.object(
+                self.auth_service.session_manager, "delete_all_user_sessions"
+            ),
         ):
-            with patch.object(self.auth_service.user_service, "update_by_id"):
-                with patch.object(
-                    self.auth_service.session_manager, "delete_all_user_sessions"
-                ):
-                    result = await self.auth_service.change_password(
-                        "user123", "password123", "NewSecureP@ssw0rd2024!"
-                    )
+            result = await self.auth_service.change_password(
+                "user123", "password123", "NewSecureP@ssw0rd2024!"
+            )
 
-                    assert result is True
+            assert result is True
 
     async def test_change_password_wrong_old_password(self):
         """Test password change with wrong old password."""
@@ -788,13 +810,15 @@ class TestAuthenticationService:
 
     async def test_change_password_weak_new_password(self):
         """Test password change with weak new password."""
-        with patch.object(
-            self.auth_service.user_service, "get_by_id", return_value=self.test_user
+        with (
+            patch.object(
+                self.auth_service.user_service, "get_by_id", return_value=self.test_user
+            ),
+            pytest.raises(ValueError, match="Password validation failed"),
         ):
-            with pytest.raises(ValueError, match="Password validation failed"):
-                await self.auth_service.change_password(
-                    "user123", "password123", "weak"
-                )
+            await self.auth_service.change_password(
+                "user123", "password123", "weak"
+            )
 
 
 @pytest.mark.asyncio

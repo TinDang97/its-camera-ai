@@ -322,6 +322,52 @@ class ConcurrencyError(ITSCameraAIError):
         self.operation = operation
 
 
+class ServiceMeshError(ITSCameraAIError):
+    """Raised when service mesh operations fail."""
+
+    def __init__(
+        self,
+        message: str,
+        service_name: str | None = None,
+        operation: str | None = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        code = "SERVICE_MESH_ERROR"
+        mesh_details = details or {}
+        if service_name:
+            mesh_details["service_name"] = service_name
+        if operation:
+            mesh_details["operation"] = operation
+
+        super().__init__(message, code, mesh_details, cause)
+        self.service_name = service_name
+        self.operation = operation
+
+
+class CircuitBreakerError(ServiceMeshError):
+    """Raised when circuit breaker operations fail."""
+
+    def __init__(
+        self,
+        message: str,
+        service_name: str | None = None,
+        state: str | None = None,
+        failure_count: int | None = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        cb_details = details or {}
+        if state:
+            cb_details["circuit_breaker_state"] = state
+        if failure_count is not None:
+            cb_details["failure_count"] = failure_count
+
+        super().__init__(message, service_name, "circuit_breaker", cb_details, cause)
+        self.state = state
+        self.failure_count = failure_count
+
+
 class NotFoundError(ITSCameraAIError):
     """Raised when a requested resource is not found."""
 

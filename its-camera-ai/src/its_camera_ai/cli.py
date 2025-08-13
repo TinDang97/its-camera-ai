@@ -28,9 +28,9 @@ def main() -> None:
 @main.command()
 @click.option(
     "--host",
-    default="0.0.0.0",  # noqa: S104 - Needed for containerized deployment
-    help="Host to bind the server to",
-    show_default=True,
+    default=None,
+    help="Host to bind the server to (defaults to environment-specific binding)",
+    show_default=False,
 )
 @click.option(
     "--port",
@@ -69,6 +69,15 @@ def serve(
     settings = get_settings()
     setup_logging(settings)
 
+    # Security: Environment-specific host binding
+    if host is None:
+        if settings.is_production():
+            # Production: bind to specific interface or localhost
+            host = settings.get("api_host", "127.0.0.1")
+        else:
+            # Development: allow broader access for development
+            host = "0.0.0.0"  # noqa: S104 - Development only
+
     logger.info(
         "Starting ITS Camera AI server",
         host=host,
@@ -76,6 +85,7 @@ def serve(
         reload=reload,
         workers=workers,
         log_level=log_level,
+        environment=settings.environment,
     )
 
     # Override settings from CLI arguments

@@ -1,0 +1,296 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: its-camera-ai-slo-rules
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: slo-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  groups:
+  - name: its-camera-ai.slo.recordings
+    interval: 30s
+    rules:
+    # Service Level Indicators (SLIs)
+    
+    # API Availability SLI
+    - record: its_camera_ai:api_availability_sli
+      expr: |
+        (
+          sum(rate(http_requests_total{job=~"camera-service|analytics-service|streaming-service", code!~"5.."}[5m])) /
+          sum(rate(http_requests_total{job=~"camera-service|analytics-service|streaming-service"}[5m]))
+        )
+    
+    # API Latency SLI (95th percentile)
+    - record: its_camera_ai:api_latency_sli
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket{job=~"camera-service|analytics-service|streaming-service"}[5m])) by (le)
+        )
+    
+    # Inference Availability SLI
+    - record: its_camera_ai:inference_availability_sli
+      expr: |
+        (
+          sum(rate(inference_requests_total{status="success"}[5m])) /
+          sum(rate(inference_requests_total[5m]))
+        )
+    
+    # Inference Latency SLI (95th percentile)
+    - record: its_camera_ai:inference_latency_sli
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(inference_duration_seconds_bucket[5m])) by (le)
+        )
+    
+    # Stream Processing Availability SLI
+    - record: its_camera_ai:stream_availability_sli
+      expr: |
+        (
+          sum(rate(stream_processing_total{status="success"}[5m])) /
+          sum(rate(stream_processing_total[5m]))
+        )
+    
+    # Data Pipeline Availability SLI
+    - record: its_camera_ai:pipeline_availability_sli
+      expr: |
+        (
+          sum(rate(data_pipeline_processed_total{status="success"}[5m])) /
+          sum(rate(data_pipeline_processed_total[5m]))
+        )
+
+    # Resource Utilization SLIs
+    - record: its_camera_ai:cpu_utilization_sli
+      expr: |
+        (
+          1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))
+        )
+    
+    - record: its_camera_ai:memory_utilization_sli
+      expr: |
+        (
+          1 - (avg(node_memory_MemAvailable_bytes) / avg(node_memory_MemTotal_bytes))
+        )
+    
+    - record: its_camera_ai:gpu_utilization_sli
+      expr: |
+        avg(DCGM_FI_DEV_GPU_UTIL) / 100
+
+  - name: its-camera-ai.slo.objectives
+    interval: 2m
+    rules:
+    # Service Level Objectives (SLOs) - 99.9% availability target
+    
+    # API Availability SLO (99.9% target)
+    - record: its_camera_ai:api_availability_slo
+      expr: |
+        clamp_max(its_camera_ai:api_availability_sli, 1)
+      labels:
+        slo_target: "0.999"
+        slo_name: "api_availability"
+        service: "api"
+    
+    # Inference Availability SLO (99.9% target)  
+    - record: its_camera_ai:inference_availability_slo
+      expr: |
+        clamp_max(its_camera_ai:inference_availability_sli, 1)
+      labels:
+        slo_target: "0.999"
+        slo_name: "inference_availability"
+        service: "vision-engine"
+    
+    # Stream Processing SLO (99.5% target)
+    - record: its_camera_ai:stream_availability_slo
+      expr: |
+        clamp_max(its_camera_ai:stream_availability_sli, 1)
+      labels:
+        slo_target: "0.995"
+        slo_name: "stream_availability"
+        service: "streaming"
+
+    # Latency SLOs
+    
+    # API Latency SLO (<500ms for 95th percentile)
+    - record: its_camera_ai:api_latency_slo
+      expr: |
+        clamp_max(1 - (its_camera_ai:api_latency_sli > 0.5), 1)
+      labels:
+        slo_target: "0.95"
+        slo_name: "api_latency"
+        service: "api"
+        threshold: "500ms"
+    
+    # Inference Latency SLO (<100ms for 95th percentile)
+    - record: its_camera_ai:inference_latency_slo
+      expr: |
+        clamp_max(1 - (its_camera_ai:inference_latency_sli > 0.1), 1)
+      labels:
+        slo_target: "0.95"
+        slo_name: "inference_latency"
+        service: "vision-engine"
+        threshold: "100ms"
+
+  - name: its-camera-ai.slo.burn-rates
+    interval: 30s
+    rules:
+    # Error Budget Burn Rate Calculations
+    
+    # API Availability Error Budget (0.1% error budget)
+    - record: its_camera_ai:api_availability_error_budget
+      expr: |
+        1 - 0.999  # 0.1% error budget
+    
+    # Current burn rate (1h window)
+    - record: its_camera_ai:api_availability_burn_rate_1h
+      expr: |
+        (1 - its_camera_ai:api_availability_sli) / (1 - 0.999)
+    
+    # Burn rate (6h window)
+    - record: its_camera_ai:api_availability_burn_rate_6h
+      expr: |
+        (1 - avg_over_time(its_camera_ai:api_availability_sli[6h])) / (1 - 0.999)
+    
+    # Inference Availability Error Budget
+    - record: its_camera_ai:inference_availability_error_budget
+      expr: |
+        1 - 0.999  # 0.1% error budget
+    
+    - record: its_camera_ai:inference_availability_burn_rate_1h
+      expr: |
+        (1 - its_camera_ai:inference_availability_sli) / (1 - 0.999)
+    
+    - record: its_camera_ai:inference_availability_burn_rate_6h
+      expr: |
+        (1 - avg_over_time(its_camera_ai:inference_availability_sli[6h])) / (1 - 0.999)
+
+  - name: its-camera-ai.slo.alerts
+    interval: 30s
+    rules:
+    # SLO Burn Rate Alerts
+    
+    # Fast burn rate (5m window) - consumes 2% of monthly budget in 1 hour
+    - alert: APIAvailabilitySLOFastBurn
+      expr: |
+        (
+          its_camera_ai:api_availability_burn_rate_1h > (14.4 * 1)  # 14.4x burn rate
+          and
+          its_camera_ai:api_availability_burn_rate_1h > (14.4 * 0.5)  # 5m burn rate
+        )
+      for: 2m
+      labels:
+        severity: critical
+        slo: api-availability
+        burn_rate: fast
+      annotations:
+        summary: "API availability SLO fast burn rate"
+        description: "API availability is burning error budget 14.4x faster than allowed (current: {{ $value }}x)"
+        
+    - alert: APIAvailabilitySLOSlowBurn
+      expr: |
+        (
+          its_camera_ai:api_availability_burn_rate_6h > (6 * 1)  # 6x burn rate over 6h
+          and
+          its_camera_ai:api_availability_burn_rate_1h > (6 * 0.75)  # 1h burn rate
+        )
+      for: 15m
+      labels:
+        severity: warning
+        slo: api-availability
+        burn_rate: slow
+      annotations:
+        summary: "API availability SLO slow burn rate"
+        description: "API availability is burning error budget 6x faster than allowed (current: {{ $value }}x)"
+
+    - alert: InferenceAvailabilitySLOFastBurn
+      expr: |
+        (
+          its_camera_ai:inference_availability_burn_rate_1h > (14.4 * 1)
+          and
+          its_camera_ai:inference_availability_burn_rate_1h > (14.4 * 0.5)
+        )
+      for: 2m
+      labels:
+        severity: critical
+        slo: inference-availability
+        burn_rate: fast
+      annotations:
+        summary: "Inference availability SLO fast burn rate"
+        description: "Inference availability is burning error budget 14.4x faster than allowed (current: {{ $value }}x)"
+
+    - alert: InferenceLatencySLOViolation
+      expr: |
+        its_camera_ai:inference_latency_sli > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        slo: inference-latency
+      annotations:
+        summary: "Inference latency SLO violation"
+        description: "95th percentile inference latency is {{ $value }}s, exceeding 100ms target"
+
+    - alert: APILatencySLOViolation
+      expr: |
+        its_camera_ai:api_latency_sli > 0.5
+      for: 5m
+      labels:
+        severity: warning
+        slo: api-latency
+      annotations:
+        summary: "API latency SLO violation"
+        description: "95th percentile API latency is {{ $value }}s, exceeding 500ms target"
+
+  - name: its-camera-ai.slo.budget-alerts
+    interval: 5m
+    rules:
+    # Error Budget Exhaustion Alerts
+    
+    - record: its_camera_ai:api_availability_error_budget_remaining
+      expr: |
+        1 - (
+          (1 - avg_over_time(its_camera_ai:api_availability_sli[30d])) /
+          (1 - 0.999)
+        )
+    
+    - record: its_camera_ai:inference_availability_error_budget_remaining
+      expr: |
+        1 - (
+          (1 - avg_over_time(its_camera_ai:inference_availability_sli[30d])) /
+          (1 - 0.999)
+        )
+    
+    # Alert when error budget is 75% consumed
+    - alert: APIAvailabilityErrorBudgetLow
+      expr: |
+        its_camera_ai:api_availability_error_budget_remaining < 0.25
+      for: 5m
+      labels:
+        severity: warning
+        slo: api-availability
+      annotations:
+        summary: "API availability error budget low"
+        description: "Only {{ $value | humanizePercentage }} of monthly error budget remaining for API availability"
+    
+    # Alert when error budget is 90% consumed
+    - alert: APIAvailabilityErrorBudgetCritical
+      expr: |
+        its_camera_ai:api_availability_error_budget_remaining < 0.1
+      for: 1m
+      labels:
+        severity: critical
+        slo: api-availability
+      annotations:
+        summary: "API availability error budget critical"
+        description: "Only {{ $value | humanizePercentage }} of monthly error budget remaining for API availability"
+
+    - alert: InferenceAvailabilityErrorBudgetLow
+      expr: |
+        its_camera_ai:inference_availability_error_budget_remaining < 0.25
+      for: 5m
+      labels:
+        severity: warning
+        slo: inference-availability
+      annotations:
+        summary: "Inference availability error budget low"
+        description: "Only {{ $value | humanizePercentage }} of monthly error budget remaining for inference availability"

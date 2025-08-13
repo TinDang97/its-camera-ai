@@ -220,7 +220,7 @@ class TrafficMetrics(BaseModel):
     )
 
     # Additional flexible attributes
-    metadata: Mapped[dict[str, Any] | None] = mapped_column(
+    additional_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, comment="Additional metadata and custom metrics"
     )
 

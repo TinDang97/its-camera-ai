@@ -19,6 +19,12 @@ from .auth import (
     create_security_middleware_stack,
 )
 
+# Add aliases for backward compatibility
+LoggingMiddleware = SecurityLoggingMiddleware
+MetricsMiddleware = SecurityLoggingMiddleware  # For now, combine with logging
+RateLimitMiddleware = RateLimitingMiddleware
+SecurityMiddleware = SecurityHeadersMiddleware
+
 __all__ = [
     "AuthenticationMiddleware",
     "EnhancedCORSMiddleware",
@@ -27,4 +33,9 @@ __all__ = [
     "SecurityLoggingMiddleware",
     "create_auth_middleware",
     "create_security_middleware_stack",
+    # Backward compatibility aliases
+    "LoggingMiddleware",
+    "MetricsMiddleware",
+    "RateLimitMiddleware",
+    "SecurityMiddleware",
 ]

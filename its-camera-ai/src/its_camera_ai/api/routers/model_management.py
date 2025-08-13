@@ -5,6 +5,7 @@ deployment, version control, performance monitoring, and A/B testing.
 """
 
 import json
+import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -105,7 +106,7 @@ async def register_model(
     model_file: UploadFile = File(..., description="Model artifact file"),
     model_name: str = Form(..., description="Model name/identifier"),
     version: str = Form(..., description="Model version"),
-    description: str | None = Form(None, description="Model description"),
+    _description: str | None = Form(None, description="Model description"),
     accuracy: float = Form(..., ge=0.0, le=1.0, description="Model accuracy"),
     latency_p95_ms: float | None = Form(None, ge=0.0, description="95th percentile latency"),
     throughput_fps: float | None = Form(None, ge=0.0, description="Throughput in FPS"),
@@ -147,8 +148,11 @@ async def register_model(
         # Create temporary file for model
         temp_file = None
         try:
-            # Save model to temporary file
-            temp_file = Path(tempfile.mktemp(suffix=file_extension))
+            # Save model to temporary file with secure creation
+            with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp:
+                temp_file = Path(tmp.name)
+                # Set secure file permissions (owner read/write only)
+                os.chmod(temp_file, 0o600)
 
             async with aiofiles.open(temp_file, 'wb') as f:
                 content = await model_file.read()
@@ -284,7 +288,7 @@ async def get_model(
 )
 async def download_model(
     model_id: str,
-    include_config: bool = Query(False, description="Include training configuration"),
+    _include_config: bool = Query(False, description="Include training configuration"),
     format: str = Query("binary", description="Download format (binary, url)"),
     expires_in: int = Query(3600, ge=300, le=86400, description="URL expiration (seconds)"),
     model_registry: MinIOModelRegistry = Depends(get_model_registry),

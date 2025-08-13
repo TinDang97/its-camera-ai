@@ -16,12 +16,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import BaseModel
 
-# Association table for many-to-many relationship between users and roles
+# Association tables for many-to-many relationships
 user_roles = Table(
     "user_roles",
     BaseModel.metadata,
     Column("user_id", String, ForeignKey("user.id"), primary_key=True),
     Column("role_id", String, ForeignKey("role.id"), primary_key=True),
+)
+
+role_permissions = Table(
+    "role_permissions",
+    BaseModel.metadata,
+    Column("role_id", String, ForeignKey("role.id"), primary_key=True),
+    Column("permission_id", String, ForeignKey("permission.id"), primary_key=True),
 )
 
 
@@ -84,13 +91,6 @@ class Role(BaseModel):
         return f"<Role(name={self.name})>"
 
 
-# Association tables for many-to-many relationships
-role_permissions = Table(
-    "role_permissions",
-    BaseModel.metadata,
-    Column("role_id", String, ForeignKey("role.id"), primary_key=True),
-    Column("permission_id", String, ForeignKey("permission.id"), primary_key=True),
-)
 
 
 class Permission(BaseModel):

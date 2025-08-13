@@ -76,7 +76,10 @@ def validate_environment():
         issues.append("❌ Production environment should not use localhost Redis")
 
     # Check security configuration
-    if settings.security.secret_key == "change-me-in-production":
+    # Security: Use secure secret comparison to prevent timing attacks
+    import secrets
+    default_secret = "change-me-in-production"
+    if secrets.compare_digest(settings.security.secret_key, default_secret):
         issues.append("❌ Default secret key detected - change before production")
 
     if settings.security.algorithm != "RS256":

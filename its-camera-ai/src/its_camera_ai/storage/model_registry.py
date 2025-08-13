@@ -135,11 +135,10 @@ class MinIOModelRegistry:
             metadata_key = self._generate_metadata_key(model_name, version)
 
             # Check if version already exists
-            if await self.storage_service.object_exists(self.models_bucket, model_key):
-                if not self.registry_config.get("allow_overwrites", False):
-                    raise ValidationError(
-                        f"Model version {model_name}:{version} already exists"
-                    )
+            if await self.storage_service.object_exists(self.models_bucket, model_key) and not self.registry_config.get("allow_overwrites", False):
+                raise ValidationError(
+                    f"Model version {model_name}:{version} already exists"
+                )
 
             # Prepare model metadata
             model_metadata = {
@@ -424,7 +423,7 @@ class MinIOModelRegistry:
             ) from e
 
     async def delete_model(
-        self, model_name: str, version: str, force: bool = False
+        self, model_name: str, version: str, _force: bool = False
     ) -> bool:
         """Delete model and its metadata.
 

@@ -5,7 +5,6 @@ health monitoring, and batch operations.
 """
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +33,7 @@ from ..schemas.cameras import (
     StreamRequest,
 )
 from ..schemas.common import PaginatedResponse, SuccessResponse
+from ..schemas.database import CameraCreateSchema, CameraUpdateSchema
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -48,8 +48,7 @@ async def get_camera_service(db: AsyncSession = Depends(get_db)) -> CameraServic
     return CameraService(db)
 
 
-# Remove simulated database - now using real database service
-# cameras_db: dict[str, dict[str, Any]] = {}
+# In-memory stream health cache (TODO: move to Redis)
 stream_health_db: dict[str, StreamHealth] = {}
 
 
@@ -147,60 +146,52 @@ async def list_cameras(
             logger.debug("Returning cached camera list", cache_key=cache_key)
             return PaginatedResponse[CameraResponse](**cached_result)
 
-        # TODO: Replace with actual database queries
-        # For now, use simulated data
-        cameras = list(cameras_db.values())
-
-        # Apply filters
+        # Build filters for database query
+        filters = {}
         if status:
-            cameras = [c for c in cameras if c.get("status") == status]
-        if location:
-            cameras = [
-                c for c in cameras if location.lower() in c.get("location", "").lower()
-            ]
+            filters["status"] = status.value
         if zone_id:
-            cameras = [c for c in cameras if c.get("zone_id") == zone_id]
-        if tags:
-            cameras = [
-                c for c in cameras if any(tag in c.get("tags", []) for tag in tags)
-            ]
+            filters["zone_id"] = zone_id
         if search:
-            search_lower = search.lower()
-            cameras = [
-                c
-                for c in cameras
-                if search_lower in c.get("name", "").lower()
-                or search_lower in c.get("description", "").lower()
-            ]
+            filters["search"] = search
+        if tags:
+            filters["tags"] = tags
+        # Add location filter (camera service handles this via search)
+        if location and not search:
+            filters["search"] = location
 
-        # Calculate pagination
-        total = len(cameras)
-        offset = (page - 1) * size
-        paginated_cameras = cameras[offset : offset + size]
+        # Get cameras from database service
+        cameras, total = await camera_service.get_cameras_with_pagination(
+            page=page,
+            size=size,
+            filters=filters,
+            order_by="name",
+            order_desc=False,
+        )
 
         # Convert to response models
         camera_responses = [
             CameraResponse(
-                id=camera["id"],
-                name=camera["name"],
-                description=camera.get("description"),
-                location=camera["location"],
-                coordinates=camera.get("coordinates"),
-                camera_type=camera["camera_type"],
-                stream_url=camera["stream_url"],
-                stream_protocol=camera["stream_protocol"],
-                backup_stream_url=camera.get("backup_stream_url"),
-                status=camera.get("status", CameraStatus.OFFLINE),
-                config=camera["config"],
-                health=stream_health_db.get(camera["id"]),
-                zone_id=camera.get("zone_id"),
-                tags=camera.get("tags", []),
-                is_active=camera.get("is_active", True),
-                created_at=camera.get("created_at", datetime.now(UTC)),
-                updated_at=camera.get("updated_at", datetime.now(UTC)),
-                last_seen_at=camera.get("last_seen_at"),
+                id=camera.id,
+                name=camera.name,
+                description=camera.description,
+                location=camera.location,
+                coordinates=camera.coordinates,
+                camera_type=camera.camera_type,
+                stream_url=camera.stream_url,
+                stream_protocol=camera.stream_protocol,
+                backup_stream_url=camera.backup_stream_url,
+                status=CameraStatus(camera.status),
+                config=camera.config,
+                health=stream_health_db.get(camera.id),
+                zone_id=camera.zone_id,
+                tags=camera.tags,
+                is_active=camera.is_active,
+                created_at=camera.created_at,
+                updated_at=camera.updated_at,
+                last_seen_at=camera.last_seen_at,
             )
-            for camera in paginated_cameras
+            for camera in cameras
         ]
 
         result = PaginatedResponse.create(
@@ -242,7 +233,7 @@ async def create_camera(
     camera_data: CameraCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("cameras:create")),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(rate_limit_strict),
 ) -> CameraResponse:
@@ -263,69 +254,58 @@ async def create_camera(
         HTTPException: If camera creation fails
     """
     try:
-        # Generate camera ID
-        camera_id = str(uuid4())
+        # Convert API schema to database schema
+        db_camera_data = CameraCreateSchema(
+            name=camera_data.name,
+            description=camera_data.description,
+            location=camera_data.location,
+            coordinates=camera_data.coordinates,
+            camera_type=camera_data.camera_type,
+            stream_url=camera_data.stream_url,
+            stream_protocol=camera_data.stream_protocol,
+            backup_stream_url=camera_data.backup_stream_url,
+            username=camera_data.username,
+            password=camera_data.password,
+            config=camera_data.config.model_dump(),
+            zone_id=camera_data.zone_id,
+            tags=camera_data.tags,
+        )
 
-        # TODO: Validate stream URL connectivity
-        # health = await check_stream_health(camera_id, camera_data.stream_url)
-
-        # Create camera record
-        now = datetime.now(UTC)
-        camera_record = {
-            "id": camera_id,
-            "name": camera_data.name,
-            "description": camera_data.description,
-            "location": camera_data.location,
-            "coordinates": camera_data.coordinates,
-            "camera_type": camera_data.camera_type,
-            "stream_url": camera_data.stream_url,
-            "stream_protocol": camera_data.stream_protocol,
-            "backup_stream_url": camera_data.backup_stream_url,
-            "status": CameraStatus.OFFLINE,
-            "config": camera_data.config,
-            "zone_id": camera_data.zone_id,
-            "tags": camera_data.tags,
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-            "created_by": current_user.id,
-        }
-
-        # Store in simulated database
-        cameras_db[camera_id] = camera_record
+        # Create camera in database
+        camera = await camera_service.create_camera(db_camera_data, current_user.id)
 
         # Start health monitoring in background
-        background_tasks.add_task(start_stream_monitoring, camera_id)
+        background_tasks.add_task(start_stream_monitoring, camera.id)
 
         # Invalidate cache
         await cache.delete("cameras:list:*")
 
         logger.info(
             "Camera created successfully",
-            camera_id=camera_id,
+            camera_id=camera.id,
             name=camera_data.name,
             user_id=current_user.id,
         )
 
         return CameraResponse(
-            id=camera_id,
-            name=camera_record["name"],
-            description=camera_record["description"],
-            location=camera_record["location"],
-            coordinates=camera_record["coordinates"],
-            camera_type=camera_record["camera_type"],
-            stream_url=camera_record["stream_url"],
-            stream_protocol=camera_record["stream_protocol"],
-            backup_stream_url=camera_record["backup_stream_url"],
-            status=camera_record["status"],
-            config=camera_record["config"],
+            id=camera.id,
+            name=camera.name,
+            description=camera.description,
+            location=camera.location,
+            coordinates=camera.coordinates,
+            camera_type=camera.camera_type,
+            stream_url=camera.stream_url,
+            stream_protocol=camera.stream_protocol,
+            backup_stream_url=camera.backup_stream_url,
+            status=CameraStatus(camera.status),
+            config=camera.config,
             health=None,  # Will be populated by monitoring
-            zone_id=camera_record["zone_id"],
-            tags=camera_record["tags"],
-            is_active=camera_record["is_active"],
-            created_at=camera_record["created_at"],
-            updated_at=camera_record["updated_at"],
-            last_seen_at=None,
+            zone_id=camera.zone_id,
+            tags=camera.tags,
+            is_active=camera.is_active,
+            created_at=camera.created_at,
+            updated_at=camera.updated_at,
+            last_seen_at=camera.last_seen_at,
         )
 
     except Exception as e:
@@ -350,7 +330,7 @@ async def create_camera(
 async def get_camera(
     camera_id: str,
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
 ) -> CameraResponse:
     """Get camera by ID.
@@ -374,7 +354,7 @@ async def get_camera(
         return CameraResponse(**cached_camera)
 
     # Get from database
-    camera = cameras_db.get(camera_id)
+    camera = await camera_service.get_camera_by_id(camera_id)
     if not camera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -384,28 +364,28 @@ async def get_camera(
     # Get current health status
     health = stream_health_db.get(camera_id)
     if not health:
-        health = await check_stream_health(camera_id, camera["stream_url"])
+        health = await check_stream_health(camera_id, camera.stream_url)
         stream_health_db[camera_id] = health
 
     camera_response = CameraResponse(
-        id=camera["id"],
-        name=camera["name"],
-        description=camera.get("description"),
-        location=camera["location"],
-        coordinates=camera.get("coordinates"),
-        camera_type=camera["camera_type"],
-        stream_url=camera["stream_url"],
-        stream_protocol=camera["stream_protocol"],
-        backup_stream_url=camera.get("backup_stream_url"),
-        status=camera.get("status", CameraStatus.OFFLINE),
-        config=camera["config"],
+        id=camera.id,
+        name=camera.name,
+        description=camera.description,
+        location=camera.location,
+        coordinates=camera.coordinates,
+        camera_type=camera.camera_type,
+        stream_url=camera.stream_url,
+        stream_protocol=camera.stream_protocol,
+        backup_stream_url=camera.backup_stream_url,
+        status=CameraStatus(camera.status),
+        config=camera.config,
         health=health,
-        zone_id=camera.get("zone_id"),
-        tags=camera.get("tags", []),
-        is_active=camera.get("is_active", True),
-        created_at=camera.get("created_at", datetime.now(UTC)),
-        updated_at=camera.get("updated_at", datetime.now(UTC)),
-        last_seen_at=camera.get("last_seen_at"),
+        zone_id=camera.zone_id,
+        tags=camera.tags,
+        is_active=camera.is_active,
+        created_at=camera.created_at,
+        updated_at=camera.updated_at,
+        last_seen_at=camera.last_seen_at,
     )
 
     # Cache for 30 seconds
@@ -446,22 +426,32 @@ async def update_camera(
     Raises:
         HTTPException: If camera not found or update fails
     """
-    camera = cameras_db.get(camera_id)
-    if not camera:
+    # Check if camera exists first
+    existing_camera = await camera_service.get_camera_by_id(camera_id)
+    if not existing_camera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Camera {camera_id} not found",
         )
 
     try:
-        # Update fields if provided
-        update_data = camera_data.model_dump(exclude_unset=True)
+        # Convert API schema to database schema for update
+        # Convert update data
+        update_dict = camera_data.model_dump(exclude_unset=True, exclude_none=True)
 
-        for field, value in update_data.items():
-            if value is not None:
-                camera[field] = value
+        # Handle config update if provided
+        if "config" in update_dict and update_dict["config"]:
+            update_dict["config"] = update_dict["config"].model_dump()
 
-        camera["updated_at"] = datetime.now(UTC)
+        db_update_data = CameraUpdateSchema(**update_dict)
+
+        # Update camera in database
+        updated_camera = await camera_service.update_camera(camera_id, db_update_data)
+        if not updated_camera:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Camera {camera_id} not found",
+            )
 
         # Invalidate caches
         await cache.delete(f"camera:{camera_id}")
@@ -470,11 +460,11 @@ async def update_camera(
         logger.info(
             "Camera updated successfully",
             camera_id=camera_id,
-            updated_fields=list(update_data.keys()),
+            updated_fields=list(update_dict.keys()),
             user_id=current_user.id,
         )
 
-        return await get_camera(camera_id, _db, current_user)
+        return await get_camera(camera_id, current_user, camera_service, cache)
 
     except Exception as e:
         logger.error(
@@ -499,7 +489,7 @@ async def delete_camera(
     camera_id: str,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("cameras:delete")),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(rate_limit_strict),
 ) -> SuccessResponse:
@@ -519,7 +509,8 @@ async def delete_camera(
     Raises:
         HTTPException: If camera not found
     """
-    camera = cameras_db.get(camera_id)
+    # Check if camera exists
+    camera = await camera_service.get_camera_by_id(camera_id)
     if not camera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -530,8 +521,15 @@ async def delete_camera(
         # Stop monitoring
         background_tasks.add_task(stop_stream_monitoring, camera_id)
 
-        # Remove from databases
-        del cameras_db[camera_id]
+        # Delete camera from database
+        success = await camera_service.delete_camera(camera_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Camera {camera_id} not found",
+            )
+
+        # Remove from stream health cache
         if camera_id in stream_health_db:
             del stream_health_db[camera_id]
 
@@ -542,7 +540,7 @@ async def delete_camera(
         logger.info(
             "Camera deleted successfully",
             camera_id=camera_id,
-            name=camera.get("name"),
+            name=camera.name,
             user_id=current_user.id,
         )
 
@@ -576,7 +574,7 @@ async def control_stream(
     stream_request: StreamRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("cameras:stream")),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(stream_control_rate_limit),
 ) -> SuccessResponse:
@@ -597,7 +595,8 @@ async def control_stream(
     Raises:
         HTTPException: If camera not found or operation fails
     """
-    camera = cameras_db.get(camera_id)
+    # Check if camera exists
+    camera = await camera_service.get_camera_by_id(camera_id)
     if not camera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -607,18 +606,25 @@ async def control_stream(
     try:
         action = stream_request.action
 
+        # Update camera status based on action
         if action == "start":
-            camera["status"] = CameraStatus.STREAMING
+            new_status = CameraStatus.STREAMING
             background_tasks.add_task(start_stream_monitoring, camera_id)
         elif action == "stop":
-            camera["status"] = CameraStatus.STOPPED
+            new_status = CameraStatus.STOPPED
             background_tasks.add_task(stop_stream_monitoring, camera_id)
         elif action == "restart":
-            camera["status"] = CameraStatus.STREAMING
+            new_status = CameraStatus.STREAMING
             background_tasks.add_task(stop_stream_monitoring, camera_id)
             background_tasks.add_task(start_stream_monitoring, camera_id)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid action: {action}",
+            )
 
-        camera["updated_at"] = datetime.now(UTC)
+        # Update camera status in database
+        await camera_service.update_camera_status(camera_id, new_status)
 
         # Invalidate cache
         await cache.delete(f"camera:{camera_id}")
@@ -636,7 +642,7 @@ async def control_stream(
             data={
                 "camera_id": camera_id,
                 "action": action,
-                "status": camera["status"],
+                "status": new_status.value,
             },
         )
 
@@ -663,7 +669,7 @@ async def control_stream(
 async def get_stream_health(
     camera_id: str,
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
 ) -> StreamHealth:
     """Get stream health metrics.
 
@@ -678,7 +684,7 @@ async def get_stream_health(
     Raises:
         HTTPException: If camera not found
     """
-    camera = cameras_db.get(camera_id)
+    camera = await camera_service.get_camera_by_id(camera_id)
     if not camera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -688,7 +694,7 @@ async def get_stream_health(
     # Get or refresh health data
     health = stream_health_db.get(camera_id)
     if not health:
-        health = await check_stream_health(camera_id, camera["stream_url"])
+        health = await check_stream_health(camera_id, camera.stream_url)
         stream_health_db[camera_id] = health
 
     logger.debug(
@@ -708,7 +714,7 @@ async def batch_operations(
     batch_request: CameraBatchOperation,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("cameras:batch")),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(batch_operation_rate_limit),
 ) -> list[CameraBatchResult]:
@@ -731,7 +737,8 @@ async def batch_operations(
 
     for camera_id in batch_request.camera_ids:
         try:
-            camera = cameras_db.get(camera_id)
+            # Check if camera exists
+            camera = await camera_service.get_camera_by_id(camera_id)
             if not camera:
                 results.append(
                     CameraBatchResult(
@@ -744,39 +751,56 @@ async def batch_operations(
 
             # Perform operation based on type
             if operation == "start_streams":
-                camera["status"] = CameraStatus.STREAMING
+                await camera_service.update_camera_status(camera_id, CameraStatus.STREAMING)
                 background_tasks.add_task(start_stream_monitoring, camera_id)
                 message = "Stream started"
 
             elif operation == "stop_streams":
-                camera["status"] = CameraStatus.STOPPED
+                await camera_service.update_camera_status(camera_id, CameraStatus.STOPPED)
                 background_tasks.add_task(stop_stream_monitoring, camera_id)
                 message = "Stream stopped"
 
             elif operation == "restart_streams":
-                camera["status"] = CameraStatus.STREAMING
+                await camera_service.update_camera_status(camera_id, CameraStatus.STREAMING)
                 background_tasks.add_task(stop_stream_monitoring, camera_id)
                 background_tasks.add_task(start_stream_monitoring, camera_id)
                 message = "Stream restarted"
 
             elif operation == "update_config":
                 if "config" in parameters:
-                    camera["config"].update(parameters["config"])
-                camera["updated_at"] = datetime.now(UTC)
+                    # Create update schema with new config
+                    update_data = CameraUpdateSchema(config=parameters["config"])
+                    await camera_service.update_camera(camera_id, update_data)
                 message = "Configuration updated"
 
             elif operation == "enable_analytics":
-                camera["config"]["analytics_enabled"] = True
-                camera["updated_at"] = datetime.now(UTC)
+                # Update camera config to enable analytics
+                new_config = camera.config.copy()
+                new_config["analytics_enabled"] = True
+                update_data = CameraUpdateSchema(config=new_config)
+                await camera_service.update_camera(camera_id, update_data)
                 message = "Analytics enabled"
 
             elif operation == "disable_analytics":
-                camera["config"]["analytics_enabled"] = False
-                camera["updated_at"] = datetime.now(UTC)
+                # Update camera config to disable analytics
+                new_config = camera.config.copy()
+                new_config["analytics_enabled"] = False
+                update_data = CameraUpdateSchema(config=new_config)
+                await camera_service.update_camera(camera_id, update_data)
                 message = "Analytics disabled"
 
             elif operation == "delete":
-                del cameras_db[camera_id]
+                success = await camera_service.delete_camera(camera_id)
+                if not success:
+                    results.append(
+                        CameraBatchResult(
+                            camera_id=camera_id,
+                            success=False,
+                            message=f"Failed to delete camera {camera_id}",
+                        )
+                    )
+                    continue
+
                 if camera_id in stream_health_db:
                     del stream_health_db[camera_id]
                 background_tasks.add_task(stop_stream_monitoring, camera_id)
@@ -843,7 +867,7 @@ async def get_camera_stats(
     camera_id: str,
     days: int = Query(7, ge=1, le=30, description="Number of days for statistics"),
     current_user: User = Depends(get_current_user),
-    _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
 ) -> CameraStats:
     """Get camera statistics.
@@ -861,7 +885,7 @@ async def get_camera_stats(
     Raises:
         HTTPException: If camera not found
     """
-    camera = cameras_db.get(camera_id)
+    camera = await camera_service.get_camera_by_id(camera_id)
     if not camera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

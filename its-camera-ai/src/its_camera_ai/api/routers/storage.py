@@ -4,6 +4,7 @@ Provides comprehensive media management functionality with MinIO integration,
 including file uploads, downloads, presigned URLs, and metadata management.
 """
 
+import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -202,8 +203,11 @@ async def upload_video(
         # Create temporary file for upload
         temp_file = None
         try:
-            # Save uploaded file to temporary location
-            temp_file = Path(tempfile.mktemp(suffix=file_extension))
+            # Save uploaded file to temporary location with secure creation
+            with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp:
+                temp_file = Path(tmp.name)
+                # Set secure file permissions (owner read/write only)
+                os.chmod(temp_file, 0o600)
 
             async with aiofiles.open(temp_file, 'wb') as f:
                 content = await file.read()
@@ -279,7 +283,7 @@ async def upload_video(
     description="Upload individual video frames for processing",
 )
 async def upload_frame(
-    background_tasks: BackgroundTasks,
+    _background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Frame image file"),
     camera_id: str = Form(..., description="Source camera ID"),
     frame_number: int = Form(..., description="Frame sequence number"),
@@ -393,7 +397,7 @@ async def upload_frame(
 async def init_chunked_upload(
     request: ChunkedUploadRequest,
     minio_service: MinIOService = Depends(get_minio_service),
-    current_user = Depends(get_current_user),
+    _current_user = Depends(get_current_user),
 ) -> ChunkedUploadResponse:
     """Initialize chunked upload for large files."""
 
@@ -562,12 +566,11 @@ async def get_presigned_url(
         target_bucket = request.bucket or settings.minio.video_bucket
 
         # Check if object exists for GET requests
-        if request.method.upper() == "GET":
-            if not await minio_service.object_exists(target_bucket, request.object_id):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Media object not found: {request.object_id}",
-                )
+        if request.method.upper() == "GET" and not await minio_service.object_exists(target_bucket, request.object_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Media object not found: {request.object_id}",
+            )
 
         # Generate presigned URL
         url = await minio_service.generate_presigned_url(
@@ -607,7 +610,7 @@ async def delete_media(
     bucket: str | None = Query(None, description="Source bucket"),
     version_id: str | None = Query(None, description="Specific version to delete"),
     minio_service: MinIOService = Depends(get_minio_service),
-    current_user = Depends(get_current_user),
+    _current_user = Depends(get_current_user),
     settings = Depends(get_settings),
 ):
     """Delete media object from storage."""
@@ -659,7 +662,7 @@ async def delete_media(
 async def batch_delete_media(
     request: MediaDeleteRequest,
     minio_service: MinIOService = Depends(get_minio_service),
-    current_user = Depends(get_current_user),
+    _current_user = Depends(get_current_user),
     settings = Depends(get_settings),
 ):
     """Delete multiple media objects."""

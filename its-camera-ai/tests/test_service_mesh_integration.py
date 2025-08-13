@@ -6,6 +6,7 @@ health checks, and distributed tracing.
 """
 
 import asyncio
+import contextlib
 import json
 import time
 import uuid
@@ -15,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import redis.asyncio as redis
 
-from src.its_camera_ai.core.exceptions import ServiceMeshError
+from src.its_camera_ai.core.exceptions import CircuitBreakerError, ServiceMeshError
 from src.its_camera_ai.services.service_mesh import (
     CircuitBreaker,
     CircuitBreakerConfig,
@@ -110,20 +111,20 @@ class TestCircuitBreaker:
         breaker = CircuitBreaker("test_service", config)
 
         async def failing_func():
-            raise Exception("Test failure")
+            raise RuntimeError("Test failure")
 
         # First failure
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             await breaker.call(failing_func)
         assert breaker.state == CircuitBreakerState.CLOSED
 
         # Second failure should trip the circuit
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             await breaker.call(failing_func)
         assert breaker.state == CircuitBreakerState.OPEN
 
         # Third call should be blocked by circuit breaker
-        with pytest.raises(ServiceMeshError, match="Circuit breaker open"):
+        with pytest.raises(CircuitBreakerError, match="Circuit breaker open"):
             await breaker.call(failing_func)
 
     @pytest.mark.asyncio
@@ -140,9 +141,9 @@ class TestCircuitBreaker:
 
         # Trip the circuit
         async def failing_func():
-            raise Exception("Test failure")
+            raise RuntimeError("Test failure")
 
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             await breaker.call(failing_func)
         assert breaker.state == CircuitBreakerState.OPEN
 
@@ -657,12 +658,10 @@ class TestIntegrationWorkflows:
                 ):
                     # Make multiple calls to trigger circuit breaker
                     for _i in range(6):  # More than failure threshold
-                        try:
+                        with contextlib.suppress(ServiceMeshError, RuntimeError):
                             await mesh_client.call_service(
                                 "failing_service", "test_method", {"test": "data"}
                             )
-                        except (ServiceMeshError, Exception):
-                            pass  # Expected failures
 
                     # Check circuit breaker state
                     cb_status = await mesh_client.get_circuit_breaker_status()

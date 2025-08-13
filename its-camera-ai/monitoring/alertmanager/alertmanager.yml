@@ -1,0 +1,305 @@
+# Alertmanager Configuration for ITS Camera AI
+# Provides intelligent alert routing, grouping, and escalation
+
+global:
+  # SMTP configuration for email alerts
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@its-camera-ai.com'
+  smtp_auth_username: 'alerts@its-camera-ai.com'
+  smtp_auth_password: '{{ .SMTPPassword }}'
+  smtp_require_tls: true
+  
+  # Slack webhook for team notifications
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+  
+  # PagerDuty integration key
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# Templates for alert formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration - how alerts are distributed
+route:
+  # Root route catches all alerts
+  group_by: ['alertname', 'service', 'severity']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 24h
+  receiver: 'its-camera-ai-default'
+  
+  # Specific routing rules
+  routes:
+    # Critical production alerts go to PagerDuty immediately
+    - match:
+        severity: critical
+        environment: production
+      receiver: 'pagerduty-critical'
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 5m
+      continue: true  # Also send to other receivers
+    
+    # High priority alerts go to Slack and email
+    - match:
+        severity: warning
+        environment: production
+      receiver: 'slack-warnings'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 2h
+      continue: true
+    
+    # SLO alerts require special handling
+    - match_re:
+        alertname: '.*SLO.*'
+      receiver: 'slo-alerts'
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 6h
+    
+    # Infrastructure alerts
+    - match_re:
+        component: 'infrastructure|kubernetes|gpu'
+      receiver: 'infrastructure-team'
+      group_wait: 2m
+      group_interval: 10m
+      repeat_interval: 4h
+    
+    # Application-specific alerts
+    - match_re:
+        component: 'application|inference|api'
+      receiver: 'application-team'
+      group_wait: 1m
+      group_interval: 5m
+      repeat_interval: 2h
+    
+    # Database and storage alerts
+    - match_re:
+        component: 'database|cache|messaging'
+      receiver: 'data-team'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+    
+    # Development environment alerts (low priority)
+    - match:
+        environment: development
+      receiver: 'dev-alerts'
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 24h
+    
+    # Staging environment alerts
+    - match:
+        environment: staging
+      receiver: 'staging-alerts'
+      group_wait: 2m
+      group_interval: 10m
+      repeat_interval: 8h
+
+# Inhibition rules - suppress alerts based on other active alerts
+inhibit_rules:
+  # Suppress individual service down alerts if entire cluster is down
+  - source_match:
+      alertname: 'KubernetesNodeDown'
+    target_match_re:
+      alertname: '.*Down|.*Unavailable'
+    equal: ['kubernetes_node']
+  
+  # Suppress latency alerts if service is down
+  - source_match_re:
+      alertname: '.*Down|.*Unavailable'
+    target_match_re:
+      alertname: '.*Latency.*|.*ResponseTime.*'
+    equal: ['service', 'job']
+  
+  # Suppress memory alerts if node is down
+  - source_match:
+      alertname: 'NodeDown'
+    target_match_re:
+      alertname: '.*Memory.*|.*CPU.*|.*Disk.*'
+    equal: ['instance']
+  
+  # Suppress GPU alerts if DCGM exporter is down
+  - source_match:
+      alertname: 'GPUDown'
+    target_match_re:
+      alertname: 'GPU.*'
+    equal: ['instance']
+
+# Receiver configurations
+receivers:
+  # Default receiver for unmatched alerts
+  - name: 'its-camera-ai-default'
+    email_configs:
+      - to: 'its-camera-ai-team@company.com'
+        subject: 'ITS Camera AI Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Environment: {{ .Labels.environment }}
+          
+          {{ end }}
+        headers:
+          From: 'ITS Camera AI Monitoring <alerts@its-camera-ai.com>'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#its-camera-ai-alerts'
+        title: 'ITS Camera AI Alert'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Service:* {{ .Labels.service }}
+          *Environment:* {{ .Labels.environment }}
+          {{ end }}
+  
+  # Critical alerts to PagerDuty
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - routing_key: '{{ .PagerDutyRoutingKey }}'
+        description: 'ITS Camera AI Critical Alert: {{ .GroupLabels.alertname }}'
+        details:
+          summary: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          environment: '{{ .GroupLabels.environment }}'
+          service: '{{ .GroupLabels.service }}'
+          severity: '{{ .GroupLabels.severity }}'
+        links:
+          - href: 'https://grafana.its-camera-ai.com/d/its-camera-ai-overview'
+            text: 'System Dashboard'
+          - href: 'https://grafana.its-camera-ai.com/d/its-camera-ai-performance'
+            text: 'Performance Dashboard'
+  
+  # Warning alerts to Slack
+  - name: 'slack-warnings'
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#its-camera-ai-warnings'
+        title: '⚠️ ITS Camera AI Warning'
+        color: 'warning'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          *Environment:* {{ .Labels.environment }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          {{ end }}
+        actions:
+          - type: button
+            text: 'View Dashboard'
+            url: 'https://grafana.its-camera-ai.com/d/its-camera-ai-overview'
+          - type: button
+            text: 'Silence Alert'
+            url: 'https://alertmanager.its-camera-ai.com/#/silences/new'
+  
+  # SLO-specific alerts
+  - name: 'slo-alerts'
+    email_configs:
+      - to: 'sre-team@company.com'
+        subject: '🚨 SLO Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          SLO Alert Details:
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          SLO: {{ .Labels.slo }}
+          Burn Rate: {{ .Labels.burn_rate }}
+          Environment: {{ .Labels.environment }}
+          
+          Dashboard: https://grafana.its-camera-ai.com/d/its-camera-ai-slo
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#its-camera-ai-slo'
+        color: 'danger'
+        title: '🚨 SLO Alert'
+        text: |
+          {{ range .Alerts }}
+          *SLO:* {{ .Labels.slo }}
+          *Alert:* {{ .Annotations.summary }}
+          *Burn Rate:* {{ .Labels.burn_rate }}
+          *Environment:* {{ .Labels.environment }}
+          {{ end }}
+  
+  # Infrastructure team alerts
+  - name: 'infrastructure-team'
+    email_configs:
+      - to: 'infrastructure-team@company.com'
+        subject: '🔧 Infrastructure Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Infrastructure Alert:
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          Node: {{ .Labels.instance }}
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#infrastructure-alerts'
+        color: 'warning'
+        title: '🔧 Infrastructure Alert'
+  
+  # Application team alerts
+  - name: 'application-team'
+    email_configs:
+      - to: 'app-team@company.com'
+        subject: '🚀 Application Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#app-alerts'
+        color: 'warning'
+        title: '🚀 Application Alert'
+  
+  # Data team alerts
+  - name: 'data-team'
+    email_configs:
+      - to: 'data-team@company.com'
+        subject: '💾 Data Infrastructure Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#data-alerts'
+        color: 'warning'
+        title: '💾 Data Alert'
+  
+  # Development environment alerts (email only, low priority)
+  - name: 'dev-alerts'
+    email_configs:
+      - to: 'dev-team@company.com'
+        subject: '[DEV] ITS Camera AI Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Development Environment Alert:
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Service: {{ .Labels.service }}
+          {{ end }}
+          
+          Note: This is from the development environment.
+  
+  # Staging environment alerts
+  - name: 'staging-alerts'
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#staging-alerts'
+        color: 'warning'
+        title: '[STAGING] ITS Camera AI Alert'
+
+# Alert templates
+templates:
+  - '/etc/alertmanager/templates/email.tmpl'
+  - '/etc/alertmanager/templates/slack.tmpl'
