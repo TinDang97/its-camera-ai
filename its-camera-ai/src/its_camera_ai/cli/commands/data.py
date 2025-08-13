@@ -39,7 +39,7 @@ async def cameras(
     ),
 ) -> None:
     """📹 List and manage camera streams.
-    
+
     Display all camera streams with their status, location, and performance metrics.
     """
     print_info("Fetching camera information...")
@@ -159,7 +159,7 @@ async def streams(
     ),
 ) -> None:
     """🌊 Monitor data streams.
-    
+
     Monitor real-time data streams from cameras including throughput,
     quality metrics, and processing statistics.
     """
@@ -172,7 +172,7 @@ async def streams(
 async def _show_streams_status(camera_id: str | None, show_stats: bool) -> None:
     """
     Show current stream status.
-    
+
     Args:
         camera_id: Optional camera ID filter
         show_stats: Whether to show detailed statistics
@@ -261,7 +261,7 @@ async def _show_streams_status(camera_id: str | None, show_stats: bool) -> None:
 async def _monitor_streams_realtime(camera_id: str | None) -> None:
     """
     Monitor streams in real-time.
-    
+
     Args:
         camera_id: Optional camera ID filter
     """
@@ -291,7 +291,7 @@ async def pipeline(
     ),
 ) -> None:
     """⚙️ Control data processing pipeline.
-    
+
     Start, stop, restart, or check status of the data processing pipeline
     and its individual stages.
     """
@@ -313,7 +313,7 @@ async def pipeline(
 async def _show_pipeline_status(stage: str | None) -> None:
     """
     Show pipeline status.
-    
+
     Args:
         stage: Optional stage filter
     """
@@ -411,7 +411,7 @@ async def _start_pipeline(
 ) -> None:
     """
     Start pipeline or specific stage.
-    
+
     Args:
         stage: Optional stage to start
         config_file: Optional configuration file
@@ -445,7 +445,7 @@ async def _start_pipeline(
 async def _stop_pipeline(stage: str | None) -> None:
     """
     Stop pipeline or specific stage.
-    
+
     Args:
         stage: Optional stage to stop
     """
@@ -476,7 +476,7 @@ async def _restart_pipeline(
 ) -> None:
     """
     Restart pipeline or specific stage.
-    
+
     Args:
         stage: Optional stage to restart
         config_file: Optional configuration file
@@ -514,7 +514,7 @@ async def process(
     ),
 ) -> None:
     """🚀 Process data files through the pipeline.
-    
+
     Process video files or directories through the complete data pipeline
     including preprocessing, inference, and output generation.
     """
@@ -655,7 +655,7 @@ def storage(
     ),
 ) -> None:
     """💾 Manage data storage.
-    
+
     Manage stored data including listing, cleaning old files, creating backups,
     and restoring from backups.
     """
@@ -677,7 +677,7 @@ def storage(
 def _list_storage(path_filter: str | None) -> None:
     """
     List storage contents.
-    
+
     Args:
         path_filter: Optional path filter
     """
@@ -758,7 +758,7 @@ def _list_storage(path_filter: str | None) -> None:
 def _clean_storage(days: int, dry_run: bool) -> None:
     """
     Clean old storage data.
-    
+
     Args:
         days: Age threshold in days
         dry_run: Show what would be done
@@ -806,7 +806,7 @@ def _clean_storage(days: int, dry_run: bool) -> None:
 def _backup_storage(path: str | None, dry_run: bool) -> None:
     """
     Create storage backup.
-    
+
     Args:
         path: Path to backup
         dry_run: Show what would be done
@@ -858,7 +858,7 @@ def _backup_storage(path: str | None, dry_run: bool) -> None:
 def _restore_storage(path: str | None, dry_run: bool) -> None:
     """
     Restore from backup.
-    
+
     Args:
         path: Backup path to restore
         dry_run: Show what would be done

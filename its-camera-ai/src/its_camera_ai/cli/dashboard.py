@@ -230,7 +230,7 @@ class Dashboard:
         table.add_column("Port", width=8)
         table.add_column("Uptime", width=10)
 
-        for service_id, service in services.items():
+        for _service_id, service in services.items():
             status_style = get_status_style(service["status"])
             status_icon = "✅" if service["healthy"] else "❌"
             port_str = str(service["port"]) if service["port"] else "N/A"

@@ -22,13 +22,13 @@ _its_camera_ai_completion() {
     local cur opts
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
-    
+
     if [[ $COMP_CWORD -eq 1 ]]; then
         opts="service ml data security monitor config info version status dashboard interactive"
         COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
         return 0
     fi
-    
+
     case "${COMP_WORDS[1]}" in
         service)
             opts="start stop restart status logs scale health"
@@ -51,7 +51,7 @@ _its_camera_ai_completion() {
         *)
             ;;
     esac
-    
+
     COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
 }
 
@@ -62,11 +62,11 @@ complete -F _its_camera_ai_completion its-camera-ai
 
 _its_camera_ai() {
     local context state line
-    
+
     _arguments -C \\
         '1: :_its_camera_ai_commands' \\
         '*::arg:->args'
-    
+
     case $state in
         args)
             case $words[1] in
@@ -157,7 +157,7 @@ complete -c its-camera-ai -n '__fish_seen_subcommand_from config' -a 'get set li
 
 Register-ArgumentCompleter -Native -CommandName its-camera-ai -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    
+
     $commands = @{
         'service' = @('start', 'stop', 'restart', 'status', 'logs', 'scale', 'health')
         'ml' = @('train', 'inference', 'models', 'deploy', 'experiments', 'benchmark', 'optimize')
@@ -166,9 +166,9 @@ Register-ArgumentCompleter -Native -CommandName its-camera-ai -ScriptBlock {
         'monitor' = @('metrics', 'alerts', 'health', 'dashboard', 'logs')
         'config' = @('get', 'set', 'list', 'validate', 'profile')
     }
-    
+
     $tokens = $commandAst.ToString() -split '\\s+'
-    
+
     if ($tokens.Length -eq 2) {
         # Complete main commands
         $mainCommands = @('service', 'ml', 'data', 'security', 'monitor', 'config', 'info', 'version', 'status', 'dashboard', 'interactive')

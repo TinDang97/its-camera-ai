@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class CUDAPreprocessor:
     """
     Production-optimized GPU preprocessing pipeline using CUDA kernels.
-    
+
     Performance targets:
     - <5ms preprocessing latency per batch
     - Zero-copy GPU memory operations
@@ -110,7 +110,7 @@ class CUDAPreprocessor:
             ) {
                 int idx = blockDim.x * blockIdx.x + threadIdx.x;
                 int total_elements = batch_size * channels * target_height * target_width;
-                
+
                 if (idx < total_elements) {
                     int b = idx / (channels * target_height * target_width);
                     int remaining = idx % (channels * target_height * target_width);
@@ -118,7 +118,7 @@ class CUDAPreprocessor:
                     remaining = remaining % (target_height * target_width);
                     int h = remaining / target_width;
                     int w = remaining % target_width;
-                    
+
                     // Check if we're in the valid region (not padding)
                     if (h >= pad_top && h < pad_top + orig_height &&
                         w >= pad_left && w < pad_left + orig_width) {
@@ -145,11 +145,11 @@ class CUDAPreprocessor:
     ) -> tuple[torch.Tensor, list[dict[str, Any]]]:
         """
         GPU-accelerated batch preprocessing with zero-copy operations.
-        
+
         Args:
             frames: List of input frames as numpy arrays (H, W, C)
             target_size: Optional target size, defaults to self.input_size
-            
+
         Returns:
             Tuple of (preprocessed_tensor, metadata_list)
         """
@@ -381,10 +381,7 @@ class CUDAPreprocessor:
         dtype: torch.dtype = torch.half
     ) -> torch.Tensor:
         """Get tensor from pre-allocated pool or create new one."""
-        if dtype == torch.half:
-            pool = self.output_tensor_pool
-        else:
-            pool = self.tensor_pool
+        pool = self.output_tensor_pool if dtype == torch.half else self.tensor_pool
 
         if shape in pool:
             tensor = pool[shape]
@@ -424,7 +421,7 @@ class CUDAPreprocessor:
 class DALIPreprocessor:
     """
     NVIDIA DALI-based preprocessing pipeline for maximum throughput.
-    
+
     Optimized for high-throughput video stream processing with minimal latency.
     """
 
@@ -516,7 +513,7 @@ class DALIPreprocessor:
 
         # Create metadata
         metadata_list = []
-        for i, frame in enumerate(frames):
+        for _i, frame in enumerate(frames):
             metadata = {
                 "original_shape": frame.shape[:2],
                 "scale_factor": 1.0,  # DALI handles scaling internally

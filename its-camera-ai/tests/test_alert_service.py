@@ -425,7 +425,7 @@ class TestSMSNotificationChannel:
         long_message = """
 Traffic Violation Alert
 
-Type: Speed Limit Violation  
+Type: Speed Limit Violation
 Severity: CRITICAL
 Location: Camera CAM-001
 Time: 2023-12-01 10:30:00

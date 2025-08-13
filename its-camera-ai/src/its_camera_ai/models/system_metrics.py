@@ -90,7 +90,7 @@ class MetricUnit(str, Enum):
 
 class SystemMetrics(BaseModel):
     """System performance and operational metrics.
-    
+
     Designed for time-series data storage with efficient querying
     for monitoring dashboards and alerting systems.
     """
@@ -221,7 +221,7 @@ class SystemMetrics(BaseModel):
 
     def set_thresholds(self, warning: float, critical: float) -> None:
         """Set alert thresholds for the metric.
-        
+
         Args:
             warning: Warning threshold value
             critical: Critical threshold value
@@ -231,7 +231,7 @@ class SystemMetrics(BaseModel):
 
     def add_label(self, key: str, value: str) -> None:
         """Add a label to the metric.
-        
+
         Args:
             key: Label key
             value: Label value
@@ -242,7 +242,7 @@ class SystemMetrics(BaseModel):
 
     def add_context(self, key: str, value: Any) -> None:
         """Add context information to the metric.
-        
+
         Args:
             key: Context key
             value: Context value
@@ -286,14 +286,14 @@ class SystemMetrics(BaseModel):
         labels: dict[str, str] | None = None
     ) -> "SystemMetrics":
         """Create a performance metric.
-        
+
         Args:
             name: Metric name
             value: Metric value
             source_id: Source identifier
             unit: Metric unit
             labels: Additional labels
-            
+
         Returns:
             SystemMetrics instance
         """
@@ -321,13 +321,13 @@ class SystemMetrics(BaseModel):
         unit: MetricUnit = MetricUnit.PERCENT
     ) -> "SystemMetrics":
         """Create a resource utilization metric.
-        
+
         Args:
             metric_type: Resource metric type
             value: Resource usage value
             hostname: Server hostname
             unit: Metric unit
-            
+
         Returns:
             SystemMetrics instance
         """
@@ -353,7 +353,7 @@ class SystemMetrics(BaseModel):
 
 class AggregatedMetrics(BaseModel):
     """Pre-computed aggregated metrics for faster dashboard queries.
-    
+
     Stores hourly, daily, and weekly rollups to avoid expensive
     real-time aggregations on large datasets.
     """

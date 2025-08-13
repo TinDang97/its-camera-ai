@@ -142,22 +142,22 @@ class CUDAPreprocessingKernels:
             ) {
                 int idx = blockIdx.x * blockDim.x + threadIdx.x;
                 int total_pixels = batch_size * output_height * output_width * channels;
-                
+
                 if (idx >= total_pixels) return;
-                
+
                 // Calculate batch, pixel, and channel indices
                 int batch_idx = idx / (output_height * output_width * channels);
                 int remaining = idx % (output_height * output_width * channels);
                 int pixel_idx = remaining / channels;
                 int channel = remaining % channels;
-                
+
                 int y = pixel_idx / output_width;
                 int x = pixel_idx % output_width;
-                
+
                 float scale = scales[batch_idx];
                 int offset_x = offsets_x[batch_idx];
                 int offset_y = offsets_y[batch_idx];
-                
+
                 // Check if pixel is in padding area
                 if (x < offset_x || x >= offset_x + (int)(input_width * scale) ||
                     y < offset_y || y >= offset_y + (int)(input_height * scale)) {
@@ -166,15 +166,15 @@ class CUDAPreprocessingKernels:
                     // Map back to input coordinates
                     int input_x = (int)((x - offset_x) / scale);
                     int input_y = (int)((y - offset_y) / scale);
-                    
+
                     // Ensure coordinates are within bounds
                     input_x = min(max(input_x, 0), input_width - 1);
                     input_y = min(max(input_y, 0), input_height - 1);
-                    
+
                     int input_idx = batch_idx * (input_height * input_width * channels) +
                                    input_y * input_width * channels +
                                    input_x * channels + channel;
-                    
+
                     output_batch[idx] = input_batch[input_idx];
                 }
             }
@@ -198,43 +198,43 @@ class CUDAPreprocessingKernels:
             ) {
                 int idx = blockIdx.x * blockDim.x + threadIdx.x;
                 int total_pixels = batch_size * output_height * output_width * channels;
-                
+
                 if (idx >= total_pixels) return;
-                
+
                 int batch_idx = idx / (output_height * output_width * channels);
                 int remaining = idx % (output_height * output_width * channels);
                 int pixel_idx = remaining / channels;
                 int channel = remaining % channels;
-                
+
                 int out_y = pixel_idx / output_width;
                 int out_x = pixel_idx % output_width;
-                
+
                 // Bilinear interpolation
                 float scale_y = (float)input_height / output_height;
                 float scale_x = (float)input_width / output_width;
-                
+
                 float src_y = (out_y + 0.5f) * scale_y - 0.5f;
                 float src_x = (out_x + 0.5f) * scale_x - 0.5f;
-                
+
                 int y1 = max(0, (int)floor(src_y));
                 int y2 = min(input_height - 1, y1 + 1);
                 int x1 = max(0, (int)floor(src_x));
                 int x2 = min(input_width - 1, x1 + 1);
-                
+
                 float wy2 = src_y - y1;
                 float wy1 = 1.0f - wy2;
                 float wx2 = src_x - x1;
                 float wx1 = 1.0f - wx2;
-                
+
                 int base_input = batch_idx * (input_height * input_width * channels);
-                
+
                 unsigned char p11 = input_batch[base_input + y1 * input_width * channels + x1 * channels + channel];
                 unsigned char p12 = input_batch[base_input + y1 * input_width * channels + x2 * channels + channel];
                 unsigned char p21 = input_batch[base_input + y2 * input_width * channels + x1 * channels + channel];
                 unsigned char p22 = input_batch[base_input + y2 * input_width * channels + x2 * channels + channel];
-                
+
                 float result = wy1 * wx1 * p11 + wy1 * wx2 * p12 + wy2 * wx1 * p21 + wy2 * wx2 * p22;
-                
+
                 output_batch[idx] = (unsigned char)min(255.0f, max(0.0f, result));
             }
             '''
@@ -267,7 +267,7 @@ class CUDAPreprocessingKernels:
         offsets_y = []
         metadata_list = []
 
-        for i in range(batch_size):
+        for _i in range(batch_size):
             scale = min(output_h / input_h, output_w / input_w)
             new_h, new_w = int(input_h * scale), int(input_w * scale)
             offset_x = (output_w - new_w) // 2
@@ -398,7 +398,7 @@ class AsyncQualityCalculator:
 class ProductionPreprocessingOptimizer:
     """
     Production-ready preprocessing optimizer combining all optimization techniques.
-    
+
     This class provides the highest performance preprocessing pipeline by:
     1. Using custom CUDA kernels for batch operations
     2. Managing GPU memory pools for tensor reuse
@@ -464,7 +464,7 @@ class ProductionPreprocessingOptimizer:
                 all_processed_frames = []
                 all_metadata = []
 
-                for group_shapes, group_data in dimension_groups.items():
+                for _group_shapes, group_data in dimension_groups.items():
                     group_frames, group_indices = group_data
 
                     if len(group_frames) > 1 and self.cuda_kernels and self.cuda_kernels.kernels_compiled:

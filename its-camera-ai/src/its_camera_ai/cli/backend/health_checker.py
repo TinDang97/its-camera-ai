@@ -87,7 +87,7 @@ class SystemHealth:
 
 class HealthChecker:
     """Comprehensive health checking system.
-    
+
     Features:
     - Service health monitoring
     - Database connectivity checks
@@ -99,7 +99,7 @@ class HealthChecker:
 
     def __init__(self, settings: Settings = None):
         """Initialize health checker.
-        
+
         Args:
             settings: Application settings
         """
@@ -155,7 +155,7 @@ class HealthChecker:
 
     def register_health_check(self, name: str, check_func: Callable) -> None:
         """Register custom health check.
-        
+
         Args:
             name: Name of the health check
             check_func: Async function that returns HealthCheckResult
@@ -165,10 +165,10 @@ class HealthChecker:
 
     async def check_component(self, component: str) -> HealthCheckResult:
         """Check health of a specific component.
-        
+
         Args:
             component: Name of the component to check
-            
+
         Returns:
             Health check result
         """
@@ -204,11 +204,11 @@ class HealthChecker:
         parallel: bool = True
     ) -> SystemHealth:
         """Check health of all or specified components.
-        
+
         Args:
             components: List of specific components to check
             parallel: Whether to run checks in parallel
-            
+
         Returns:
             System health assessment
         """
@@ -655,11 +655,11 @@ class HealthChecker:
 
     async def benchmark_component(self, component: str, iterations: int = 5) -> dict[str, Any]:
         """Benchmark a component's performance.
-        
+
         Args:
             component: Component to benchmark
             iterations: Number of test iterations
-            
+
         Returns:
             Benchmark results
         """

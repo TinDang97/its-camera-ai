@@ -5,6 +5,7 @@ event streaming and monitoring of backend services.
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from collections.abc import AsyncGenerator, Callable
@@ -32,7 +33,7 @@ class StreamEvent:
 
 class EventStreamer:
     """Real-time event streaming for monitoring.
-    
+
     Features:
     - Server-Sent Events (SSE) streaming
     - WebSocket connections
@@ -43,7 +44,7 @@ class EventStreamer:
 
     def __init__(self, settings: Settings = None):
         """Initialize event streamer.
-        
+
         Args:
             settings: Application settings
         """
@@ -71,7 +72,7 @@ class EventStreamer:
 
     async def connect(self, timeout: float = 10.0) -> None:
         """Establish connection for event streaming.
-        
+
         Args:
             timeout: Connection timeout in seconds
         """
@@ -107,10 +108,8 @@ class EventStreamer:
         # Stop reconnection task
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reconnect_task
-            except asyncio.CancelledError:
-                pass
             self._reconnect_task = None
 
         # Close WebSocket
@@ -136,7 +135,7 @@ class EventStreamer:
 
     def register_handler(self, event_type: str, handler: Callable) -> None:
         """Register event handler.
-        
+
         Args:
             event_type: Type of event to handle
             handler: Async function to handle events
@@ -149,7 +148,7 @@ class EventStreamer:
 
     def unregister_handler(self, event_type: str, handler: Callable) -> None:
         """Unregister event handler.
-        
+
         Args:
             event_type: Type of event
             handler: Handler function to remove
@@ -163,7 +162,7 @@ class EventStreamer:
 
     async def _dispatch_event(self, event: StreamEvent) -> None:
         """Dispatch event to registered handlers.
-        
+
         Args:
             event: Event to dispatch
         """
@@ -191,11 +190,11 @@ class EventStreamer:
         params: dict[str, Any] | None = None
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream Server-Sent Events.
-        
+
         Args:
             endpoint: SSE endpoint to connect to
             params: Query parameters
-            
+
         Yields:
             StreamEvent: Events from the stream
         """
@@ -248,7 +247,7 @@ class EventStreamer:
         params: dict[str, Any] | None = None
     ) -> None:
         """Connect to WebSocket endpoint.
-        
+
         Args:
             endpoint: WebSocket endpoint
             params: Query parameters
@@ -273,7 +272,7 @@ class EventStreamer:
 
     async def listen_websocket(self) -> AsyncGenerator[StreamEvent, None]:
         """Listen for WebSocket messages.
-        
+
         Yields:
             StreamEvent: Events from WebSocket
         """
@@ -313,7 +312,7 @@ class EventStreamer:
 
     async def send_websocket_message(self, message: dict[str, Any]) -> None:
         """Send message via WebSocket.
-        
+
         Args:
             message: Message to send
         """
@@ -330,7 +329,7 @@ class EventStreamer:
 
     async def stream_system_events(self) -> AsyncGenerator[StreamEvent, None]:
         """Stream system events (metrics, health, alerts).
-        
+
         Yields:
             StreamEvent: System events
         """
@@ -347,10 +346,10 @@ class EventStreamer:
 
     async def stream_camera_events(self, camera_ids: list[str] | None = None) -> AsyncGenerator[StreamEvent, None]:
         """Stream camera-related events.
-        
+
         Args:
             camera_ids: List of camera IDs to filter by
-            
+
         Yields:
             StreamEvent: Camera events
         """
@@ -370,7 +369,7 @@ class EventStreamer:
 
     async def stream_analytics_events(self) -> AsyncGenerator[StreamEvent, None]:
         """Stream analytics and ML events.
-        
+
         Yields:
             StreamEvent: Analytics events
         """
@@ -391,7 +390,7 @@ class EventStreamer:
         auto_reconnect: bool = True
     ) -> None:
         """Start continuous event monitoring.
-        
+
         Args:
             event_types: List of event types to monitor
             auto_reconnect: Whether to auto-reconnect on failure
@@ -404,7 +403,7 @@ class EventStreamer:
 
         while self._connected:
             try:
-                async for event in self.stream_sse(
+                async for _event in self.stream_sse(
                     endpoint="/api/v1/events/stream",
                     params=params
                 ):
@@ -431,11 +430,11 @@ class EventStreamer:
         limit: int = 100
     ) -> list[StreamEvent]:
         """Get recent events from buffer.
-        
+
         Args:
             event_type: Filter by event type
             limit: Maximum number of events to return
-            
+
         Returns:
             List of recent events
         """
@@ -460,12 +459,12 @@ class EventStreamer:
         condition: Callable[[StreamEvent], bool] | None = None
     ) -> StreamEvent | None:
         """Wait for a specific event.
-        
+
         Args:
             event_type: Event type to wait for
             timeout: Timeout in seconds
             condition: Optional condition function
-            
+
         Returns:
             Matching event or None if timeout
         """
@@ -496,7 +495,7 @@ class EventStreamer:
 
     def get_connection_status(self) -> dict[str, Any]:
         """Get connection status information.
-        
+
         Returns:
             Connection status dictionary
         """

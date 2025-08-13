@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 
 class FrameService(BaseAsyncService[FrameMetadata]):
     """High-throughput async service for frame metadata operations.
-    
+
     Designed for processing 30+ FPS per camera across 100+ cameras
     with optimized batch operations and minimal latency.
     """
@@ -44,13 +44,13 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         self, frame_data: FrameMetadataCreateSchema
     ) -> FrameMetadata:
         """Create single frame metadata record.
-        
+
         Args:
             frame_data: Frame metadata creation data
-            
+
         Returns:
             Created frame metadata instance
-            
+
         Raises:
             DatabaseError: If creation fails
         """
@@ -100,13 +100,13 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         self, batch_data: BatchFrameMetadataCreateSchema
     ) -> BatchOperationResultSchema:
         """Batch create frame metadata records for high throughput.
-        
+
         Args:
             batch_data: Batch of frame metadata to create
-            
+
         Returns:
             Batch operation result with performance metrics
-            
+
         Raises:
             DatabaseError: If batch creation fails
         """
@@ -186,11 +186,11 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         self, frame_id: str, update_data: FrameMetadataUpdateSchema
     ) -> FrameMetadata | None:
         """Update frame metadata after processing completion.
-        
+
         Args:
             frame_id: Frame metadata ID
             update_data: Processing update data
-            
+
         Returns:
             Updated frame metadata if found, None otherwise
         """
@@ -236,11 +236,11 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         self, camera_id: str | None = None, limit: int = 100
     ) -> list[FrameMetadata]:
         """Get pending frames for processing.
-        
+
         Args:
             camera_id: Optional camera ID filter
             limit: Maximum number of frames to return
-            
+
         Returns:
             List of pending frame metadata
         """
@@ -277,7 +277,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         include_detections: bool = False,
     ) -> list[FrameMetadata]:
         """Get frames for a specific camera with filtering.
-        
+
         Args:
             camera_id: Camera identifier
             start_time: Optional start time filter
@@ -286,7 +286,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             has_detections: Optional detection filter
             limit: Maximum number of frames
             include_detections: Whether to load detection results
-            
+
         Returns:
             List of frame metadata
         """
@@ -332,11 +332,11 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         time_window_hours: int = 24,
     ) -> dict[str, Any]:
         """Get frame processing statistics.
-        
+
         Args:
             camera_id: Optional camera ID filter
             time_window_hours: Time window for statistics (hours)
-            
+
         Returns:
             Processing statistics dictionary
         """
@@ -457,11 +457,11 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         self, retention_days: int = 7, batch_size: int = 1000
     ) -> int:
         """Clean up old frame metadata beyond retention period.
-        
+
         Args:
             retention_days: Number of days to retain frames
             batch_size: Number of frames to delete per batch
-            
+
         Returns:
             Number of frames deleted
         """
@@ -476,7 +476,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
                     .where(
                         and_(
                             FrameMetadata.timestamp < cutoff_time,
-                            FrameMetadata.is_stored == False,  # Only delete unstored frames
+                            not FrameMetadata.is_stored,  # Only delete unstored frames
                         )
                     )
                     .limit(batch_size)
@@ -520,11 +520,11 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         limit: int = 50,
     ) -> list[FrameMetadata]:
         """Get real-time frame feed for SSE broadcasting.
-        
+
         Args:
             camera_ids: Optional list of camera IDs to filter by
             limit: Maximum number of recent frames
-            
+
         Returns:
             List of recent frame metadata with detections
         """
@@ -569,10 +569,10 @@ class DetectionService(BaseAsyncService[DetectionResult]):
         self, batch_data: BatchDetectionResultCreateSchema
     ) -> BatchOperationResultSchema:
         """Batch create detection results for high throughput.
-        
+
         Args:
             batch_data: Batch of detection results to create
-            
+
         Returns:
             Batch operation result with performance metrics
         """

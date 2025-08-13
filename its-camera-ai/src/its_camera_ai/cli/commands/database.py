@@ -40,7 +40,7 @@ def init(
     console.print("[bold blue]Initializing database...[/bold blue]")
 
     try:
-        settings = get_settings()
+        get_settings()
 
         if run_migrations:
             console.print("Running database migrations...")

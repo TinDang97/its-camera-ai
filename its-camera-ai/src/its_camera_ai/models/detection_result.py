@@ -68,7 +68,7 @@ class VehicleType(str, Enum):
 
 class DetectionResult(BaseModel):
     """Individual detection result within a frame.
-    
+
     Stores bounding box coordinates, classification confidence,
     tracking information, and vehicle-specific attributes.
     """
@@ -293,10 +293,10 @@ class DetectionResult(BaseModel):
 
     def set_bounding_box(self, x1: float, y1: float, x2: float, y2: float) -> None:
         """Set bounding box coordinates and calculate derived properties.
-        
+
         Args:
             x1: Top-left X coordinate
-            y1: Top-left Y coordinate  
+            y1: Top-left Y coordinate
             x2: Bottom-right X coordinate
             y2: Bottom-right Y coordinate
         """
@@ -310,7 +310,7 @@ class DetectionResult(BaseModel):
 
     def set_velocity(self, vx: float, vy: float) -> None:
         """Set velocity components and calculate magnitude and direction.
-        
+
         Args:
             vx: Velocity in X direction
             vy: Velocity in Y direction
@@ -330,7 +330,7 @@ class DetectionResult(BaseModel):
         bbox: dict[str, float] | None = None
     ) -> None:
         """Set license plate information.
-        
+
         Args:
             plate_text: License plate text
             confidence: Recognition confidence
@@ -343,7 +343,7 @@ class DetectionResult(BaseModel):
 
     def mark_false_positive(self, reason: str | None = None) -> None:
         """Mark detection as false positive.
-        
+
         Args:
             reason: Optional reason for false positive marking
         """
@@ -355,7 +355,7 @@ class DetectionResult(BaseModel):
 
     def verify_detection(self, verified_by: str) -> None:
         """Mark detection as human-verified.
-        
+
         Args:
             verified_by: Username or ID of verifier
         """

@@ -80,7 +80,7 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                 ("grpc.max_send_message_length", 16 * 1024 * 1024),  # 16MB
             ]
 
-            for option in options:
+            for _option in options:
                 self.server.add_generic_rpc_handlers(
                     (grpc.method_handlers_generic_handler("", {}),)
                 )
@@ -546,7 +546,7 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                 # Get metrics for all queues
                 all_metrics = await self.redis_manager.get_all_metrics()
 
-                for queue_name, metrics in all_metrics.items():
+                for _queue_name, metrics in all_metrics.items():
                     queue_metric = frame_pb.QueueMetrics(
                         queue_name=metrics.queue_name,
                         pending_count=metrics.pending_count,

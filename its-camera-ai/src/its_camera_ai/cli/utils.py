@@ -29,7 +29,7 @@ console = Console()
 def setup_logging(level: str = "INFO") -> None:
     """
     Setup logging with Rich formatting.
-    
+
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
@@ -69,7 +69,7 @@ def show_banner() -> None:
 def create_progress() -> Progress:
     """
     Create a Rich progress bar for long-running operations.
-    
+
     Returns:
         Configured Progress instance
     """
@@ -87,7 +87,7 @@ def create_progress() -> Progress:
 def create_status_table() -> Table:
     """
     Create a table for displaying service status.
-    
+
     Returns:
         Configured Table instance
     """
@@ -103,7 +103,7 @@ def create_status_table() -> Table:
 def create_metrics_table() -> Table:
     """
     Create a table for displaying metrics.
-    
+
     Returns:
         Configured Table instance
     """
@@ -119,10 +119,10 @@ def create_metrics_table() -> Table:
 def format_bytes(bytes_value: int) -> str:
     """
     Format bytes into human-readable format.
-    
+
     Args:
         bytes_value: Number of bytes
-        
+
     Returns:
         Formatted string (e.g., "1.5 GB")
     """
@@ -136,10 +136,10 @@ def format_bytes(bytes_value: int) -> str:
 def format_duration(seconds: float) -> str:
     """
     Format duration in seconds to human-readable format.
-    
+
     Args:
         seconds: Duration in seconds
-        
+
     Returns:
         Formatted string (e.g., "1h 30m 45s")
     """
@@ -166,11 +166,11 @@ def format_duration(seconds: float) -> str:
 def format_percentage(value: float, total: float) -> str:
     """
     Format a percentage value.
-    
+
     Args:
         value: Current value
         total: Total value
-        
+
     Returns:
         Formatted percentage string
     """
@@ -182,10 +182,10 @@ def format_percentage(value: float, total: float) -> str:
 def get_status_style(status: str) -> str:
     """
     Get Rich style for status value.
-    
+
     Args:
         status: Status string
-        
+
     Returns:
         Rich style string
     """
@@ -203,7 +203,7 @@ def get_status_style(status: str) -> str:
 def print_error(message: str, exit_code: int = 1) -> None:
     """
     Print error message and exit.
-    
+
     Args:
         message: Error message
         exit_code: Exit code (default: 1)
@@ -215,7 +215,7 @@ def print_error(message: str, exit_code: int = 1) -> None:
 def print_warning(message: str) -> None:
     """
     Print warning message.
-    
+
     Args:
         message: Warning message
     """
@@ -225,7 +225,7 @@ def print_warning(message: str) -> None:
 def print_success(message: str) -> None:
     """
     Print success message.
-    
+
     Args:
         message: Success message
     """
@@ -235,7 +235,7 @@ def print_success(message: str) -> None:
 def print_info(message: str) -> None:
     """
     Print info message.
-    
+
     Args:
         message: Info message
     """
@@ -245,11 +245,11 @@ def print_info(message: str) -> None:
 def confirm_action(message: str, default: bool = False) -> bool:
     """
     Ask user for confirmation.
-    
+
     Args:
         message: Confirmation message
         default: Default value if user just presses Enter
-        
+
     Returns:
         True if confirmed, False otherwise
     """
@@ -267,7 +267,7 @@ def confirm_action(message: str, default: bool = False) -> bool:
 def display_config(config: dict[str, Any], title: str = "Configuration") -> None:
     """
     Display configuration in a formatted table.
-    
+
     Args:
         config: Configuration dictionary
         title: Table title
@@ -305,10 +305,10 @@ class CLIError(Exception):
 def handle_async_command(func):
     """
     Decorator to handle async commands in Typer.
-    
+
     Args:
         func: Async function to wrap
-        
+
     Returns:
         Wrapped synchronous function
     """

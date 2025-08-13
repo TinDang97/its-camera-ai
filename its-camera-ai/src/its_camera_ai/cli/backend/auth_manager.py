@@ -31,7 +31,7 @@ class AuthorizationError(Exception):
 
 class CLIAuthManager:
     """Authentication manager for CLI operations.
-    
+
     Features:
     - JWT token management
     - User authentication
@@ -42,7 +42,7 @@ class CLIAuthManager:
 
     def __init__(self, settings: Settings = None):
         """Initialize authentication manager.
-        
+
         Args:
             settings: Application settings
         """
@@ -99,11 +99,11 @@ class CLIAuthManager:
         expires_delta: timedelta | None = None
     ) -> str:
         """Create JWT access token.
-        
+
         Args:
             data: Token payload data
             expires_delta: Token expiration time
-            
+
         Returns:
             JWT token string
         """
@@ -128,13 +128,13 @@ class CLIAuthManager:
 
     def verify_token(self, token: str) -> dict[str, Any]:
         """Verify and decode JWT token.
-        
+
         Args:
             token: JWT token to verify
-            
+
         Returns:
             Decoded token payload
-            
+
         Raises:
             AuthenticationError: If token is invalid
         """
@@ -153,10 +153,10 @@ class CLIAuthManager:
 
     def hash_password(self, password: str) -> str:
         """Hash a password.
-        
+
         Args:
             password: Plain text password
-            
+
         Returns:
             Hashed password
         """
@@ -164,11 +164,11 @@ class CLIAuthManager:
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash.
-        
+
         Args:
             plain_password: Plain text password
             hashed_password: Hashed password
-            
+
         Returns:
             True if password matches
         """
@@ -180,11 +180,11 @@ class CLIAuthManager:
         password: str
     ) -> dict[str, Any] | None:
         """Authenticate user with username and password.
-        
+
         Args:
             username: Username
             password: Password
-            
+
         Returns:
             User information if authentication successful
         """
@@ -233,14 +233,14 @@ class CLIAuthManager:
         password: str
     ) -> dict[str, Any]:
         """Login user and create session.
-        
+
         Args:
             username: Username
             password: Password
-            
+
         Returns:
             Login response with token information
-            
+
         Raises:
             AuthenticationError: If authentication fails
         """
@@ -287,7 +287,7 @@ class CLIAuthManager:
 
     async def get_current_user(self) -> dict[str, Any] | None:
         """Get current authenticated user.
-        
+
         Returns:
             Current user information or None
         """
@@ -304,7 +304,7 @@ class CLIAuthManager:
 
     async def refresh_token(self) -> str | None:
         """Refresh current access token.
-        
+
         Returns:
             New access token or None if refresh failed
         """
@@ -341,11 +341,11 @@ class CLIAuthManager:
         user: dict[str, Any] | None = None
     ) -> bool:
         """Check if user has specific permission.
-        
+
         Args:
             permission: Permission string to check
             user: User data (uses current user if not provided)
-            
+
         Returns:
             True if user has permission
         """
@@ -371,10 +371,7 @@ class CLIAuthManager:
             "analytics:read", "models:read", "models:write"
         ]
 
-        if "admin" in user_roles and permission in admin_permissions:
-            return True
-
-        return False
+        return bool("admin" in user_roles and permission in admin_permissions)
 
     async def check_role(
         self,
@@ -382,11 +379,11 @@ class CLIAuthManager:
         user: dict[str, Any] | None = None
     ) -> bool:
         """Check if user has specific role.
-        
+
         Args:
             role: Role name to check
             user: User data (uses current user if not provided)
-            
+
         Returns:
             True if user has role
         """
@@ -438,7 +435,7 @@ class CLIAuthManager:
         is_superuser: bool = False
     ) -> dict[str, Any]:
         """Create new user account.
-        
+
         Args:
             username: Username
             password: Plain text password
@@ -447,10 +444,10 @@ class CLIAuthManager:
             roles: List of role names
             permissions: List of permission strings
             is_superuser: Whether user is superuser
-            
+
         Returns:
             Created user information
-            
+
         Raises:
             AuthorizationError: If current user lacks permission
         """
@@ -507,10 +504,10 @@ class CLIAuthManager:
 
     async def list_users(self) -> list[dict[str, Any]]:
         """List all users.
-        
+
         Returns:
             List of user information
-            
+
         Raises:
             AuthorizationError: If current user lacks permission
         """
@@ -519,7 +516,7 @@ class CLIAuthManager:
 
         try:
             users_query = """
-                SELECT id, username, email, full_name, is_active, is_superuser, 
+                SELECT id, username, email, full_name, is_active, is_superuser,
                        roles, permissions, created_at, updated_at
                 FROM users
                 ORDER BY username
@@ -534,7 +531,7 @@ class CLIAuthManager:
 
     def is_authenticated(self) -> bool:
         """Check if there is a current authenticated user.
-        
+
         Returns:
             True if user is authenticated
         """
@@ -547,7 +544,7 @@ class CLIAuthManager:
 
     def get_auth_headers(self) -> dict[str, str]:
         """Get authentication headers for API requests.
-        
+
         Returns:
             Dictionary with authorization header
         """
@@ -557,7 +554,7 @@ class CLIAuthManager:
 
     def get_session_info(self) -> dict[str, Any]:
         """Get current session information.
-        
+
         Returns:
             Session information dictionary
         """

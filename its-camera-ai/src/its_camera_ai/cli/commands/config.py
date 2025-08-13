@@ -42,7 +42,7 @@ def show(
     ),
 ) -> None:
     """📜 Show current configuration.
-    
+
     Display the current system configuration with options to filter by section,
     change output format, and save to file.
     """
@@ -91,10 +91,10 @@ def show(
 def _mask_sensitive_values(config: dict[str, Any]) -> dict[str, Any]:
     """
     Mask sensitive configuration values.
-    
+
     Args:
         config: Configuration dictionary
-        
+
     Returns:
         Configuration with sensitive values masked
     """
@@ -127,7 +127,7 @@ def _mask_sensitive_values(config: dict[str, Any]) -> dict[str, Any]:
 def _save_config_to_file(config: dict[str, Any], output_file: Path, format_type: str) -> None:
     """
     Save configuration to file.
-    
+
     Args:
         config: Configuration dictionary
         output_file: Output file path
@@ -155,7 +155,7 @@ def _save_config_to_file(config: dict[str, Any], output_file: Path, format_type:
 def _write_config_text(config: dict[str, Any], file, indent: int = 0) -> None:
     """
     Write configuration in text format.
-    
+
     Args:
         config: Configuration dictionary
         file: File object
@@ -180,7 +180,7 @@ def validate(
     ),
 ) -> None:
     """✅ Validate configuration.
-    
+
     Validate the current configuration or a specific configuration file
     for correctness and completeness.
     """
@@ -193,7 +193,7 @@ def validate(
 def _validate_current_config(strict: bool) -> None:
     """
     Validate current system configuration.
-    
+
     Args:
         strict: Enable strict validation
     """
@@ -211,7 +211,7 @@ def _validate_current_config(strict: bool) -> None:
 def _validate_config_file(config_file: Path, strict: bool) -> None:
     """
     Validate specific configuration file.
-    
+
     Args:
         config_file: Configuration file path
         strict: Enable strict validation
@@ -243,11 +243,11 @@ def _validate_config_file(config_file: Path, strict: bool) -> None:
 def _run_config_validation(settings, strict: bool) -> dict[str, Any]:
     """
     Run configuration validation checks.
-    
+
     Args:
         settings: Settings object
         strict: Enable strict validation
-        
+
     Returns:
         Validation results dictionary
     """
@@ -282,7 +282,7 @@ def _run_config_validation(settings, strict: bool) -> dict[str, Any]:
         warnings.append(f"Model path does not exist: {settings.ml.model_path}")
 
     # Check API configuration
-    if settings.api_host == "0.0.0.0" and settings.environment == "production":
+    if settings.api_host == "0.0.0.0" and settings.environment == "production":  # noqa: S104
         warnings.append("API server is bound to all interfaces in production")
 
     # Environment-specific checks
@@ -323,7 +323,7 @@ def _run_config_validation(settings, strict: bool) -> dict[str, Any]:
 def _display_validation_results(results: dict[str, Any]) -> None:
     """
     Display configuration validation results.
-    
+
     Args:
         results: Validation results dictionary
     """
@@ -375,14 +375,13 @@ def update(
     ),
 ) -> None:
     """✏️ Update configuration value.
-    
+
     Update a specific configuration value. Use dot notation to specify
     nested configuration keys (e.g., database.pool_size).
     """
-    if not force:
-        if not confirm_action(f"Update '{key}' to '{value}'?"):
-            print_info("Configuration update cancelled")
-            return
+    if not force and not confirm_action(f"Update '{key}' to '{value}'?"):
+        print_info("Configuration update cancelled")
+        return
 
     try:
         if config_file:
@@ -397,7 +396,7 @@ def update(
 def _update_runtime_config(key: str, value: str) -> None:
     """
     Update runtime configuration.
-    
+
     Args:
         key: Configuration key
         value: New value
@@ -423,7 +422,7 @@ def _update_runtime_config(key: str, value: str) -> None:
 def _update_config_file(config_file: Path, key: str, value: str, backup: bool) -> None:
     """
     Update configuration file.
-    
+
     Args:
         config_file: Configuration file path
         key: Configuration key
@@ -464,7 +463,7 @@ def reset(
     ),
 ) -> None:
     """🔄 Reset configuration.
-    
+
     Reset configuration to defaults or previous values. Can reset entire
     sections or specific keys.
     """
@@ -493,7 +492,7 @@ def reset(
 def _reset_config_section(section: str, to_defaults: bool) -> None:
     """
     Reset configuration section.
-    
+
     Args:
         section: Section name
         to_defaults: Reset to defaults
@@ -511,7 +510,7 @@ def _reset_config_section(section: str, to_defaults: bool) -> None:
 def _reset_config_key(key: str, to_defaults: bool) -> None:
     """
     Reset configuration key.
-    
+
     Args:
         key: Configuration key
         to_defaults: Reset to defaults
@@ -542,7 +541,7 @@ def env(
     ),
 ) -> None:
     """🌍 Manage environment variables.
-    
+
     Manage environment variables related to ITS Camera AI configuration.
     """
     valid_actions = ["list", "set", "unset", "export"]
@@ -569,7 +568,7 @@ def env(
 def _list_env_variables(filter_var: str | None) -> None:
     """
     List environment variables.
-    
+
     Args:
         filter_var: Optional variable name filter
     """
@@ -608,7 +607,7 @@ def _list_env_variables(filter_var: str | None) -> None:
 def _set_env_variable(variable: str, value: str) -> None:
     """
     Set environment variable.
-    
+
     Args:
         variable: Variable name
         value: Variable value
@@ -624,7 +623,7 @@ def _set_env_variable(variable: str, value: str) -> None:
 def _unset_env_variable(variable: str) -> None:
     """
     Unset environment variable.
-    
+
     Args:
         variable: Variable name
     """
@@ -640,7 +639,7 @@ def _unset_env_variable(variable: str) -> None:
 def _export_env_variables(output_file: Path | None) -> None:
     """
     Export environment variables.
-    
+
     Args:
         output_file: Optional output file
     """
@@ -695,7 +694,7 @@ def template(
     ),
 ) -> None:
     """📝 Generate configuration templates.
-    
+
     Generate configuration file templates for different environments
     and deployment scenarios.
     """
@@ -722,11 +721,11 @@ def template(
 def _generate_config_template(template_type: str, include_examples: bool) -> str:
     """
     Generate configuration template content.
-    
+
     Args:
         template_type: Template type
         include_examples: Include example values
-        
+
     Returns:
         Template content string
     """
@@ -911,10 +910,10 @@ def _generate_config_template(template_type: str, include_examples: bool) -> str
 def _add_production_config_section(include_examples: bool) -> str:
     """
     Add production-specific configuration section.
-    
+
     Args:
         include_examples: Include example values
-        
+
     Returns:
         Configuration section string
     """
@@ -953,7 +952,7 @@ def restore(
     ),
 ) -> None:
     """🔄 Restore configuration from backup.
-    
+
     Restore system configuration from a previously created backup file.
     This will replace current configuration settings.
     """
@@ -979,7 +978,7 @@ def restore(
 @app.command()
 def list_backups() -> None:
     """📋 List available configuration backups.
-    
+
     Display all available configuration backups including full system
     backups and individual section/key backups.
     """
@@ -1051,7 +1050,7 @@ def diff(
     ),
 ) -> None:
     """🔍 Compare configuration files or settings.
-    
+
     Compare two configuration sources and show differences.
     Use 'current' to compare against current runtime settings.
     Use 'defaults' to compare against default values.
@@ -1575,7 +1574,7 @@ def backup(
     ),
 ) -> None:
     """💾 Create configuration backups.
-    
+
     Create backups of configuration settings for safe rollback.
     Supports full system backups or targeted section/key backups.
     """
@@ -1643,10 +1642,10 @@ def backup(
 def _add_docker_config_section(include_examples: bool) -> str:
     """
     Add Docker-specific configuration section.
-    
+
     Args:
         include_examples: Include example values
-        
+
     Returns:
         Configuration section string
     """
@@ -1687,7 +1686,7 @@ def restore(
     ),
 ) -> None:
     """🔄 Restore configuration from backup.
-    
+
     Restore system configuration from a previously created backup file.
     This will replace current configuration settings.
     """
@@ -1713,7 +1712,7 @@ def restore(
 @app.command()
 def list_backups() -> None:
     """📋 List available configuration backups.
-    
+
     Display all available configuration backups including full system
     backups and individual section/key backups.
     """
@@ -1785,7 +1784,7 @@ def diff(
     ),
 ) -> None:
     """🔍 Compare configuration files or settings.
-    
+
     Compare two configuration sources and show differences.
     Use 'current' to compare against current runtime settings.
     Use 'defaults' to compare against default values.

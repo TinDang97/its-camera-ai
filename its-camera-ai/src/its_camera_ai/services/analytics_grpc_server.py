@@ -385,7 +385,7 @@ class AnalyticsServiceImpl(analytics_grpc.AnalyticsServiceServicer):
 
         try:
             # Check if analytics service is available
-            analytics_service = await self.get_analytics_service()
+            await self.get_analytics_service()
 
             response_time = (time.perf_counter() - start_time) * 1000
 
@@ -428,7 +428,7 @@ class AnalyticsGrpcServer:
             )
 
             # Add server options for performance
-            options = [
+            [
                 ("grpc.keepalive_time_ms", 10000),
                 ("grpc.keepalive_timeout_ms", 5000),
                 ("grpc.keepalive_permit_without_calls", True),

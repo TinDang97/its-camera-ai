@@ -564,7 +564,7 @@ async def get_disk_usage(
         # Get usage for key directories
         directories = {
             "root": "/",
-            "tmp": "/tmp",
+            "tmp": "/tmp",  # noqa: S108 - legitimate disk usage monitoring
         }
 
         for name, path in directories.items():

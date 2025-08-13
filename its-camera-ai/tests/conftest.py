@@ -207,7 +207,7 @@ async def auth_headers(auth_service: AuthenticationService, test_user: User) -> 
     )
 
     # Authenticate and get tokens
-    credentials = UserCredentials(
+    UserCredentials(
         username="testuser",
         password="password123",
         ip_address="127.0.0.1"

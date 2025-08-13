@@ -234,15 +234,8 @@ class TensorRTEngineBuilder:
         """Configure tactics specifically optimized for YOLO11 architecture."""
         try:
             # Get algorithm selector for custom tactics
-            selector = config.algorithm_selector
 
             # Custom tactics for convolutional layers (backbone)
-            conv_tactics = [
-                # Prefer Winograd for 3x3 convolutions in backbone
-                trt.TacticSource.CUDNN,
-                trt.TacticSource.CUBLAS,
-                trt.TacticSource.CUBLAS_LT,
-            ]
 
             # These would be set per layer if TensorRT API supported it
             # Currently configured globally

@@ -39,13 +39,13 @@ class TokenService:
         expires_delta: timedelta | None = None
     ) -> tuple[str, datetime]:
         """Create JWT access token.
-        
+
         Args:
             user_id: User ID
             session_id: Session ID for tracking
             permissions: User permissions
             expires_delta: Custom expiration time
-            
+
         Returns:
             Tuple of (token, expiration_time)
         """
@@ -103,12 +103,12 @@ class TokenService:
         expires_delta: timedelta | None = None
     ) -> tuple[str, datetime]:
         """Create JWT refresh token.
-        
+
         Args:
             user_id: User ID
             session_id: Session ID
             expires_delta: Custom expiration time
-            
+
         Returns:
             Tuple of (token, expiration_time)
         """
@@ -184,10 +184,10 @@ class TokenService:
 
     async def verify_token(self, token: str) -> dict[str, Any] | None:
         """Verify JWT token and check if blacklisted.
-        
+
         Args:
             token: JWT token to verify
-            
+
         Returns:
             Token payload if valid, None otherwise
         """
@@ -223,11 +223,11 @@ class TokenService:
 
     async def blacklist_token(self, token: str, reason: str = "user_logout") -> bool:
         """Add token to blacklist.
-        
+
         Args:
             token: JWT token to blacklist
             reason: Reason for blacklisting
-            
+
         Returns:
             True if successfully blacklisted
         """
@@ -279,10 +279,10 @@ class TokenService:
 
     async def invalidate_session(self, session_id: str) -> bool:
         """Invalidate entire session (all tokens).
-        
+
         Args:
             session_id: Session ID to invalidate
-            
+
         Returns:
             True if successfully invalidated
         """
@@ -301,7 +301,7 @@ class TokenService:
                     jti = token_data['jti']
 
                     # Create fake token payload for blacklisting
-                    fake_payload = {
+                    {
                         'jti': jti,
                         'exp': datetime.fromisoformat(token_data['expires_at']).timestamp(),
                         'sub': token_data.get('user_id'),
@@ -358,11 +358,11 @@ class TokenService:
 
     async def invalidate_all_user_sessions(self, user_id: str, except_session: str | None = None) -> bool:
         """Invalidate all sessions for a user.
-        
+
         Args:
             user_id: User ID
             except_session: Session ID to exclude from invalidation
-            
+
         Returns:
             True if successfully invalidated
         """
@@ -411,10 +411,10 @@ class TokenService:
 
     async def get_user_sessions(self, user_id: str) -> list[dict[str, Any]]:
         """Get active sessions for a user.
-        
+
         Args:
             user_id: User ID
-            
+
         Returns:
             List of active session information
         """
@@ -465,7 +465,7 @@ class TokenService:
 
     async def cleanup_expired_blacklist_entries(self) -> int:
         """Clean up expired blacklist entries.
-        
+
         Returns:
             Number of entries cleaned up
         """
@@ -476,10 +476,10 @@ class TokenService:
 
     async def get_token_info(self, token: str) -> dict[str, Any] | None:
         """Get information about a token without verifying it.
-        
+
         Args:
             token: JWT token
-            
+
         Returns:
             Token information if valid format
         """

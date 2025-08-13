@@ -751,7 +751,6 @@ class EdgeOptimizer:
 
     def compile_edge_model(self, model_path: Path, output_path: Path, config: InferenceConfig) -> Path:
         """Compile model specifically for edge deployment."""
-        edge_config = self.optimization_config
 
         if self.device_type.startswith("jetson") and TRT_AVAILABLE:
             return self._compile_jetson_model(model_path, output_path, config)
@@ -1133,7 +1132,7 @@ class CPUFallbackEngine:
 
         # Get class predictions
         class_scores = np.max(class_probs, axis=1)
-        class_indices = np.argmax(class_probs, axis=1)
+        np.argmax(class_probs, axis=1)
         final_scores = scores * class_scores
 
         # Convert to corner format for NMS
@@ -1314,7 +1313,7 @@ class PerformanceBenchmarkSuite:
         images = []
         h, w = self.inference_engine.config.input_size
 
-        for i in range(count):
+        for _i in range(count):
             # Create realistic traffic scene patterns
             base_color = np.random.randint(80, 200, 3)
             img = np.full((h, w, 3), base_color, dtype=np.uint8)
@@ -1345,7 +1344,7 @@ class PerformanceBenchmarkSuite:
         # Measure latency
         for i in range(100):
             start_time = time.time()
-            result = await self.inference_engine.predict_single(test_image, f"bench_{i}", "benchmark")
+            await self.inference_engine.predict_single(test_image, f"bench_{i}", "benchmark")
             latency = (time.time() - start_time) * 1000
             latencies.append(latency)
 
@@ -1377,7 +1376,7 @@ class PerformanceBenchmarkSuite:
                 await self.inference_engine.predict_batch(batch_images, batch_ids)
 
             # Measure throughput
-            for i in range(20):
+            for _i in range(20):
                 start_time = time.time()
                 batch_results = await self.inference_engine.predict_batch(batch_images, batch_ids)
                 total_time = time.time() - start_time
@@ -1499,7 +1498,7 @@ class PerformanceBenchmarkSuite:
         memory_data = benchmark_result["benchmarks"].get("memory_usage", {})
 
         utilizations = []
-        for key, value in memory_data.items():
+        for _key, value in memory_data.items():
             if isinstance(value, dict) and "utilization_percent" in value:
                 utilizations.append(value["utilization_percent"])
 
@@ -1685,16 +1684,16 @@ class AdvancedDynamicBatcher:
         self.avg_batch_size = (1 - alpha) * self.avg_batch_size + alpha * batch_size
 
         # Extract frames and metadata
-        frames = [req['frame'] for req in batch]
-        frame_ids = [req['frame_id'] for req in batch]
-        camera_ids = [req.get('camera_id', 'unknown') for req in batch]
+        [req['frame'] for req in batch]
+        [req['frame_id'] for req in batch]
+        [req.get('camera_id', 'unknown') for req in batch]
 
         try:
             # This will be called by the InferenceEngine
             logger.debug(f"Processing batch of {batch_size} frames")
 
             # For now, create mock results - this will be replaced by actual inference
-            for i, req in enumerate(batch):
+            for _i, req in enumerate(batch):
                 if not req['future'].done():
                     # Mock result - replace with actual inference results
                     mock_result = DetectionResult(
@@ -1732,7 +1731,7 @@ class AdvancedDynamicBatcher:
 
             # Calculate recent performance metrics
             recent_times = list(self.timeout_history)[-10:]
-            avg_batch_time = sum(recent_times) / len(recent_times)
+            sum(recent_times) / len(recent_times)
 
             # Adjust timeout based on system load and performance
             if len(self.latency_history) > 50:

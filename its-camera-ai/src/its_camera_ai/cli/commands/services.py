@@ -20,6 +20,9 @@ try:
     import psutil
 except ImportError:
     psutil = None
+import builtins
+import contextlib
+
 import typer
 import uvicorn
 from rich.live import Live
@@ -50,12 +53,12 @@ app = typer.Typer(help="🚀 Service management commands")
 
 class ServiceManager:
     """Comprehensive service management system.
-    
+
     Supports multiple service backends:
     - Docker containers
     - systemd services
     - Direct subprocess execution
-    
+
     Features:
     - Real-time health monitoring
     - Service dependency management
@@ -323,7 +326,7 @@ class ServiceManager:
         """Get status for all configured services."""
         services_status = []
 
-        for service_name in self.services_config.keys():
+        for service_name in self.services_config:
             status = await self.get_service_health(service_name)
             services_status.append(status)
 
@@ -341,10 +344,8 @@ class ServiceManager:
             self.stop_service(service_name, force=True)
 
         if self.docker_client:
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 self.docker_client.close()
-            except:
-                pass
 
 
 @app.command()
@@ -1192,7 +1193,7 @@ def setup(
     ),
 ) -> None:
     """🔧 Setup and configure services for first-time deployment.
-    
+
     This command will:
     - Create necessary directories and files
     - Generate configuration files
@@ -1205,9 +1206,9 @@ def setup(
     service_manager = ServiceManager()
 
     if services == "all":
-        services_to_setup = list(service_manager.services_config.keys())
+        list(service_manager.services_config.keys())
     else:
-        services_to_setup = [s.strip() for s in services.split(",")]
+        [s.strip() for s in services.split(",")]
 
     # Create necessary directories
     directories = ["logs", "data", "models", "monitoring"]
@@ -1225,7 +1226,7 @@ def setup(
                 if networks and force:
                     networks[0].remove()
 
-                network = service_manager.docker_client.networks.create(
+                service_manager.docker_client.networks.create(
                     network_name,
                     driver="bridge"
                 )
@@ -1281,13 +1282,13 @@ scrape_configs:
       - targets: ['host.docker.internal:8080']
     metrics_path: '/metrics'
     scrape_interval: 10s
-    
+
   - job_name: 'its-camera-ai-inference'
     static_configs:
       - targets: ['host.docker.internal:8081']
     metrics_path: '/metrics'
     scrape_interval: 30s
-    
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']

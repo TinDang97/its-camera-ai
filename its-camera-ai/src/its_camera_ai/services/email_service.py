@@ -309,14 +309,14 @@ class EmailService:
         to_name: str | None = None
     ) -> bool:
         """Send email using template.
-        
+
         Args:
             to_email: Recipient email address
             subject: Email subject
             template_name: Template filename
             template_vars: Variables for template rendering
             to_name: Recipient name
-            
+
         Returns:
             True if email sent successfully
         """
@@ -378,13 +378,13 @@ class EmailService:
         self, to_email: str, username: str, verification_token: str, full_name: str | None = None
     ) -> bool:
         """Send email verification email.
-        
+
         Args:
             to_email: User email
             username: Username
             verification_token: Verification token
             full_name: User's full name
-            
+
         Returns:
             True if sent successfully
         """
@@ -408,13 +408,13 @@ class EmailService:
         self, to_email: str, username: str, reset_token: str, full_name: str | None = None
     ) -> bool:
         """Send password reset email.
-        
+
         Args:
             to_email: User email
             username: Username
             reset_token: Reset token
             full_name: User's full name
-            
+
         Returns:
             True if sent successfully
         """
@@ -445,7 +445,7 @@ class EmailService:
         full_name: str | None = None
     ) -> bool:
         """Send security alert email.
-        
+
         Args:
             to_email: User email
             username: Username
@@ -454,7 +454,7 @@ class EmailService:
             ip_address: Client IP address
             timestamp: Event timestamp
             full_name: User's full name
-            
+
         Returns:
             True if sent successfully
         """
@@ -484,7 +484,7 @@ class EmailService:
         full_name: str | None = None
     ) -> bool:
         """Send account lockout notification email.
-        
+
         Args:
             to_email: User email
             username: Username
@@ -493,7 +493,7 @@ class EmailService:
             attempt_count: Number of failed attempts
             lockout_duration: Lockout duration in minutes
             full_name: User's full name
-            
+
         Returns:
             True if sent successfully
         """
@@ -522,7 +522,7 @@ class EmailService:
         full_name: str | None = None
     ) -> bool:
         """Send password changed notification email.
-        
+
         Args:
             to_email: User email
             username: Username
@@ -530,7 +530,7 @@ class EmailService:
             ip_address: Client IP address
             device: User device info
             full_name: User's full name
-            
+
         Returns:
             True if sent successfully
         """
@@ -558,7 +558,7 @@ class EmailService:
         full_name: str | None = None
     ) -> bool:
         """Send MFA enabled notification email.
-        
+
         Args:
             to_email: User email
             username: Username
@@ -566,7 +566,7 @@ class EmailService:
             setup_time: When MFA was enabled
             backup_codes_count: Number of backup codes generated
             full_name: User's full name
-            
+
         Returns:
             True if sent successfully
         """

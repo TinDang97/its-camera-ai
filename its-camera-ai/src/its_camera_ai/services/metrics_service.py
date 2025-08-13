@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 class MetricsService(BaseAsyncService[SystemMetrics]):
     """High-performance async service for system metrics management.
-    
+
     Optimized for time-series data collection, aggregation,
     and monitoring dashboard queries.
     """
@@ -35,11 +35,11 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         timestamp: datetime | None = None,
     ) -> SystemMetrics:
         """Record a single system metric.
-        
+
         Args:
             metric_data: Metric data to record
             timestamp: Optional custom timestamp
-            
+
         Returns:
             Created metrics record
         """
@@ -80,10 +80,10 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         self, metrics_data: list[SystemMetricsCreateSchema]
     ) -> int:
         """Batch record multiple metrics for high throughput.
-        
+
         Args:
             metrics_data: List of metrics to record
-            
+
         Returns:
             Number of successfully recorded metrics
         """
@@ -137,14 +137,14 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         limit: int = 1000,
     ) -> list[SystemMetrics]:
         """Get metrics by name with time range and source filtering.
-        
+
         Args:
             metric_name: Name of the metric
             start_time: Optional start time filter
             end_time: Optional end time filter
             source_id: Optional source ID filter
             limit: Maximum number of metrics to return
-            
+
         Returns:
             List of matching metrics ordered by timestamp
         """
@@ -185,13 +185,13 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         limit: int = 500,
     ) -> list[SystemMetrics]:
         """Get recent metrics for real-time monitoring.
-        
+
         Args:
             metric_types: Optional list of metric types to filter
             sources: Optional list of source IDs to filter
             minutes: Time window in minutes
             limit: Maximum number of metrics
-            
+
         Returns:
             List of recent metrics
         """
@@ -234,13 +234,13 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         source_id: str | None = None,
     ) -> dict[str, Any]:
         """Get statistical aggregations for a metric over time range.
-        
+
         Args:
             metric_name: Name of the metric
             start_time: Start time for aggregation
             end_time: End time for aggregation
             source_id: Optional source ID filter
-            
+
         Returns:
             Dictionary with aggregated statistics
         """
@@ -306,11 +306,11 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         self, threshold_type: str = "critical", limit: int = 100
     ) -> list[SystemMetrics]:
         """Get metrics that exceed alert thresholds.
-        
+
         Args:
             threshold_type: Type of threshold ('warning' or 'critical')
             limit: Maximum number of alert metrics
-            
+
         Returns:
             List of metrics exceeding thresholds
         """
@@ -355,11 +355,11 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         self, retention_days: int = 30, batch_size: int = 1000
     ) -> int:
         """Clean up old metrics beyond retention period.
-        
+
         Args:
             retention_days: Number of days to retain metrics
             batch_size: Number of metrics to delete per batch
-            
+
         Returns:
             Total number of metrics deleted
         """
@@ -411,10 +411,10 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
         self, target_hour: datetime | None = None
     ) -> int:
         """Create hourly aggregated metrics for dashboard performance.
-        
+
         Args:
             target_hour: Specific hour to aggregate (defaults to previous hour)
-            
+
         Returns:
             Number of aggregations created
         """
@@ -524,7 +524,7 @@ class MetricsService(BaseAsyncService[SystemMetrics]):
 
     async def get_system_health_summary(self) -> dict[str, Any]:
         """Get comprehensive system health summary.
-        
+
         Returns:
             System health summary with key metrics
         """

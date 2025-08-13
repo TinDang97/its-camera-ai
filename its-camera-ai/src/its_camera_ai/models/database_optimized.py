@@ -244,10 +244,10 @@ class HighPerformanceDatabaseManager:
         frame_data: list[dict[str, Any]]
     ) -> int:
         """High-performance bulk insert for frame metadata.
-        
+
         Args:
             frame_data: List of frame metadata dictionaries
-            
+
         Returns:
             Number of inserted records
         """
@@ -297,7 +297,7 @@ class HighPerformanceDatabaseManager:
                 rows.append(row)
 
             # Use COPY for fastest possible insert
-            result = await conn.copy_records_to_table(
+            await conn.copy_records_to_table(
                 'frame_metadata',
                 records=rows,
                 columns=columns

@@ -1066,14 +1066,14 @@ async def complete_mfa_setup(
     settings: Settings = Depends(get_settings),
 ) -> SuccessResponse:
     """Complete MFA setup by verifying the initial code.
-    
+
     Args:
         verification_data: MFA verification data
         current_user: Currently authenticated user
         db: Database session
         cache: Cache service
         settings: Application settings
-        
+
     Returns:
         SuccessResponse: Setup completion confirmation
     """

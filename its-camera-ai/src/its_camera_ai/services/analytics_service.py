@@ -187,14 +187,14 @@ class RuleEngine:
                               weather: str | None = None,
                               visibility: float | None = None) -> float:
         """Get dynamic speed limit for zone and vehicle type with Redis caching.
-        
+
         Args:
             zone_id: Traffic zone identifier
             vehicle_type: Vehicle classification
             check_time: Time to check validity (defaults to current time)
             weather: Current weather condition
             visibility: Current visibility in meters
-            
+
         Returns:
             Speed limit in km/h
         """
@@ -234,14 +234,14 @@ class RuleEngine:
                                        check_time: datetime, weather: str | None = None,
                                        visibility: float | None = None) -> float | None:
         """Query speed limit from database with environmental conditions.
-        
+
         Args:
             zone_id: Traffic zone identifier
             vehicle_type: Normalized vehicle type
             check_time: Time to check validity
             weather: Current weather condition
             visibility: Current visibility in meters
-            
+
         Returns:
             Speed limit in km/h or None if not found
         """
@@ -252,7 +252,7 @@ class RuleEngine:
             # Build query for active speed limits
             query = select(SpeedLimit).where(
                 and_(
-                    SpeedLimit.enforcement_enabled == True,
+                    SpeedLimit.enforcement_enabled,
                     SpeedLimit.valid_from <= check_time,
                     or_(
                         SpeedLimit.valid_until.is_(None),
@@ -316,10 +316,10 @@ class RuleEngine:
 
     def _normalize_vehicle_type(self, vehicle_type: str | None) -> str:
         """Normalize vehicle type for consistent lookup.
-        
+
         Args:
             vehicle_type: Raw vehicle type from detection
-            
+
         Returns:
             Normalized vehicle type
         """
@@ -353,10 +353,10 @@ class RuleEngine:
 
     def _get_default_speed_limit(self, vehicle_type: str) -> float:
         """Get default speed limit when database lookup fails.
-        
+
         Args:
             vehicle_type: Normalized vehicle type
-            
+
         Returns:
             Default speed limit in km/h
         """
@@ -565,7 +565,7 @@ class AnomalyDetector:
 
             for key in feature_keys:
                 value = data_point.get(key, 0.0)
-                if isinstance(value, (int, float)):
+                if isinstance(value, int | float):
                     feature_vector.append(float(value))
                 else:
                     feature_vector.append(0.0)

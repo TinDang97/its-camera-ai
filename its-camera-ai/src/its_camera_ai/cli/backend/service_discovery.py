@@ -5,6 +5,7 @@ and service endpoint management for CLI operations.
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -117,7 +118,7 @@ class ServiceRegistry:
 
 class ServiceDiscovery:
     """Service discovery and health monitoring system.
-    
+
     Features:
     - Automatic service discovery
     - Continuous health monitoring
@@ -128,7 +129,7 @@ class ServiceDiscovery:
 
     def __init__(self, settings: Settings = None):
         """Initialize service discovery.
-        
+
         Args:
             settings: Application settings
         """
@@ -256,11 +257,11 @@ class ServiceDiscovery:
         ttl: int = 60
     ) -> bool:
         """Register service in Redis.
-        
+
         Args:
             service: Service to register
             ttl: Time to live in seconds
-            
+
         Returns:
             True if registration successful
         """
@@ -298,7 +299,7 @@ class ServiceDiscovery:
 
     async def discover_services(self) -> int:
         """Discover services from Redis registry.
-        
+
         Returns:
             Number of services discovered
         """
@@ -345,7 +346,7 @@ class ServiceDiscovery:
 
     async def check_service_health(self, service: ServiceEndpoint) -> None:
         """Check health of a single service.
-        
+
         Args:
             service: Service to check
         """
@@ -446,10 +447,8 @@ class ServiceDiscovery:
 
         if self._monitoring_task:
             self._monitoring_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._monitoring_task
-            except asyncio.CancelledError:
-                pass
             self._monitoring_task = None
 
         logger.info("Stopped service health monitoring")
@@ -478,10 +477,10 @@ class ServiceDiscovery:
 
     async def get_service_status(self, service_name: str) -> dict[str, Any]:
         """Get detailed status for a service.
-        
+
         Args:
             service_name: Name of the service
-            
+
         Returns:
             Dictionary with service status information
         """
@@ -505,7 +504,7 @@ class ServiceDiscovery:
 
     async def get_all_services_status(self) -> dict[str, dict[str, Any]]:
         """Get status for all services.
-        
+
         Returns:
             Dictionary mapping service names to status information
         """
@@ -518,10 +517,10 @@ class ServiceDiscovery:
 
     def get_healthy_service(self, service_type: ServiceType) -> ServiceEndpoint | None:
         """Get a healthy service of the specified type.
-        
+
         Args:
             service_type: Type of service to find
-            
+
         Returns:
             Healthy service endpoint or None
         """

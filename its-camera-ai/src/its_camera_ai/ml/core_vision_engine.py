@@ -1188,7 +1188,7 @@ class PostProcessor:
     def _get_cpu_utilization(self) -> float:
         """
         Get current CPU utilization with caching for performance.
-        
+
         Uses a cached value to avoid frequent system calls during high-throughput processing.
         Thread-safe implementation for concurrent access.
         """

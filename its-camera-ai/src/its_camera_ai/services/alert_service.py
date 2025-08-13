@@ -654,10 +654,7 @@ class AlertRuleEngine:
 
         # Check severity threshold
         severity_thresholds = rules.get("severity_thresholds", {})
-        if not severity_thresholds.get(violation.severity, False):
-            return False
-
-        return True
+        return severity_thresholds.get(violation.severity, False)
 
     def should_alert_for_anomaly(self, anomaly: TrafficAnomaly) -> bool:
         """Determine if an anomaly should trigger an alert."""
@@ -673,10 +670,7 @@ class AlertRuleEngine:
 
         # Check severity threshold
         severity_thresholds = rules.get("severity_thresholds", {})
-        if not severity_thresholds.get(anomaly.severity, False):
-            return False
-
-        return True
+        return severity_thresholds.get(anomaly.severity, False)
 
     def get_alert_priority(self, entity: RuleViolation | TrafficAnomaly) -> str:
         """Get alert priority based on entity severity and type."""

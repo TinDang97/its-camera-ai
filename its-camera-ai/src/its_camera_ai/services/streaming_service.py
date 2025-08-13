@@ -1547,7 +1547,7 @@ class StreamingDataProcessor(StreamingServiceInterface):
     def _get_current_memory_usage(self) -> float:
         """
         Get current memory usage in MB.
-        
+
         Returns comprehensive memory usage including:
         - Process RSS (Resident Set Size)
         - GPU memory if available

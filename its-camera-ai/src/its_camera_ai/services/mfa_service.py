@@ -49,10 +49,10 @@ class MFAService:
 
     def _generate_backup_codes(self, count: int = None) -> list[str]:
         """Generate backup recovery codes.
-        
+
         Args:
             count: Number of codes to generate
-            
+
         Returns:
             List of backup codes
         """
@@ -74,11 +74,11 @@ class MFAService:
 
     async def setup_totp(self, db: AsyncSession, user: User) -> dict[str, Any]:
         """Set up TOTP for a user.
-        
+
         Args:
             db: Database session
             user: User to set up TOTP for
-            
+
         Returns:
             Setup information including secret and QR code URL
         """
@@ -139,12 +139,12 @@ class MFAService:
 
     async def verify_totp_setup(self, db: AsyncSession, user: User, code: str) -> bool:
         """Verify TOTP setup code.
-        
+
         Args:
             db: Database session
             user: User verifying setup
             code: TOTP code to verify
-            
+
         Returns:
             True if verification successful
         """
@@ -183,11 +183,11 @@ class MFAService:
 
     async def verify_totp(self, user: User, code: str) -> bool:
         """Verify TOTP code for authentication.
-        
+
         Args:
             user: User to verify
             code: TOTP code to verify
-            
+
         Returns:
             True if verification successful
         """
@@ -217,12 +217,12 @@ class MFAService:
 
     async def verify_backup_code(self, db: AsyncSession, user: User, code: str) -> bool:
         """Verify backup recovery code.
-        
+
         Args:
             db: Database session
             user: User to verify
             code: Backup code to verify
-            
+
         Returns:
             True if verification successful
         """
@@ -265,11 +265,11 @@ class MFAService:
 
     async def generate_new_backup_codes(self, db: AsyncSession, user: User) -> list[str]:
         """Generate new backup codes for user.
-        
+
         Args:
             db: Database session
             user: User to generate codes for
-            
+
         Returns:
             List of new backup codes
         """
@@ -299,11 +299,11 @@ class MFAService:
 
     async def disable_mfa(self, db: AsyncSession, user: User) -> bool:
         """Disable MFA for user.
-        
+
         Args:
             db: Database session
             user: User to disable MFA for
-            
+
         Returns:
             True if successfully disabled
         """
@@ -327,10 +327,10 @@ class MFAService:
 
     async def get_mfa_status(self, user: User) -> dict[str, Any]:
         """Get MFA status for user.
-        
+
         Args:
             user: User to check
-            
+
         Returns:
             MFA status information
         """
@@ -358,11 +358,11 @@ class MFAService:
 
     async def send_mfa_code_sms(self, user: User, phone_number: str) -> bool:
         """Send MFA code via SMS (placeholder for future implementation).
-        
+
         Args:
             user: User to send code to
             phone_number: Phone number to send to
-            
+
         Returns:
             True if SMS sent successfully
         """
@@ -395,11 +395,11 @@ class MFAService:
 
     async def verify_sms_code(self, user: User, code: str) -> bool:
         """Verify SMS MFA code (placeholder for future implementation).
-        
+
         Args:
             user: User to verify
             code: SMS code to verify
-            
+
         Returns:
             True if verification successful
         """
@@ -436,7 +436,7 @@ class MFAService:
 
     async def cleanup_expired_sessions(self) -> int:
         """Clean up expired MFA setup sessions.
-        
+
         Returns:
             Number of sessions cleaned up
         """

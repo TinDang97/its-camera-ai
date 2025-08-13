@@ -40,7 +40,7 @@ async def stream_camera_events(
 ) -> StreamingResponse:
     """
     Stream real-time camera events via Server-Sent Events.
-    
+
     Event types include:
     - `status_change`: Camera online/offline status changes
     - `detection_result`: New vehicle detection results
@@ -48,7 +48,7 @@ async def stream_camera_events(
     - `configuration_change`: Camera setting modifications
     - `error`: Camera error notifications
     - `maintenance`: Maintenance mode changes
-    
+
     Args:
         request: FastAPI request object
         camera_ids: List of camera IDs to monitor
@@ -56,7 +56,7 @@ async def stream_camera_events(
         zones: List of zone IDs to monitor
         include_history: Include recent event history
         current_user: Authenticated user
-        
+
     Returns:
         StreamingResponse: SSE stream of camera events
     """
@@ -95,7 +95,7 @@ async def stream_system_events(
 ) -> StreamingResponse:
     """
     Stream real-time system events via Server-Sent Events.
-    
+
     Event types include:
     - `performance_alert`: System performance alerts
     - `resource_usage`: CPU, memory, GPU utilization updates
@@ -103,16 +103,16 @@ async def stream_system_events(
     - `system_error`: Critical system errors
     - `maintenance`: System maintenance notifications
     - `statistics`: Aggregate processing statistics
-    
+
     Args:
         request: FastAPI request object
         event_types: List of event types to include
         include_history: Include recent event history
         current_user: Authenticated user
-        
+
     Returns:
         StreamingResponse: SSE stream of system events
-        
+
     Raises:
         HTTPException: If user lacks system monitoring permissions
     """
@@ -148,10 +148,10 @@ async def stream_detection_events(
 ) -> StreamingResponse:
     """
     Stream real-time vehicle detection events.
-    
+
     Streams detection results from the Core Vision Engine as they are processed,
     including bounding boxes, classification confidence, and metadata.
-    
+
     Args:
         request: FastAPI request object
         camera_ids: List of camera IDs to monitor
@@ -159,7 +159,7 @@ async def stream_detection_events(
         min_confidence: Minimum detection confidence threshold
         zones: List of zone IDs to monitor
         current_user: Authenticated user
-        
+
     Returns:
         StreamingResponse: SSE stream of detection events
     """
@@ -200,19 +200,19 @@ async def broadcast_camera_event(
 ) -> dict[str, str]:
     """
     Manually broadcast a camera event to all connected SSE clients.
-    
+
     This endpoint allows administrators to send custom events to all
     connected dashboard clients.
-    
+
     Args:
         camera_id: Camera identifier
         event_type: Type of event to broadcast
         data: Event data payload
         current_user: Authenticated user
-        
+
     Returns:
         Dict: Broadcast confirmation
-        
+
     Raises:
         HTTPException: If user lacks admin permissions
     """
@@ -250,15 +250,15 @@ async def broadcast_system_event(
 ) -> dict[str, str]:
     """
     Manually broadcast a system event to all connected SSE clients.
-    
+
     Args:
         event_type: Type of event to broadcast
         data: Event data payload
         current_user: Authenticated user
-        
+
     Returns:
         Dict: Broadcast confirmation
-        
+
     Raises:
         HTTPException: If user lacks admin permissions
     """
@@ -292,16 +292,16 @@ async def get_sse_stats(
 ) -> dict:
     """
     Get statistics about the SSE broadcaster.
-    
+
     Returns information about active connections, message throughput,
     and connection details for monitoring purposes.
-    
+
     Args:
         current_user: Authenticated user
-        
+
     Returns:
         Dict: SSE broadcaster statistics
-        
+
     Raises:
         HTTPException: If user lacks monitoring permissions
     """

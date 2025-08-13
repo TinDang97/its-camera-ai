@@ -9,7 +9,9 @@ import tempfile
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+
+# Type-checking imports to fix forward references
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import redis.asyncio as redis
@@ -27,6 +29,11 @@ from ..services.cache import CacheService
 from ..services.camera_service import CameraService
 from ..services.frame_service import DetectionService, FrameService
 from ..services.metrics_service import MetricsService
+
+if TYPE_CHECKING:
+    from ..services.email_service import EmailService
+    from ..services.mfa_service import MFAService
+    from ..services.token_service import TokenService
 
 logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)

@@ -440,7 +440,7 @@ class AlertServiceImpl(alert_grpc.AlertServiceServicer):
 
         try:
             # Check if alert service is available
-            alert_service = await self.get_alert_service()
+            await self.get_alert_service()
 
             response_time = (time.perf_counter() - start_time) * 1000
 
@@ -483,7 +483,7 @@ class AlertGrpcServer:
             )
 
             # Add server options for performance
-            options = [
+            [
                 ("grpc.keepalive_time_ms", 10000),
                 ("grpc.keepalive_timeout_ms", 5000),
                 ("grpc.keepalive_permit_without_calls", True),

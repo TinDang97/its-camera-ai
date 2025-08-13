@@ -967,7 +967,7 @@ class ModelValidator:
         try:
             # Convert ground truth to proper format
             gt_boxes = ground_truth.get("boxes", [])
-            gt_classes = ground_truth.get("classes", [])
+            ground_truth.get("classes", [])
 
             if len(gt_boxes) == 0 and len(result.boxes) == 0:
                 return True  # Both empty, correct
@@ -1450,7 +1450,7 @@ class ModelValidator:
         """Determine overall regression test status."""
 
         improvements = metrics_comparison["improvements"]
-        relative_improvements = metrics_comparison["relative_improvements"]
+        metrics_comparison["relative_improvements"]
 
         # Check for significant regressions
         critical_regressions = []
@@ -1578,7 +1578,7 @@ class ModelValidator:
         <p><strong>Status:</strong> <span class="status-{status['status']}">{status['status'].upper()}</span></p>
         <p><strong>Summary:</strong> {status['summary']}</p>
     </div>
-    
+
     <div class="section">
         <h2>Performance Metrics Comparison</h2>
         <table class="metrics-table">
@@ -1672,19 +1672,19 @@ class ModelValidator:
             </tbody>
         </table>
     </div>
-    
+
     <div class="section">
         <h2>Statistical Significance Analysis</h2>
         <p><strong>Overall Significance:</strong> {'Statistically Significant' if significance_test.get('overall_significance', {}).get('is_significant', False) else 'Not Statistically Significant'}</p>
         <p><strong>Sample Size:</strong> {significance_test.get('overall_significance', {}).get('sample_size', 'Unknown')}</p>
-        
+
         <h3>F1 Score Comparison</h3>
         <ul>
             <li><strong>P-value:</strong> {significance_test.get('f1_score', {}).get('p_value', 'N/A'):.6f}</li>
             <li><strong>Statistically Significant:</strong> {'Yes' if significance_test.get('f1_score', {}).get('is_significant', False) else 'No'}</li>
             <li><strong>Effect Size (Cohen's d):</strong> {significance_test.get('f1_score', {}).get('effect_size', 0):.4f} ({significance_test.get('f1_score', {}).get('interpretation', 'unknown')})</li>
         </ul>
-        
+
         <h3>Inference Latency Comparison</h3>
         <ul>
             <li><strong>P-value:</strong> {significance_test.get('inference_latency', {}).get('p_value', 'N/A'):.6f}</li>
@@ -1718,7 +1718,7 @@ class ModelValidator:
         html += """
         </ul>
     </div>
-    
+
     <div class="section">
         <h2>Test Configuration</h2>
         <ul>
@@ -1728,7 +1728,7 @@ class ModelValidator:
             <li><strong>Statistical Significance Level:</strong> α = 0.05</li>
         </ul>
     </div>
-    
+
 </body>
 </html>
 """.format(

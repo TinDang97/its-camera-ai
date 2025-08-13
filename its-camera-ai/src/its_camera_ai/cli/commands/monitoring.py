@@ -39,7 +39,7 @@ async def metrics(
     ),
 ) -> None:
     """📊 Display system metrics.
-    
+
     Show key performance metrics including throughput, latency, resource usage,
     and system health indicators.
     """
@@ -52,7 +52,7 @@ async def metrics(
 async def _show_metrics_once(service_filter: str | None) -> None:
     """
     Show metrics once.
-    
+
     Args:
         service_filter: Optional service filter
     """
@@ -111,7 +111,7 @@ async def _show_metrics_once(service_filter: str | None) -> None:
 async def _watch_metrics(service_filter: str | None, interval: int) -> None:
     """
     Watch metrics in real-time.
-    
+
     Args:
         service_filter: Optional service filter
         interval: Update interval in seconds
@@ -161,10 +161,10 @@ async def _watch_metrics(service_filter: str | None, interval: int) -> None:
 async def _get_metrics_data(service_filter: str | None) -> dict:
     """
     Get current metrics data.
-    
+
     Args:
         service_filter: Optional service filter
-        
+
     Returns:
         Dictionary of metrics data
     """
@@ -283,7 +283,7 @@ async def health(
     ),
 ) -> None:
     """❤️ Comprehensive health checks.
-    
+
     Run health checks on all system components or specific components.
     Includes connectivity, performance, and dependency checks.
     """
@@ -358,11 +358,11 @@ async def health(
 async def _check_component_health(component: str, timeout: int) -> dict:
     """
     Check health of a specific component.
-    
+
     Args:
         component: Component name
         timeout: Timeout in seconds
-        
+
     Returns:
         Health check result dictionary
     """
@@ -437,7 +437,7 @@ async def alerts(
     ),
 ) -> None:
     """🚨 View system alerts.
-    
+
     Display active and recent system alerts with filtering options.
     """
     print_info("Fetching system alerts...")
@@ -515,7 +515,7 @@ async def alerts(
 async def _get_alerts_data() -> list:
     """
     Get current alerts data.
-    
+
     Returns:
         List of alert dictionaries
     """
@@ -579,7 +579,7 @@ async def dashboard(
     ),
 ) -> None:
     """📊 Live monitoring dashboard.
-    
+
     Display a comprehensive live dashboard with key metrics, health status,
     and alerts in a single view.
     """
@@ -596,7 +596,7 @@ async def dashboard(
 async def _show_static_dashboard(component_filter: str | None) -> None:
     """
     Show static dashboard snapshot.
-    
+
     Args:
         component_filter: Optional component filter
     """
@@ -618,7 +618,7 @@ async def _show_static_dashboard(component_filter: str | None) -> None:
 async def _show_live_dashboard(component_filter: str | None, refresh_interval: int) -> None:
     """
     Show live updating dashboard.
-    
+
     Args:
         component_filter: Optional component filter
         refresh_interval: Refresh interval in seconds
@@ -658,7 +658,7 @@ def _display_dashboard_summary(
 ) -> None:
     """
     Display dashboard summary tables.
-    
+
     Args:
         metrics_data: Metrics data
         health_results: Health check results
@@ -760,7 +760,7 @@ def reports(
     ),
 ) -> None:
     """📊 Generate monitoring reports.
-    
+
     Generate various types of monitoring reports including performance
     summaries, health reports, and alert analyses.
     """
@@ -784,7 +784,7 @@ def reports(
 def _generate_summary_report(output_file: str | None, format_type: str, period: str) -> None:
     """
     Generate summary report.
-    
+
     Args:
         output_file: Optional output file
         format_type: Output format
@@ -825,7 +825,7 @@ def _generate_summary_report(output_file: str | None, format_type: str, period: 
 def _display_summary_table(report_data: dict) -> None:
     """
     Display summary report as table.
-    
+
     Args:
         report_data: Report data dictionary
     """
@@ -878,7 +878,7 @@ def _display_summary_table(report_data: dict) -> None:
 def _save_report_to_file(report_data: dict, output_file: str, format_type: str) -> None:
     """
     Save report data to file.
-    
+
     Args:
         report_data: Report data
         output_file: Output file path
@@ -923,7 +923,7 @@ def _save_report_to_file(report_data: dict, output_file: str, format_type: str) 
 def _generate_performance_report(output_file: str | None, format_type: str, period: str) -> None:
     """
     Generate performance report.
-    
+
     Args:
         output_file: Optional output file
         format_type: Output format
@@ -935,7 +935,7 @@ def _generate_performance_report(output_file: str | None, format_type: str, peri
 def _generate_health_report(output_file: str | None, format_type: str, period: str) -> None:
     """
     Generate health report.
-    
+
     Args:
         output_file: Optional output file
         format_type: Output format
@@ -947,7 +947,7 @@ def _generate_health_report(output_file: str | None, format_type: str, period: s
 def _generate_alerts_report(output_file: str | None, format_type: str, period: str) -> None:
     """
     Generate alerts report.
-    
+
     Args:
         output_file: Optional output file
         format_type: Output format

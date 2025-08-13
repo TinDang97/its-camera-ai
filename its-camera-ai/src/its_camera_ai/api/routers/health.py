@@ -314,7 +314,7 @@ async def _check_ml_models_health() -> dict[str, Any]:
             inference_time = (time.time() - inference_start) * 1000
 
             # Get model performance metrics
-            performance_metrics = test_engine.get_performance_metrics()
+            test_engine.get_performance_metrics()
             health_status = test_engine.get_health_status()
 
             # Determine overall health

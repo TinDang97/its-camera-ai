@@ -46,7 +46,7 @@ class FrameQuality(str, Enum):
 
 class FrameMetadata(BaseModel):
     """Frame metadata for real-time processing results.
-    
+
     Designed for high-throughput inserts (30+ FPS per camera, 100+ cameras)
     with optimized indexing and partitioning for time-series queries.
     """
@@ -246,7 +246,7 @@ class FrameMetadata(BaseModel):
         quality_score: float | None = None
     ) -> None:
         """Mark frame as processing completed with results.
-        
+
         Args:
             processing_time_ms: Total processing time
             has_detections: Whether frame contains detections
@@ -267,7 +267,7 @@ class FrameMetadata(BaseModel):
 
     def fail_processing(self, error_message: str, increment_retry: bool = True) -> None:
         """Mark frame as processing failed.
-        
+
         Args:
             error_message: Error description
             increment_retry: Whether to increment retry counter
@@ -281,7 +281,7 @@ class FrameMetadata(BaseModel):
 
     def set_storage_info(self, storage_path: str, bucket: str, file_size: int) -> None:
         """Update storage information after frame is stored.
-        
+
         Args:
             storage_path: Storage path or object key
             bucket: Storage bucket name
@@ -294,10 +294,10 @@ class FrameMetadata(BaseModel):
 
     def _calculate_quality_rating(self, score: float) -> str:
         """Calculate quality rating from score.
-        
+
         Args:
             score: Quality score (0.0-1.0)
-            
+
         Returns:
             Quality rating string
         """

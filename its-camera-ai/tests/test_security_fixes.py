@@ -31,7 +31,7 @@ class TestTemporaryFileSecurityFixes:
 
             # Setup mock temporary file
             mock_temp_instance = MagicMock()
-            mock_temp_instance.name = '/tmp/secure_test_file.pt'
+            mock_temp_instance.name = '/tmp/secure_test_file.pt'  # noqa: S108 - test mock
             mock_temp_file.return_value.__enter__.return_value = mock_temp_instance
 
             # Create mock upload file
@@ -53,7 +53,7 @@ class TestTemporaryFileSecurityFixes:
             mock_user = MagicMock()
             mock_user.username = 'testuser'
 
-            mock_background_tasks = MagicMock()
+            MagicMock()
 
             try:
                 # This would normally call the endpoint
@@ -77,10 +77,10 @@ class TestTemporaryFileSecurityFixes:
 
         # Similar test for storage router
         with patch('tempfile.NamedTemporaryFile') as mock_temp_file, \
-             patch('os.chmod') as mock_chmod:
+             patch('os.chmod'):
 
             mock_temp_instance = MagicMock()
-            mock_temp_instance.name = '/tmp/secure_video.mp4'
+            mock_temp_instance.name = '/tmp/secure_video.mp4'  # noqa: S108 - test mock
             mock_temp_file.return_value.__enter__.return_value = mock_temp_instance
 
             # Verify secure temporary file creation pattern exists

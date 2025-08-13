@@ -34,7 +34,7 @@ class OrchestrationStatus(Enum):
 
 class ServiceOrchestrator:
     """Central orchestrator for backend services.
-    
+
     Features:
     - Coordinated service startup/shutdown
     - Complex multi-service operations
@@ -46,7 +46,7 @@ class ServiceOrchestrator:
 
     def __init__(self, settings: Settings = None):
         """Initialize service orchestrator.
-        
+
         Args:
             settings: Application settings
         """
@@ -128,7 +128,7 @@ class ServiceOrchestrator:
 
     async def full_system_health_check(self) -> dict[str, Any]:
         """Perform comprehensive system health check.
-        
+
         Returns:
             Complete health assessment
         """
@@ -191,7 +191,7 @@ class ServiceOrchestrator:
 
     async def start_monitoring_services(self) -> dict[str, Any]:
         """Start all monitoring services.
-        
+
         Returns:
             Monitoring startup status
         """
@@ -219,7 +219,7 @@ class ServiceOrchestrator:
             self.services_started.add("metrics_collection")
 
             # Start event streaming
-            monitoring_task = asyncio.create_task(
+            asyncio.create_task(
                 self.event_streamer.start_monitoring()
             )
             results["event_streaming"] = "started"
@@ -243,7 +243,7 @@ class ServiceOrchestrator:
 
     async def stop_monitoring_services(self) -> dict[str, Any]:
         """Stop all monitoring services.
-        
+
         Returns:
             Monitoring shutdown status
         """
@@ -282,10 +282,10 @@ class ServiceOrchestrator:
 
     async def perform_system_maintenance(self, operations: list[str]) -> dict[str, Any]:
         """Perform system maintenance operations.
-        
+
         Args:
             operations: List of maintenance operations to perform
-            
+
         Returns:
             Maintenance results
         """
@@ -326,7 +326,7 @@ class ServiceOrchestrator:
                     queue_status = await self.queue_manager.get_all_queue_status()
                     purged_counts = {}
 
-                    for queue_name in queue_status.keys():
+                    for queue_name in queue_status:
                         if queue_status[queue_name]["pending_count"] > 1000:
                             purged = await self.queue_manager.purge_queue(
                                 queue_name, force=True
@@ -368,10 +368,10 @@ class ServiceOrchestrator:
         camera_config: dict[str, Any]
     ) -> dict[str, Any]:
         """Orchestrate complete camera setup process.
-        
+
         Args:
             camera_config: Camera configuration
-            
+
         Returns:
             Setup results
         """
@@ -439,10 +439,10 @@ class ServiceOrchestrator:
         model_info: dict[str, Any]
     ) -> dict[str, Any]:
         """Orchestrate ML model deployment process.
-        
+
         Args:
             model_info: Model deployment information
-            
+
         Returns:
             Deployment results
         """
@@ -512,7 +512,7 @@ class ServiceOrchestrator:
 
     def get_system_overview(self) -> dict[str, Any]:
         """Get comprehensive system overview.
-        
+
         Returns:
             System overview dictionary
         """
@@ -535,7 +535,7 @@ class ServiceOrchestrator:
 
     def get_active_operations(self) -> dict[str, dict[str, Any]]:
         """Get information about active operations.
-        
+
         Returns:
             Active operations dictionary
         """
@@ -554,10 +554,10 @@ class ServiceOrchestrator:
 
     async def cancel_operation(self, operation_id: str) -> bool:
         """Cancel an active operation.
-        
+
         Args:
             operation_id: ID of operation to cancel
-            
+
         Returns:
             True if successfully cancelled
         """
@@ -579,11 +579,11 @@ class ServiceOrchestrator:
         check_interval: int = 10
     ) -> bool:
         """Wait for system to become healthy.
-        
+
         Args:
             timeout: Maximum wait time in seconds
             check_interval: Check interval in seconds
-            
+
         Returns:
             True if system becomes healthy
         """

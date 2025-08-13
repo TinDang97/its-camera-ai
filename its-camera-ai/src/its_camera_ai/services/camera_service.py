@@ -527,7 +527,7 @@ class CameraService(BaseAsyncService[Camera]):
                         Camera.last_seen_at.is_(None),
                     )
                 )
-                .where(Camera.is_active == True)
+                .where(Camera.is_active)
             )  # noqa: E712
 
             result = await self.session.execute(query)
@@ -582,7 +582,7 @@ class CameraService(BaseAsyncService[Camera]):
             # Count total and active cameras
             total_query = select(func.count(Camera.id))
             active_query = select(func.count(Camera.id)).where(
-                Camera.is_active == True
+                Camera.is_active
             )  # noqa: E712
 
             total_result = await self.session.execute(total_query)

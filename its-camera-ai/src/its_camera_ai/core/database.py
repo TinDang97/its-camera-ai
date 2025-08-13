@@ -25,7 +25,7 @@ _async_session_factory = None
 
 def get_engine():
     """Get or create the async database engine.
-    
+
     Returns:
         AsyncEngine: The database engine
     """
@@ -46,7 +46,7 @@ def get_engine():
 
 def get_session_factory():
     """Get or create the async session factory.
-    
+
     Returns:
         async_sessionmaker: The session factory
     """
@@ -66,7 +66,7 @@ def get_session_factory():
 
 async def get_database_session() -> AsyncGenerator[AsyncSession, None]:
     """Get a database session for FastAPI dependency injection.
-    
+
     Yields:
         AsyncSession: A database session
     """
@@ -85,11 +85,11 @@ async def get_database_session() -> AsyncGenerator[AsyncSession, None]:
 @asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Get a database session as async context manager.
-    
+
     Usage:
         async with get_db_session() as session:
             result = await session.execute(query)
-    
+
     Yields:
         AsyncSession: A database session
     """
@@ -105,7 +105,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_database():
     """Initialize the database (create tables, etc.).
-    
+
     This should be called during application startup.
     """
     engine = get_engine()
@@ -122,7 +122,7 @@ async def init_database():
 
 async def close_database():
     """Close the database connections.
-    
+
     This should be called during application shutdown.
     """
     global _engine, _async_session_factory

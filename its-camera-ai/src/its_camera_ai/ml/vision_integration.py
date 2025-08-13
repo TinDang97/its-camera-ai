@@ -1,7 +1,7 @@
 """
 Vision Integration Layer for ITS Camera AI Traffic Monitoring System.
 
-This module provides integration between the Core Computer Vision Engine and the 
+This module provides integration between the Core Computer Vision Engine and the
 broader ML pipeline architecture, including model registry, federated learning,
 monitoring systems, and production deployment workflows.
 
@@ -15,6 +15,7 @@ Key Features:
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -83,7 +84,7 @@ class IntegrationConfig:
 class VisionPipelineIntegration:
     """
     Integration layer between Core Vision Engine and ML Pipeline.
-    
+
     Coordinates computer vision processing with model management,
     monitoring, and deployment systems.
     """
@@ -279,14 +280,14 @@ class VisionPipelineIntegration:
     ) -> VisionResult:
         """
         Process frame through integrated vision pipeline.
-        
+
         Includes vision processing, monitoring integration, and optional
         experiment tracking.
         """
         if not self.initialized:
             raise RuntimeError("Integration not initialized")
 
-        start_time = time.time()
+        time.time()
 
         try:
             # Core vision processing
@@ -781,10 +782,8 @@ class VisionPipelineIntegration:
         # Cancel monitoring tasks
         for task in self.monitoring_tasks:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
         # Clean up vision engine
         await self.vision_engine.cleanup()
@@ -802,12 +801,12 @@ async def create_integrated_vision_pipeline(
 ) -> VisionPipelineIntegration:
     """
     Create fully integrated vision pipeline with optimal configuration.
-    
+
     Args:
         deployment_scenario: Target deployment scenario
         ml_pipeline: Existing ML pipeline to integrate with
         enable_full_integration: Enable all integration features
-    
+
     Returns:
         Configured and initialized VisionPipelineIntegration
     """
@@ -842,7 +841,7 @@ async def benchmark_integrated_pipeline(
 ) -> dict[str, Any]:
     """
     Comprehensive benchmark of integrated vision pipeline.
-    
+
     Includes vision processing, ML integration, monitoring,
     and deployment coordination performance.
     """

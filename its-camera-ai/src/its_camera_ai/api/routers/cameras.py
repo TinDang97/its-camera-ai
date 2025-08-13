@@ -16,6 +16,7 @@ from ...services.camera_service import CameraService
 from ..dependencies import (
     RateLimiter,
     get_cache_service,
+    get_camera_service,
     get_current_user,
     get_db,
     rate_limit_strict,
@@ -41,11 +42,6 @@ router = APIRouter()
 # Rate limiters
 batch_operation_rate_limit = RateLimiter(calls=5, period=300)  # 5 batch ops per 5 min
 stream_control_rate_limit = RateLimiter(calls=20, period=60)  # 20 stream ops per min
-
-# Database service dependency
-async def get_camera_service(db: AsyncSession = Depends(get_db)) -> CameraService:
-    """Get camera service instance."""
-    return CameraService(db)
 
 
 async def check_stream_health(camera_id: str, stream_url: str, cache: CacheService) -> StreamHealth:
@@ -545,6 +541,7 @@ async def update_camera(
     camera_data: CameraUpdate,
     current_user: User = Depends(require_permissions("cameras:update")),
     _db: AsyncSession = Depends(get_db),
+    camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
     _rate_limit: None = Depends(rate_limit_strict),
 ) -> CameraResponse:
@@ -808,6 +805,7 @@ async def get_stream_health(
     camera_id: str,
     current_user: User = Depends(get_current_user),
     camera_service: CameraService = Depends(get_camera_service),
+    cache: CacheService = Depends(get_cache_service),
 ) -> StreamHealth:
     """Get stream health metrics.
 
@@ -1004,6 +1002,7 @@ async def get_camera_stats(
     camera_id: str,
     days: int = Query(7, ge=1, le=30, description="Number of days for statistics"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     camera_service: CameraService = Depends(get_camera_service),
     cache: CacheService = Depends(get_cache_service),
 ) -> CameraStats:

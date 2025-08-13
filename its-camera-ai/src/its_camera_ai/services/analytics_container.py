@@ -324,7 +324,7 @@ async def initialize_analytics_database() -> None:
                     # Create hypertable if it doesn't exist
                     await conn.execute(f"""
                         SELECT create_hypertable(
-                            '{hypertable["table"]}', 
+                            '{hypertable["table"]}',
                             '{hypertable["time_column"]}',
                             chunk_time_interval => INTERVAL '{hypertable["chunk_interval"]}',
                             if_not_exists => TRUE
@@ -367,7 +367,7 @@ async def initialize_analytics_database() -> None:
                 try:
                     await conn.execute(f"""
                         SELECT add_retention_policy(
-                            '{policy["table"]}', 
+                            '{policy["table"]}',
                             INTERVAL '{policy["retention"]}',
                             if_not_exists => TRUE
                         );

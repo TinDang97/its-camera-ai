@@ -54,7 +54,7 @@ async def train(
     ),
 ) -> None:
     """🎯 Train a new model.
-    
+
     Start training a new model with specified parameters. Supports distributed
     training, experiment tracking, and automatic checkpointing.
     """
@@ -156,7 +156,7 @@ async def inference(
     ),
 ) -> None:
     """🔍 Run inference on images or videos.
-    
+
     Process images or videos through the ML model and generate predictions.
     Supports batch processing and various output formats.
     """
@@ -253,7 +253,7 @@ async def models(
     ),
 ) -> None:
     """📊 List available models.
-    
+
     Display all available models with their metadata, performance metrics,
     and deployment status.
     """
@@ -362,7 +362,7 @@ async def deploy(
     ),
 ) -> None:
     """🚀 Deploy a model to specified environment.
-    
+
     Deploy a trained model to staging or production environment with
     various deployment strategies and scaling options.
     """
@@ -448,7 +448,7 @@ async def experiments(
     ),
 ) -> None:
     """🧪 List ML experiments.
-    
+
     Display ML experiments with their metrics, status, and results.
     Integrates with MLflow for experiment tracking.
     """
@@ -555,7 +555,7 @@ async def benchmark(
     ),
 ) -> None:
     """📏 Benchmark model performance.
-    
+
     Run comprehensive performance benchmarks on a model including
     throughput, latency, and resource utilization across different
     configurations.
@@ -652,7 +652,7 @@ def optimize(
     ),
 ) -> None:
     """⚡ Optimize model for deployment.
-    
+
     Optimize models for specific hardware targets including quantization,
     pruning, and conversion to optimized formats like TensorRT or CoreML.
     """

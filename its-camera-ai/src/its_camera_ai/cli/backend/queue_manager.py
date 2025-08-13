@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 class CLIQueueManager:
     """Queue manager for CLI operations.
-    
+
     Provides high-level queue operations for:
     - Background task management
     - Event processing
@@ -33,7 +33,7 @@ class CLIQueueManager:
 
     def __init__(self, settings: Settings = None):
         """Initialize CLI queue manager.
-        
+
         Args:
             settings: Application settings
         """
@@ -136,13 +136,13 @@ class CLIQueueManager:
         queue: str = "cli_tasks"
     ) -> str:
         """Submit a background task.
-        
+
         Args:
             task_type: Type of task to execute
             task_data: Task parameters and data
             priority: Task priority (higher = more important)
             queue: Queue name to submit to
-            
+
         Returns:
             Task ID
         """
@@ -173,11 +173,11 @@ class CLIQueueManager:
         queue: str = "cli_tasks"
     ) -> list[str]:
         """Submit multiple tasks in batch.
-        
+
         Args:
             tasks: List of task dictionaries
             queue: Queue name to submit to
-            
+
         Returns:
             List of task IDs
         """
@@ -212,7 +212,7 @@ class CLIQueueManager:
 
     def register_task_handler(self, task_type: str, handler: Callable) -> None:
         """Register handler for a task type.
-        
+
         Args:
             task_type: Type of task to handle
             handler: Async function to handle the task
@@ -227,12 +227,12 @@ class CLIQueueManager:
         timeout: int = 30
     ) -> int:
         """Process tasks from queue.
-        
+
         Args:
             queue: Queue name to process
             max_tasks: Maximum number of tasks to process
             timeout: Processing timeout per task
-            
+
         Returns:
             Number of tasks processed
         """
@@ -311,12 +311,12 @@ class CLIQueueManager:
         queue: str = "events"
     ) -> bool:
         """Publish an event.
-        
+
         Args:
             event_type: Type of event
             event_data: Event data
             queue: Queue/channel to publish to
-            
+
         Returns:
             Success status
         """
@@ -352,7 +352,7 @@ class CLIQueueManager:
         queue: str = "events"
     ) -> None:
         """Subscribe to events and process them.
-        
+
         Args:
             event_handler: Function to handle events
             event_types: List of event types to filter (None = all)
@@ -409,12 +409,12 @@ class CLIQueueManager:
         metadata: dict[str, Any] | None = None
     ) -> bool:
         """Send a notification message.
-        
+
         Args:
             message: Notification message
             level: Notification level (info, warning, error)
             metadata: Additional metadata
-            
+
         Returns:
             Success status
         """
@@ -445,10 +445,10 @@ class CLIQueueManager:
         count: int = 10
     ) -> list[dict[str, Any]]:
         """Get recent notifications.
-        
+
         Args:
             count: Maximum number of notifications to retrieve
-            
+
         Returns:
             List of notification dictionaries
         """
@@ -480,10 +480,10 @@ class CLIQueueManager:
 
     async def get_queue_status(self, queue: str) -> dict[str, Any] | None:
         """Get queue status information.
-        
+
         Args:
             queue: Queue name
-            
+
         Returns:
             Queue status dictionary
         """
@@ -509,13 +509,13 @@ class CLIQueueManager:
 
     async def get_all_queue_status(self) -> dict[str, dict[str, Any]]:
         """Get status for all managed queues.
-        
+
         Returns:
             Dictionary mapping queue names to status information
         """
         status = {}
 
-        for queue_name in self._queue_configs.keys():
+        for queue_name in self._queue_configs:
             queue_status = await self.get_queue_status(queue_name)
             if queue_status:
                 status[queue_name] = queue_status
@@ -524,11 +524,11 @@ class CLIQueueManager:
 
     async def purge_queue(self, queue: str, force: bool = False) -> int:
         """Purge all messages from a queue.
-        
+
         Args:
             queue: Queue name to purge
             force: Force purge even if active
-            
+
         Returns:
             Number of messages purged
         """
@@ -544,7 +544,7 @@ class CLIQueueManager:
 
     async def health_check(self) -> dict[str, Any]:
         """Perform health check on queue system.
-        
+
         Returns:
             Health status information
         """
@@ -558,7 +558,7 @@ class CLIQueueManager:
 
     def get_manager_status(self) -> dict[str, Any]:
         """Get queue manager status.
-        
+
         Returns:
             Manager status information
         """

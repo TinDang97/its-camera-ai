@@ -46,7 +46,7 @@ async def users(
     ),
 ) -> None:
     """👥 Manage system users.
-    
+
     Create, update, delete, and manage user accounts with role-based access control.
     """
     valid_actions = ["list", "create", "update", "delete", "activate", "deactivate"]
@@ -152,7 +152,7 @@ async def _create_user(
 ) -> None:
     """
     Create a new user.
-    
+
     Args:
         username: Username
         role: User role
@@ -213,7 +213,7 @@ async def _update_user(
 ) -> None:
     """
     Update an existing user.
-    
+
     Args:
         username: Username
         role: New role
@@ -252,7 +252,7 @@ async def _update_user(
 async def _delete_user(username: str, force: bool) -> None:
     """
     Delete a user.
-    
+
     Args:
         username: Username
         force: Force deletion without confirmation
@@ -284,7 +284,7 @@ async def _delete_user(username: str, force: bool) -> None:
 async def _toggle_user_status(username: str, activate: bool) -> None:
     """
     Activate or deactivate a user.
-    
+
     Args:
         username: Username
         activate: True to activate, False to deactivate
@@ -314,7 +314,7 @@ async def permissions(
     ),
 ) -> None:
     """🔑 View and manage permissions.
-    
+
     Display permissions for users, roles, or specific resources.
     """
     if username:
@@ -328,7 +328,7 @@ async def permissions(
 async def _show_user_permissions(username: str) -> None:
     """
     Show permissions for a specific user.
-    
+
     Args:
         username: Username
     """
@@ -379,7 +379,7 @@ async def _show_user_permissions(username: str) -> None:
 async def _show_role_permissions(role: str) -> None:
     """
     Show permissions for a specific role.
-    
+
     Args:
         role: Role name
     """
@@ -455,7 +455,7 @@ async def _show_role_permissions(role: str) -> None:
 async def _show_all_permissions(resource_filter: str | None) -> None:
     """
     Show all permissions matrix.
-    
+
     Args:
         resource_filter: Optional resource filter
     """
@@ -530,7 +530,7 @@ async def audit(
     ),
 ) -> None:
     """📋 View security audit logs.
-    
+
     Display security audit logs with filtering and export capabilities.
     """
     print_info("Fetching audit logs...")
@@ -631,8 +631,8 @@ async def audit(
         "Total Events": len(filtered_logs),
         "Success Events": len([l for l in filtered_logs if l["result"] == "SUCCESS"]),
         "Failed Events": len([l for l in filtered_logs if l["result"] in ["FAILED", "DENIED"]]),
-        "Unique Users": len(set(l["username"] for l in filtered_logs)),
-        "Event Types": len(set(l["event_type"] for l in filtered_logs)),
+        "Unique Users": len({l["username"] for l in filtered_logs}),
+        "Event Types": len({l["event_type"] for l in filtered_logs}),
     }
 
     summary_table = Table(title="Audit Summary")
@@ -652,7 +652,7 @@ async def audit(
 async def _export_audit_logs(logs: list[dict], export_path: Path) -> None:
     """
     Export audit logs to file.
-    
+
     Args:
         logs: Audit log entries
         export_path: Export file path
@@ -687,7 +687,7 @@ async def threats(
     ),
 ) -> None:
     """⚠️ Monitor and manage security threats.
-    
+
     View active security threats, investigate details, and take action.
     """
     valid_actions = ["list", "details", "dismiss", "block"]
@@ -717,7 +717,7 @@ async def threats(
 async def _list_threats(severity_filter: str | None, active_only: bool) -> None:
     """
     List security threats.
-    
+
     Args:
         severity_filter: Optional severity filter
         active_only: Show only active threats
@@ -822,7 +822,7 @@ async def _list_threats(severity_filter: str | None, active_only: bool) -> None:
 async def _show_threat_details(threat_id: str) -> None:
     """
     Show detailed information about a threat.
-    
+
     Args:
         threat_id: Threat ID
     """
@@ -898,7 +898,7 @@ async def _show_threat_details(threat_id: str) -> None:
 async def _dismiss_threat(threat_id: str) -> None:
     """
     Dismiss a threat.
-    
+
     Args:
         threat_id: Threat ID
     """
@@ -914,7 +914,7 @@ async def _dismiss_threat(threat_id: str) -> None:
 async def _block_threat(threat_id: str) -> None:
     """
     Block a threat source.
-    
+
     Args:
         threat_id: Threat ID
     """
@@ -951,7 +951,7 @@ def policies(
     ),
 ) -> None:
     """📋 Manage security policies.
-    
+
     View and update security policies including password requirements,
     session timeouts, and access controls.
     """
@@ -1060,7 +1060,7 @@ def _list_policies() -> None:
 def _show_policy(policy_name: str) -> None:
     """
     Show detailed information about a specific policy.
-    
+
     Args:
         policy_name: Policy name
     """
@@ -1095,7 +1095,7 @@ def _show_policy(policy_name: str) -> None:
 def _update_policy(policy_name: str, value: str) -> None:
     """
     Update a security policy.
-    
+
     Args:
         policy_name: Policy name
         value: New policy value
@@ -1112,7 +1112,7 @@ def _update_policy(policy_name: str, value: str) -> None:
 def _reset_policy(policy_name: str) -> None:
     """
     Reset a policy to its default value.
-    
+
     Args:
         policy_name: Policy name
     """

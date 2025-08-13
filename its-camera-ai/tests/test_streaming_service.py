@@ -714,11 +714,11 @@ class TestStreamingServicePerformance:
         ):
             # Register all cameras
             tasks = [self.processor.register_camera(config) for config in configs]
-            registrations = await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
 
             # Process frames for each camera
             frame_batches = []
-            for i in range(100):  # 100 frames per camera
+            for _i in range(100):  # 100 frames per camera
                 batch = []
                 for config in configs:
                     frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
@@ -937,7 +937,7 @@ class TestStreamingServicePerformance:
                 total_frames = 100
                 latencies = []
 
-                for i in range(total_frames):
+                for _i in range(total_frames):
                     frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
 
                     # Inject errors based on error rate

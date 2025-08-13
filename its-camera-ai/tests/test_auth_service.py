@@ -1059,7 +1059,7 @@ class TestAuthenticationServiceIntegration:
 
         # Verify results
         successful_auths = sum(1 for r in results if r is True)
-        failed_auths = len(results) - successful_auths
+        len(results) - successful_auths
 
         # Performance assertions
         avg_time_per_auth = total_time / concurrent_users_count
@@ -1334,7 +1334,7 @@ class TestAuthenticationEdgeCases:
         test_settings,
     ):
         """Test session cleanup with corrupted Redis data."""
-        auth_service = AuthenticationService(
+        AuthenticationService(
             db_session, redis_client, SecurityConfig()
         )
 
@@ -1362,7 +1362,7 @@ class TestAuthenticationEdgeCases:
                 else:
                     expires_at_str = session_data.get('expires_at')
                     try:
-                        expires_at = datetime.fromisoformat(expires_at_str)
+                        datetime.fromisoformat(expires_at_str)
                         # This is just a test - normally you'd check if expired
                     except (ValueError, TypeError):
                         # Invalid date format, clean it up

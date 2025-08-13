@@ -308,7 +308,7 @@ def get_sse_integration() -> SSEVisionIntegration:
 
 async def setup_vision_sse_integration(vision_engine, enable_broadcasting: bool = True):
     """Set up integration between Vision Engine and SSE broadcasting.
-    
+
     This function should be called during application startup to connect
     the vision processing pipeline to the SSE broadcasting system.
     """

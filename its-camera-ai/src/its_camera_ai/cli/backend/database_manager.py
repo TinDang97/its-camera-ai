@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 class CLIDatabaseManager:
     """Database manager specifically designed for CLI operations.
-    
+
     Features:
     - Connection pooling and management
     - Transaction handling with rollback support
@@ -32,7 +32,7 @@ class CLIDatabaseManager:
 
     def __init__(self, settings: Settings = None):
         """Initialize CLI database manager.
-        
+
         Args:
             settings: Application settings
         """
@@ -78,7 +78,7 @@ class CLIDatabaseManager:
     @asynccontextmanager
     async def get_session(self):
         """Get database session context manager.
-        
+
         Yields:
             AsyncSession: Database session
         """
@@ -98,12 +98,12 @@ class CLIDatabaseManager:
         fetch_all: bool = True
     ) -> list[dict[str, Any]] | dict[str, Any] | int:
         """Execute raw SQL query.
-        
+
         Args:
             query: SQL query string
             parameters: Query parameters
             fetch_all: Whether to fetch all results or just one
-            
+
         Returns:
             Query results
         """
@@ -132,28 +132,28 @@ class CLIDatabaseManager:
 
     async def get_table_info(self, table_name: str) -> dict[str, Any]:
         """Get information about a database table.
-        
+
         Args:
             table_name: Name of the table
-            
+
         Returns:
             Dictionary with table information
         """
         queries = {
             "columns": """
-                SELECT 
+                SELECT
                     column_name,
                     data_type,
                     is_nullable,
                     column_default,
                     character_maximum_length
-                FROM information_schema.columns 
+                FROM information_schema.columns
                 WHERE table_name = :table_name
                 ORDER BY ordinal_position
             """,
             "row_count": f"SELECT COUNT(*) as count FROM {table_name}",
             "table_size": """
-                SELECT 
+                SELECT
                     pg_size_pretty(pg_total_relation_size(:table_name)) as total_size,
                     pg_size_pretty(pg_relation_size(:table_name)) as table_size,
                     pg_size_pretty(pg_total_relation_size(:table_name) - pg_relation_size(:table_name)) as index_size
@@ -192,7 +192,7 @@ class CLIDatabaseManager:
 
     async def get_database_stats(self) -> dict[str, Any]:
         """Get comprehensive database statistics.
-        
+
         Returns:
             Dictionary with database statistics
         """
@@ -201,7 +201,7 @@ class CLIDatabaseManager:
                 SELECT pg_size_pretty(pg_database_size(current_database())) as size
             """,
             "connection_info": """
-                SELECT 
+                SELECT
                     count(*) as total_connections,
                     count(*) FILTER (WHERE state = 'active') as active_connections,
                     count(*) FILTER (WHERE state = 'idle') as idle_connections
@@ -209,7 +209,7 @@ class CLIDatabaseManager:
                 WHERE datname = current_database()
             """,
             "table_stats": """
-                SELECT 
+                SELECT
                     schemaname,
                     tablename,
                     n_tup_ins as inserts,
@@ -221,7 +221,7 @@ class CLIDatabaseManager:
                 ORDER BY n_live_tup DESC
             """,
             "index_usage": """
-                SELECT 
+                SELECT
                     schemaname,
                     tablename,
                     indexname,
@@ -265,7 +265,7 @@ class CLIDatabaseManager:
 
     async def check_connectivity(self) -> dict[str, Any]:
         """Check database connectivity and performance.
-        
+
         Returns:
             Dictionary with connectivity information
         """
@@ -306,21 +306,21 @@ class CLIDatabaseManager:
         batch_size: int = 1000
     ) -> int:
         """Clean up old data from a table.
-        
+
         Args:
             table_name: Name of the table to clean
             timestamp_column: Column containing timestamps
             retention_days: Number of days to retain
             batch_size: Number of rows to delete per batch
-            
+
         Returns:
             Number of rows deleted
         """
         try:
             # First, get count of rows to delete
             count_query = f"""
-                SELECT COUNT(*) as count 
-                FROM {table_name} 
+                SELECT COUNT(*) as count
+                FROM {table_name}
                 WHERE {timestamp_column} < NOW() - INTERVAL '{retention_days} days'
             """
 
@@ -338,10 +338,10 @@ class CLIDatabaseManager:
 
             while deleted_total < total_to_delete:
                 delete_query = f"""
-                    DELETE FROM {table_name} 
+                    DELETE FROM {table_name}
                     WHERE {timestamp_column} < NOW() - INTERVAL '{retention_days} days'
                     AND ctid IN (
-                        SELECT ctid FROM {table_name} 
+                        SELECT ctid FROM {table_name}
                         WHERE {timestamp_column} < NOW() - INTERVAL '{retention_days} days'
                         LIMIT {batch_size}
                     )
@@ -367,10 +367,10 @@ class CLIDatabaseManager:
 
     async def vacuum_analyze(self, table_name: str = None) -> dict[str, Any]:
         """Run VACUUM ANALYZE on database tables.
-        
+
         Args:
             table_name: Specific table name, or None for all tables
-            
+
         Returns:
             Operation results
         """
@@ -413,24 +413,24 @@ class CLIDatabaseManager:
 
     async def get_slow_queries(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get information about slow queries.
-        
+
         Args:
             limit: Maximum number of queries to return
-            
+
         Returns:
             List of slow query information
         """
         # Note: This requires pg_stat_statements extension
         query = f"""
-            SELECT 
+            SELECT
                 query,
                 calls,
                 total_time,
                 mean_time,
                 rows,
                 100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
-            FROM pg_stat_statements 
-            ORDER BY mean_time DESC 
+            FROM pg_stat_statements
+            ORDER BY mean_time DESC
             LIMIT {limit}
         """
 
@@ -445,7 +445,7 @@ class CLIDatabaseManager:
 
     def is_connected(self) -> bool:
         """Check if database manager is connected.
-        
+
         Returns:
             True if connected and initialized
         """

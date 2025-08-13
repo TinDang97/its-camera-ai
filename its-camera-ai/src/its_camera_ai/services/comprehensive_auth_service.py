@@ -49,14 +49,14 @@ class ComprehensiveAuthService:
         user_agent: str | None = None
     ) -> dict[str, Any]:
         """Authenticate user with comprehensive security checks.
-        
+
         Args:
             username: Username or email
             password: Password
             mfa_code: MFA code if required
             ip_address: Client IP address
             user_agent: Client user agent
-            
+
         Returns:
             Authentication result with tokens or error information
         """
@@ -264,14 +264,14 @@ class ComprehensiveAuthService:
         user_agent: str | None = None
     ) -> bool:
         """Logout user and invalidate session/tokens.
-        
+
         Args:
             user_id: User ID
             session_id: Session ID to invalidate
             token: Token to blacklist
             ip_address: Client IP address
             user_agent: Client user agent
-            
+
         Returns:
             True if logout successful
         """
@@ -325,14 +325,14 @@ class ComprehensiveAuthService:
         user_agent: str | None = None
     ) -> dict[str, Any]:
         """Change user password with security checks.
-        
+
         Args:
             user_id: User ID
             current_password: Current password
             new_password: New password
             ip_address: Client IP address
             user_agent: Client user agent
-            
+
         Returns:
             Change result
         """
@@ -460,10 +460,10 @@ class ComprehensiveAuthService:
 
     async def get_security_summary(self, user_id: str) -> dict[str, Any]:
         """Get security summary for user.
-        
+
         Args:
             user_id: User ID
-            
+
         Returns:
             Security summary
         """

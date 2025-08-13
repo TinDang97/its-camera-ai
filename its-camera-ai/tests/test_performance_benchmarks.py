@@ -142,7 +142,7 @@ class TestSystemLoadBenchmarks:
 
                 # Process frames for all cameras concurrently
                 camera_tasks = [process_camera_frames(config) for config in configs[:successful_registrations]]
-                camera_results = await asyncio.gather(*camera_tasks, return_exceptions=True)
+                await asyncio.gather(*camera_tasks, return_exceptions=True)
 
                 actual_processing_time = time.perf_counter() - processing_start
 
@@ -212,7 +212,7 @@ class TestSystemLoadBenchmarks:
                 await asyncio.gather(*tasks)
 
                 # Process several batches of frames
-                for batch in range(10):
+                for _batch in range(10):
                     frame_tasks = []
                     for config in configs:
                         frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
@@ -288,7 +288,7 @@ class TestSystemLoadBenchmarks:
 
                     start_time = time.perf_counter()
                     try:
-                        result = await breaker.call(successful_call)
+                        await breaker.call(successful_call)
                         end_time = time.perf_counter()
                         normal_load_results.append(end_time - start_time)
                     except Exception:
@@ -317,7 +317,7 @@ class TestSystemLoadBenchmarks:
 
                         start_time = time.perf_counter()
                         try:
-                            result = await breaker.call(potentially_failing_call)
+                            await breaker.call(potentially_failing_call)
                             end_time = time.perf_counter()
                             scenario_results.append(end_time - start_time)
                         except CircuitBreakerError:
@@ -436,7 +436,7 @@ class TestSystemLoadBenchmarks:
 
                 # Distribution should be reasonable (no single endpoint getting >60% of traffic)
                 total_requests = metrics['total_decisions']
-                for port, count in metrics['distribution'].items():
+                for _port, count in metrics['distribution'].items():
                     percentage = count / total_requests
                     if strategy == "round_robin":
                         # Round robin should be very even
@@ -496,7 +496,7 @@ class TestSystemLoadBenchmarks:
                     errors = 0
                     latencies = []
 
-                    for batch in range(20):  # 20 batches of frames
+                    for _batch in range(20):  # 20 batches of frames
                         batch_tasks = []
 
                         for config in configs[:successful_registrations]:

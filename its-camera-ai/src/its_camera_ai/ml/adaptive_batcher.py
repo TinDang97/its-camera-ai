@@ -2,11 +2,12 @@
 Advanced adaptive batching system for YOLO11 production inference.
 
 This module implements intelligent dynamic batching with priority queues,
-adaptive timeout management, and workload-aware optimization for 100+ 
+adaptive timeout management, and workload-aware optimization for 100+
 concurrent camera streams.
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import deque
@@ -130,7 +131,7 @@ class BatchMetrics:
 class AdaptiveTimeoutManager:
     """
     Manages adaptive timeout strategies based on system load and performance.
-    
+
     Dynamically adjusts batch timeouts to balance latency vs throughput
     based on real-time performance metrics.
     """
@@ -239,7 +240,7 @@ class AdaptiveTimeoutManager:
 class WorkloadAnalyzer:
     """
     Analyzes incoming workload patterns to optimize batching strategy.
-    
+
     Predicts optimal batch sizes and timing based on traffic patterns.
     """
 
@@ -376,7 +377,7 @@ class WorkloadAnalyzer:
 class AdaptiveBatchProcessor:
     """
     Advanced adaptive batching processor with intelligent workload management.
-    
+
     Features:
     - Multi-priority queues with deadline awareness
     - Adaptive timeout based on system performance
@@ -436,10 +437,8 @@ class AdaptiveBatchProcessor:
 
         if self.processor_task:
             self.processor_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.processor_task
-            except asyncio.CancelledError:
-                pass
 
         # Complete any pending requests with errors
         for queue in self.queues.values():
@@ -465,14 +464,14 @@ class AdaptiveBatchProcessor:
     ) -> Any:
         """
         Submit inference request to adaptive batching system.
-        
+
         Args:
             frame: Input frame for inference
             frame_id: Unique frame identifier
             camera_id: Source camera identifier
             priority: Request priority level
             deadline_ms: Optional deadline for completion
-            
+
         Returns:
             Inference result
         """
@@ -548,12 +547,12 @@ class AdaptiveBatchProcessor:
     async def _collect_adaptive_batch(self) -> list[BatchRequest]:
         """
         Collect batch with adaptive sizing and timeout management.
-        
+
         Returns:
             List of requests to process as a batch
         """
         batch: list[BatchRequest] = []
-        batch_start_time = time.time()
+        time.time()
 
         # Get workload analysis for optimization
         workload_info = None
@@ -761,12 +760,12 @@ async def create_adaptive_batcher(
 ) -> AdaptiveBatchProcessor:
     """
     Create and start an adaptive batch processor.
-    
+
     Args:
         inference_func: Function to call for batch inference
         max_batch_size: Maximum batch size
         base_timeout_ms: Base timeout for batching
-        
+
     Returns:
         Started AdaptiveBatchProcessor instance
     """

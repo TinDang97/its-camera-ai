@@ -16,6 +16,7 @@ Key Features:
 """
 
 import asyncio
+import contextlib
 import json
 import time
 import uuid
@@ -170,11 +171,8 @@ class CircuitBreaker:
         self.error_count += 1
         self.last_failure_time = datetime.now(UTC)
 
-        if self.state == CircuitBreakerState.HALF_OPEN:
+        if self.state == CircuitBreakerState.HALF_OPEN or self.state == CircuitBreakerState.CLOSED and self._should_trip():
             self._trip_circuit()
-        elif self.state == CircuitBreakerState.CLOSED:
-            if self._should_trip():
-                self._trip_circuit()
 
     def _should_trip(self) -> bool:
         """Check if circuit breaker should trip."""
@@ -325,17 +323,15 @@ class ServiceRegistry:
         self._running = False
         if self._health_check_task:
             self._health_check_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._health_check_task
-            except asyncio.CancelledError:
-                pass
         logger.info("Stopped service health monitoring")
 
     async def _health_monitoring_loop(self):
         """Health monitoring background loop."""
         while self._running:
             try:
-                for service_name, endpoints in self.services.items():
+                for _service_name, endpoints in self.services.items():
                     for endpoint in endpoints:
                         await self._check_service_health(endpoint)
 
@@ -544,7 +540,7 @@ class EventBus:
                 event_payload["trace_id"] = correlation_context.trace_id
 
             if self._producer:
-                future = self._producer.send(topic, event_payload)
+                self._producer.send(topic, event_payload)
                 # Don't wait for send to complete (async)
                 logger.debug(f"Published event to {topic}")
             else:
@@ -801,17 +797,16 @@ class ServiceMeshClient:
         if correlation_context.session_id:
             headers["X-Session-ID"] = correlation_context.session_id
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                json=request,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as response:
-                if response.status >= 400:
-                    error_text = await response.text()
-                    raise ServiceMeshError(f"HTTP {response.status}: {error_text}")
-                return await response.json()
+        async with aiohttp.ClientSession() as session, session.post(
+            url,
+            json=request,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            if response.status >= 400:
+                error_text = await response.text()
+                raise ServiceMeshError(f"HTTP {response.status}: {error_text}")
+            return await response.json()
 
     def _get_circuit_breaker(self, service_name: str) -> CircuitBreaker:
         """Get or create circuit breaker for service."""

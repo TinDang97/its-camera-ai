@@ -144,7 +144,7 @@ class PluginManager:
 
             # Find plugin class
             plugin_class = None
-            for name, obj in inspect.getmembers(module):
+            for _name, obj in inspect.getmembers(module):
                 if (inspect.isclass(obj) and
                     issubclass(obj, PluginBase) and
                     obj is not PluginBase):
@@ -386,52 +386,52 @@ from its_camera_ai.cli.utils import print_info, print_success
 
 class {name.title().replace("_", "")}Plugin(PluginBase):
     """Example plugin implementation."""
-    
+
     @property
     def name(self) -> str:
         return "{name}"
-    
+
     @property
     def version(self) -> str:
         return "1.0.0"
-    
+
     @property
     def description(self) -> str:
         return "Example plugin for demonstrating CLI extensions"
-    
+
     @property
     def author(self) -> str:
         return "Your Name"
-    
+
     @property
     def dependencies(self) -> list[str]:
         return []  # Add any required Python packages
-    
+
     def get_commands(self) -> dict[str, typer.Typer]:
         """Return the command groups provided by this plugin."""
         app = typer.Typer(help=f"🔌 {{self.name}} plugin commands")
-        
+
         @app.command()
         def hello(
             name: str = typer.Option("World", "--name", "-n", help="Name to greet"),
         ) -> None:
             """Say hello from the plugin."""
             print_success(f"Hello {{name}} from {{self.name}} plugin!")
-        
+
         @app.command()
         def info() -> None:
             """Show plugin information."""
             print_info(f"Plugin: {{self.name}} v{{self.version}}")
             print_info(f"Description: {{self.description}}")
             print_info(f"Author: {{self.author}}")
-        
+
         return {{"main": app}}
-    
+
     def initialize(self) -> bool:
         """Initialize the plugin."""
         print_info(f"Initializing {{self.name}} plugin...")
         return True
-    
+
     def cleanup(self) -> None:
         """Cleanup plugin resources."""
         print_info(f"Cleaning up {{self.name}} plugin...")

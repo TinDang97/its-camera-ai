@@ -56,7 +56,7 @@ class StreamProtocol(str, Enum):
 
 class Camera(BaseModel):
     """Camera registry model with comprehensive metadata and settings.
-    
+
     Supports 100+ concurrent cameras with optimized indexing for
     high-performance queries and real-time status updates.
     """
@@ -193,7 +193,7 @@ class Camera(BaseModel):
 
     def update_health_metrics(self, frame_count: int, avg_time: float, uptime: float) -> None:
         """Update camera health metrics.
-        
+
         Args:
             frame_count: Total frames processed
             avg_time: Average processing time in ms
@@ -206,7 +206,7 @@ class Camera(BaseModel):
 
     def set_status(self, status: CameraStatus, error_message: str | None = None) -> None:
         """Update camera status with optional error information.
-        
+
         Args:
             status: New camera status
             error_message: Optional error message for troubleshooting
@@ -247,7 +247,7 @@ class Camera(BaseModel):
 
 class CameraSettings(BaseModel):
     """Camera-specific processing and configuration settings.
-    
+
     Separated from Camera model for better performance and flexibility
     in high-frequency updates during processing optimization.
     """
@@ -337,7 +337,7 @@ class CameraSettings(BaseModel):
 
     def update_performance_settings(self, avg_processing_time: float) -> None:
         """Auto-adjust settings based on performance metrics.
-        
+
         Args:
             avg_processing_time: Current average processing time in ms
         """

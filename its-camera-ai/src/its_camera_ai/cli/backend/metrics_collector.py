@@ -5,6 +5,7 @@ with aggregation, analysis, and reporting capabilities.
 """
 
 import asyncio
+import contextlib
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -76,7 +77,7 @@ class MetricSeries:
 
 class MetricsCollector:
     """Comprehensive metrics collection system.
-    
+
     Features:
     - Prometheus metrics scraping
     - System metrics collection
@@ -88,7 +89,7 @@ class MetricsCollector:
 
     def __init__(self, settings: Settings = None):
         """Initialize metrics collector.
-        
+
         Args:
             settings: Application settings
         """
@@ -151,10 +152,10 @@ class MetricsCollector:
 
     async def collect_prometheus_metrics(self, endpoint: str) -> dict[str, list[MetricPoint]]:
         """Collect metrics from Prometheus endpoint.
-        
+
         Args:
             endpoint: Prometheus metrics endpoint URL
-            
+
         Returns:
             Dictionary of metric families
         """
@@ -191,7 +192,7 @@ class MetricsCollector:
 
     async def collect_api_metrics(self) -> dict[str, Any]:
         """Collect metrics from API endpoints.
-        
+
         Returns:
             API metrics dictionary
         """
@@ -255,7 +256,7 @@ class MetricsCollector:
 
     async def collect_system_metrics(self) -> dict[str, MetricPoint]:
         """Collect local system metrics using psutil.
-        
+
         Returns:
             System metrics dictionary
         """
@@ -327,7 +328,7 @@ class MetricsCollector:
 
     def add_metric_point(self, metric_point: MetricPoint) -> None:
         """Add a metric point to storage.
-        
+
         Args:
             metric_point: Metric point to add
         """
@@ -362,7 +363,7 @@ class MetricsCollector:
             for endpoint in self.prometheus_endpoints:
                 prometheus_metrics = await self.collect_prometheus_metrics(endpoint)
 
-                for family_name, metric_points in prometheus_metrics.items():
+                for _family_name, metric_points in prometheus_metrics.items():
                     for metric_point in metric_points:
                         self.add_metric_point(metric_point)
 
@@ -395,7 +396,7 @@ class MetricsCollector:
 
     async def start_collection(self, interval: int = None) -> None:
         """Start continuous metric collection.
-        
+
         Args:
             interval: Collection interval in seconds
         """
@@ -417,10 +418,8 @@ class MetricsCollector:
 
         if self._collection_task and not self._collection_task.done():
             self._collection_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._collection_task
-            except asyncio.CancelledError:
-                pass
             self._collection_task = None
 
         logger.info("Stopped metric collection")
@@ -440,11 +439,11 @@ class MetricsCollector:
 
     def get_metric_series(self, metric_name: str, labels: dict[str, str] = None) -> MetricSeries | None:
         """Get metric series by name and labels.
-        
+
         Args:
             metric_name: Name of the metric
             labels: Labels to match
-            
+
         Returns:
             Matching metric series or None
         """
@@ -462,11 +461,11 @@ class MetricsCollector:
         labels: dict[str, str] = None
     ) -> float | None:
         """Get latest value for a metric.
-        
+
         Args:
             metric_name: Name of the metric
             labels: Labels to match
-            
+
         Returns:
             Latest metric value or None
         """
@@ -483,12 +482,12 @@ class MetricsCollector:
         duration: int = 3600
     ) -> dict[str, float]:
         """Get statistics for a metric.
-        
+
         Args:
             metric_name: Name of the metric
             labels: Labels to match
             duration: Time window in seconds
-            
+
         Returns:
             Statistics dictionary
         """
@@ -499,7 +498,7 @@ class MetricsCollector:
 
     def list_metrics(self) -> list[dict[str, Any]]:
         """List all available metrics.
-        
+
         Returns:
             List of metric information
         """
@@ -522,7 +521,7 @@ class MetricsCollector:
 
     def get_dashboard_metrics(self) -> dict[str, Any]:
         """Get key metrics for dashboard display.
-        
+
         Returns:
             Dashboard metrics dictionary
         """
@@ -573,11 +572,11 @@ class MetricsCollector:
         duration: int = 3600
     ) -> str | dict[str, Any]:
         """Export metrics in specified format.
-        
+
         Args:
             format_type: Export format (json, csv, prometheus)
             duration: Time window in seconds
-            
+
         Returns:
             Exported metrics data
         """
@@ -625,7 +624,7 @@ class MetricsCollector:
 
     def get_collector_status(self) -> dict[str, Any]:
         """Get collector status information.
-        
+
         Returns:
             Collector status dictionary
         """
@@ -642,7 +641,7 @@ class MetricsCollector:
 
     def _estimate_memory_usage(self) -> int:
         """Estimate memory usage of stored metrics.
-        
+
         Returns:
             Estimated memory usage in bytes
         """

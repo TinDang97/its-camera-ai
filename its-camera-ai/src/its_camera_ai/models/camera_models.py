@@ -86,7 +86,7 @@ class VehicleType(str, Enum):
 
 class Camera(BaseModel):
     """Camera registry model optimized for CRUD operations.
-    
+
     Design considerations:
     - UUID primary key for distributed systems
     - JSONB for flexible configuration storage
@@ -204,7 +204,7 @@ class Camera(BaseModel):
 
 class FrameMetadata(BaseModel):
     """Frame processing metadata with time-series partitioning.
-    
+
     Optimized for high-throughput inserts (3000+/sec):
     - Partitioned by timestamp for efficient archival
     - Minimal indexes on partition key and camera_id
@@ -305,7 +305,7 @@ class FrameMetadata(BaseModel):
 
 class Detection(BaseModel):
     """Individual detection results with spatial indexing.
-    
+
     Separated from FrameMetadata for:
     - Better normalization
     - Efficient spatial queries
@@ -384,7 +384,7 @@ class Detection(BaseModel):
 
 class SystemMetric(BaseModel):
     """System performance and health metrics with time-series storage.
-    
+
     Optimized for monitoring dashboards:
     - Time-series partitioning
     - Efficient aggregation queries
@@ -446,7 +446,7 @@ class SystemMetric(BaseModel):
 
 class User(BaseModel):
     """User management with role-based access control.
-    
+
     Optimized for authentication and authorization:
     - Efficient username/email lookups
     - Role-based permissions
@@ -512,7 +512,7 @@ class User(BaseModel):
 
 class UserSession(BaseModel):
     """User session tracking for security and monitoring.
-    
+
     Optimized for session management:
     - Fast session lookups
     - Security monitoring
@@ -572,7 +572,7 @@ class UserSession(BaseModel):
 
 class Alert(BaseModel):
     """System alerts and notifications.
-    
+
     Optimized for real-time alerting:
     - Priority-based indexing
     - Status tracking

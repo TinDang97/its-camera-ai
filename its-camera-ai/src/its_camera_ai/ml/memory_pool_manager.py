@@ -79,7 +79,7 @@ class TensorDescriptor:
 class GPUMemoryPool:
     """
     High-performance GPU memory pool with intelligent allocation strategies.
-    
+
     Features:
     - Size-based allocation buckets for efficient memory reuse
     - Lazy allocation with pre-warming for hot paths
@@ -206,10 +206,10 @@ class GPUMemoryPool:
     def get_tensor(self, descriptor: TensorDescriptor) -> torch.Tensor:
         """
         Get tensor from pool or allocate new one.
-        
+
         Args:
             descriptor: Tensor descriptor specifying requirements
-            
+
         Returns:
             Allocated tensor ready for use
         """
@@ -234,7 +234,7 @@ class GPUMemoryPool:
     def return_tensor(self, tensor: torch.Tensor) -> None:
         """
         Return tensor to pool for reuse.
-        
+
         Args:
             tensor: Tensor to return to pool
         """
@@ -300,7 +300,7 @@ class GPUMemoryPool:
                 self.pools.clear()
             else:
                 # Keep only small number of tensors per descriptor
-                for desc, pool in self.pools.items():
+                for _desc, pool in self.pools.items():
                     while len(pool) > 4:
                         pool.popleft()
 
@@ -333,7 +333,7 @@ class GPUMemoryPool:
 class CUDAStreamManager:
     """
     Advanced CUDA stream manager for parallel processing across multiple streams.
-    
+
     Manages stream allocation, synchronization, and work distribution for
     optimal GPU utilization with minimal latency.
     """
@@ -371,7 +371,7 @@ class CUDAStreamManager:
                 device_locks = []
                 device_usage = []
 
-                for i in range(self.streams_per_device):
+                for _i in range(self.streams_per_device):
                     stream = torch.cuda.Stream(device=device_id, priority=0)
                     device_streams.append(stream)
                     device_locks.append(threading.Lock())
@@ -393,11 +393,11 @@ class CUDAStreamManager:
     def get_stream(self, device_id: int, high_priority: bool = False):
         """
         Get CUDA stream with automatic synchronization management.
-        
+
         Args:
             device_id: Target GPU device ID
             high_priority: Use high-priority stream if available
-            
+
         Yields:
             CUDA stream context
         """
@@ -481,7 +481,7 @@ class CUDAStreamManager:
 class MultiGPUMemoryManager:
     """
     Comprehensive multi-GPU memory management system.
-    
+
     Coordinates memory pools and streams across multiple GPUs for optimal
     performance in multi-camera inference scenarios.
     """
@@ -562,12 +562,12 @@ class MultiGPUMemoryManager:
     ) -> torch.Tensor:
         """
         Get tensor from appropriate memory pool.
-        
+
         Args:
             descriptor: Tensor requirements
             pool_type: Type of memory pool to use
             preferred_device: Preferred GPU device (None for auto-selection)
-            
+
         Returns:
             Allocated tensor
         """
@@ -601,11 +601,11 @@ class MultiGPUMemoryManager:
     ):
         """
         Get complete inference context with memory and stream management.
-        
+
         Args:
             device_id: Target device (None for auto-selection)
             high_priority: Use high-priority resources
-            
+
         Yields:
             Tuple of (device_id, stream, memory_pools)
         """

@@ -783,7 +783,7 @@ class TrafficAnomaly(BaseModel):
 
 class SpeedLimit(BaseModel):
     """Speed limit configuration by zone and vehicle type.
-    
+
     Stores dynamic speed limits that can be looked up by traffic zone
     and vehicle classification for accurate violation detection.
     """
@@ -899,10 +899,10 @@ class SpeedLimit(BaseModel):
 
     def is_valid_at(self, check_time: datetime) -> bool:
         """Check if speed limit is valid at given time.
-        
+
         Args:
             check_time: Time to check validity
-            
+
         Returns:
             True if speed limit is valid at the given time
         """
@@ -928,11 +928,11 @@ class SpeedLimit(BaseModel):
 
     def applies_to_conditions(self, weather: str | None = None, visibility: float | None = None) -> bool:
         """Check if speed limit applies to current environmental conditions.
-        
+
         Args:
             weather: Current weather condition
             visibility: Current visibility in meters
-            
+
         Returns:
             True if speed limit applies to the conditions
         """

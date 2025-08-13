@@ -87,11 +87,11 @@ class AuthService:
 
     async def get_user_permissions(self, db: AsyncSession, user: User) -> list[str]:
         """Get all permissions for a user.
-        
+
         Args:
             db: Database session
             user: User instance
-            
+
         Returns:
             List of permission names
         """
@@ -99,7 +99,7 @@ class AuthService:
             # Superuser has all permissions
             query = select(Permission.name)
             result = await db.execute(query)
-            return [perm for perm in result.scalars().all()]
+            return list(result.scalars().all())
 
         permissions = set()
         for role in user.roles:
@@ -143,7 +143,7 @@ class AuthService:
         risk_score: int = 0
     ) -> SecurityAuditLog:
         """Create security audit log entry.
-        
+
         Args:
             db: Database session
             event_type: Type of security event
@@ -158,7 +158,7 @@ class AuthService:
             error_message: Error message if failed
             details: Additional event details
             risk_score: Risk score for the event (0-100)
-            
+
         Returns:
             Created SecurityAuditLog entry
         """
@@ -198,13 +198,13 @@ class AuthService:
         self, db: AsyncSession, cache: CacheService, user: User, ip_address: str | None = None
     ) -> tuple[bool, datetime | None]:
         """Check if account is locked due to failed login attempts.
-        
+
         Args:
             db: Database session
             cache: Cache service
             user: User to check
             ip_address: Client IP address
-            
+
         Returns:
             Tuple of (is_locked, unlock_time)
         """
@@ -253,7 +253,7 @@ class AuthService:
         self, db: AsyncSession, cache: CacheService, user: User, ip_address: str | None = None
     ) -> None:
         """Record failed login attempt.
-        
+
         Args:
             db: Database session
             cache: Cache service
@@ -292,7 +292,7 @@ class AuthService:
         self, db: AsyncSession, cache: CacheService, user: User
     ) -> None:
         """Clear failed login attempts for successful login.
-        
+
         Args:
             db: Database session
             cache: Cache service
