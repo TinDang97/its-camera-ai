@@ -13,6 +13,8 @@ The repository layer abstracts:
 - Pagination and filtering
 """
 
+from .alert_repository import AlertRepository
+from .analytics_repository import AnalyticsRepository
 from .base_repository import BaseRepository
 from .camera_repository import CameraRepository
 from .detection_repository import DetectionRepository
@@ -22,6 +24,8 @@ from .user_repository import UserRepository
 
 __all__ = [
     "BaseRepository",
+    "AlertRepository",
+    "AnalyticsRepository",
     "UserRepository",
     "CameraRepository",
     "FrameRepository",

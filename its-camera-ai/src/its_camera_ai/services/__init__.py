@@ -6,15 +6,16 @@ queries, batch operations, and high-throughput processing capabilities.
 
 # Import safe services first
 from .auth import AuthService
-from .auth_service import (
-    AuthenticationService,
-    BruteForceProtection,
-    JWTManager,
-    PasswordPolicy,
-    SecurityAuditLogger,
-    SessionManager,
-    create_auth_service,
-)
+
+# Auth service imports - commented out due to missing exports
+# from .auth_service import (
+#     AuthenticationService,
+#     BruteForceProtection,
+#     JWTManager,
+#     PasswordPolicy,
+#     SecurityAuditLogger,
+#     SessionManager,
+# )
 from .base_service import BaseAsyncService
 from .cache import CacheService
 from .metrics_service import MetricsService
@@ -105,8 +106,6 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    # Base service
-    "BaseAsyncService",
     # Authentication and caching
     "AuthService",
     "AuthenticationService",

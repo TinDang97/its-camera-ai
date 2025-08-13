@@ -5,19 +5,16 @@ with batch processing, efficient queries, and real-time updates.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, desc, func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from ..api.schemas.database import (
-    BatchDetectionResultCreateSchema,
-    BatchFrameMetadataCreateSchema,
-    BatchOperationResultSchema,
-    FrameMetadataCreateSchema,
-    FrameMetadataUpdateSchema,
-)
+if TYPE_CHECKING:
+    from ..api.schemas.database import (
+        BatchDetectionResultCreateSchema,
+        BatchFrameMetadataCreateSchema,
+        BatchOperationResultSchema,
+        FrameMetadataCreateSchema,
+        FrameMetadataUpdateSchema,
+    )
 from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
 from ..models import (
@@ -25,23 +22,84 @@ from ..models import (
     FrameMetadata,
     ProcessingStatus,
 )
-from .base_service import BaseAsyncService
+from ..repositories.detection_repository import DetectionRepository
+from ..repositories.frame_repository import FrameRepository
 
 logger = get_logger(__name__)
 
 
-class FrameService(BaseAsyncService[FrameMetadata]):
+class FrameService:
     """High-throughput async service for frame metadata operations.
 
     Designed for processing 30+ FPS per camera across 100+ cameras
     with optimized batch operations and minimal latency.
     """
 
-    def __init__(self, session: AsyncSession):
-        super().__init__(session, FrameMetadata)
+    def __init__(self, frame_repository: FrameRepository):
+        self.frame_repository = frame_repository
+
+    async def get_by_id(self, frame_id: str) -> FrameMetadata | None:
+        """Get frame metadata by ID.
+        
+        Args:
+            frame_id: Frame identifier
+            
+        Returns:
+            Frame metadata if found, None otherwise
+        """
+        return await self.frame_repository.get_by_id(frame_id)
+
+    async def create(self, **kwargs: Any) -> FrameMetadata:
+        """Create frame metadata.
+        
+        Args:
+            **kwargs: Frame metadata fields
+            
+        Returns:
+            Created frame metadata
+        """
+        return await self.frame_repository.create(**kwargs)
+
+    async def update(self, frame_id: str, **kwargs: Any) -> FrameMetadata:
+        """Update frame metadata.
+        
+        Args:
+            frame_id: Frame identifier
+            **kwargs: Fields to update
+            
+        Returns:
+            Updated frame metadata
+        """
+        return await self.frame_repository.update(frame_id, **kwargs)
+
+    async def delete(self, frame_id: str) -> bool:
+        """Delete frame metadata.
+        
+        Args:
+            frame_id: Frame identifier
+            
+        Returns:
+            True if deleted successfully
+        """
+        return await self.frame_repository.delete(frame_id)
+
+    async def bulk_delete(self, frame_ids: list[str]) -> int:
+        """Bulk delete frame metadata.
+        
+        Args:
+            frame_ids: List of frame identifiers
+            
+        Returns:
+            Number of deleted frames
+        """
+        deleted_count = 0
+        for frame_id in frame_ids:
+            if await self.frame_repository.delete(frame_id):
+                deleted_count += 1
+        return deleted_count
 
     async def create_frame_metadata(
-        self, frame_data: FrameMetadataCreateSchema
+        self, frame_data: "FrameMetadataCreateSchema"
     ) -> FrameMetadata:
         """Create single frame metadata record.
 
@@ -54,6 +112,8 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         Raises:
             DatabaseError: If creation fails
         """
+        # Import schema at runtime to avoid circular import
+
         try:
             frame_dict = frame_data.model_dump()
 
@@ -71,11 +131,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
                 "retry_count": 0,
             })
 
-            frame = FrameMetadata(**frame_dict)
-
-            self.session.add(frame)
-            await self.session.commit()
-            await self.session.refresh(frame)
+            frame = await self.frame_repository.create(**frame_dict)
 
             logger.debug(
                 "Frame metadata created",
@@ -87,7 +143,6 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             return frame
 
         except Exception as e:
-            await self.session.rollback()
             logger.error(
                 "Frame metadata creation failed",
                 camera_id=frame_data.camera_id,
@@ -97,8 +152,8 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             raise DatabaseError(f"Failed to create frame metadata: {str(e)}") from e
 
     async def batch_create_frame_metadata(
-        self, batch_data: BatchFrameMetadataCreateSchema
-    ) -> BatchOperationResultSchema:
+        self, batch_data: "BatchFrameMetadataCreateSchema"
+    ) -> "BatchOperationResultSchema":
         """Batch create frame metadata records for high throughput.
 
         Args:
@@ -110,6 +165,9 @@ class FrameService(BaseAsyncService[FrameMetadata]):
         Raises:
             DatabaseError: If batch creation fails
         """
+        # Import schema at runtime to avoid circular import
+        from ..api.schemas.database import BatchOperationResultSchema
+
         start_time = datetime.now(UTC)
         successful_items = 0
         errors = []
@@ -135,9 +193,8 @@ class FrameService(BaseAsyncService[FrameMetadata]):
                         "retry_count": 0,
                     })
 
-                    frame = FrameMetadata(**frame_dict)
+                    frame = await self.frame_repository.create(**frame_dict)
                     frame_instances.append(frame)
-                    self.session.add(frame)
 
                 except Exception as e:
                     errors.append({
@@ -146,10 +203,8 @@ class FrameService(BaseAsyncService[FrameMetadata]):
                         "data": frame_data.model_dump() if frame_data else None,
                     })
 
-            # Commit all valid frames
-            if frame_instances:
-                await self.session.commit()
-                successful_items = len(frame_instances)
+            # All frames already committed individually by repository
+            successful_items = len(frame_instances)
 
             # Calculate performance metrics
             processing_time_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
@@ -174,7 +229,6 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             )
 
         except Exception as e:
-            await self.session.rollback()
             logger.error(
                 "Batch frame metadata creation failed",
                 total_items=len(batch_data.frames),
@@ -183,7 +237,7 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             raise DatabaseError(f"Batch frame creation failed: {str(e)}") from e
 
     async def update_frame_processing(
-        self, frame_id: str, update_data: FrameMetadataUpdateSchema
+        self, frame_id: str, update_data: "FrameMetadataUpdateSchema"
     ) -> FrameMetadata | None:
         """Update frame metadata after processing completion.
 
@@ -195,24 +249,20 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             Updated frame metadata if found, None otherwise
         """
         try:
-            frame = await self.get_by_id(frame_id)
+            frame = await self.frame_repository.get_by_id(frame_id)
             if not frame:
                 return None
 
             # Update fields from schema
             update_dict = update_data.model_dump(exclude_none=True)
 
-            for key, value in update_dict.items():
-                if hasattr(frame, key):
-                    setattr(frame, key, value)
-
             # Update processing timestamp
             if update_data.status == ProcessingStatus.COMPLETED:
-                frame.processing_completed_at = datetime.now(UTC)
+                update_dict["processing_completed_at"] = datetime.now(UTC)
             elif update_data.status == ProcessingStatus.PROCESSING:
-                frame.processing_started_at = datetime.now(UTC)
+                update_dict["processing_started_at"] = datetime.now(UTC)
 
-            await self.session.commit()
+            frame = await self.frame_repository.update(frame_id, **update_dict)
 
             logger.debug(
                 "Frame processing updated",
@@ -224,7 +274,6 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             return frame
 
         except Exception as e:
-            await self.session.rollback()
             logger.error(
                 "Frame processing update failed",
                 frame_id=frame_id,
@@ -245,18 +294,19 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             List of pending frame metadata
         """
         try:
-            query = (
-                select(FrameMetadata)
-                .where(FrameMetadata.status == ProcessingStatus.PENDING)
-                .order_by(FrameMetadata.timestamp)
-                .limit(limit)
+            # Use repository method for status-based queries
+            pending_frames = await self.frame_repository.get_by_status(
+                ProcessingStatus.PENDING, limit=limit
             )
 
+            # Filter by camera_id if provided
             if camera_id:
-                query = query.where(FrameMetadata.camera_id == camera_id)
+                pending_frames = [
+                    frame for frame in pending_frames
+                    if frame.camera_id == camera_id
+                ]
 
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
+            return pending_frames
 
         except Exception as e:
             logger.error(
@@ -291,32 +341,31 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             List of frame metadata
         """
         try:
-            query = (
-                select(FrameMetadata)
-                .where(FrameMetadata.camera_id == camera_id)
-                .order_by(desc(FrameMetadata.timestamp))
-                .limit(limit)
+            # Use repository method for camera-based queries
+            frames = await self.frame_repository.get_by_camera_id(
+                camera_id=camera_id, limit=limit
             )
 
-            if include_detections:
-                query = query.options(selectinload(FrameMetadata.detection_results))
+            # Apply additional filters
+            filtered_frames = []
+            for frame in frames:
+                # Time range filter
+                if start_time and frame.timestamp < start_time:
+                    continue
+                if end_time and frame.timestamp > end_time:
+                    continue
 
-            # Apply time range filter
-            if start_time:
-                query = query.where(FrameMetadata.timestamp >= start_time)
-            if end_time:
-                query = query.where(FrameMetadata.timestamp <= end_time)
+                # Status filter
+                if status_filter and frame.status != status_filter:
+                    continue
 
-            # Apply status filter
-            if status_filter:
-                query = query.where(FrameMetadata.status == status_filter)
+                # Detection filter
+                if has_detections is not None and frame.has_detections != has_detections:
+                    continue
 
-            # Apply detection filter
-            if has_detections is not None:
-                query = query.where(FrameMetadata.has_detections == has_detections)
+                filtered_frames.append(frame)
 
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
+            return filtered_frames
 
         except Exception as e:
             logger.error(
@@ -341,109 +390,10 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             Processing statistics dictionary
         """
         try:
-            start_time = datetime.now(UTC) - timedelta(hours=time_window_hours)
-
-            # Base query with time filter
-            base_query = select(FrameMetadata).where(
-                FrameMetadata.timestamp >= start_time
+            # Use repository method for processing statistics
+            return await self.frame_repository.get_processing_statistics(
+                camera_id=camera_id, hours=time_window_hours
             )
-
-            if camera_id:
-                base_query = base_query.where(FrameMetadata.camera_id == camera_id)
-
-            # Count by status
-            status_query = (
-                select(
-                    FrameMetadata.status,
-                    func.count(FrameMetadata.id).label('count')
-                )
-                .where(FrameMetadata.timestamp >= start_time)
-                .group_by(FrameMetadata.status)
-            )
-
-            if camera_id:
-                status_query = status_query.where(FrameMetadata.camera_id == camera_id)
-
-            # Average processing time for completed frames
-            avg_processing_query = (
-                select(func.avg(FrameMetadata.processing_time_ms))
-                .where(
-                    and_(
-                        FrameMetadata.timestamp >= start_time,
-                        FrameMetadata.status == ProcessingStatus.COMPLETED,
-                        FrameMetadata.processing_time_ms.is_not(None),
-                    )
-                )
-            )
-
-            if camera_id:
-                avg_processing_query = avg_processing_query.where(
-                    FrameMetadata.camera_id == camera_id
-                )
-
-            # Detection statistics
-            detection_query = (
-                select(
-                    func.count(FrameMetadata.id).label('total_frames'),
-                    func.sum(
-                        func.cast(FrameMetadata.has_detections, text('int'))
-                    ).label('frames_with_detections'),
-                    func.sum(FrameMetadata.detection_count).label('total_detections'),
-                    func.sum(FrameMetadata.vehicle_count).label('total_vehicles'),
-                )
-                .where(FrameMetadata.timestamp >= start_time)
-            )
-
-            if camera_id:
-                detection_query = detection_query.where(
-                    FrameMetadata.camera_id == camera_id
-                )
-
-            # Execute queries
-            status_result = await self.session.execute(status_query)
-            avg_processing_result = await self.session.execute(avg_processing_query)
-            detection_result = await self.session.execute(detection_query)
-
-            # Process results
-            status_counts = {row.status: row.count for row in status_result}
-            avg_processing_time = avg_processing_result.scalar()
-            detection_stats = detection_result.first()
-
-            # Calculate rates and percentages
-            total_frames = sum(status_counts.values())
-            completed_frames = status_counts.get(ProcessingStatus.COMPLETED.value, 0)
-            failed_frames = status_counts.get(ProcessingStatus.FAILED.value, 0)
-
-            success_rate = (completed_frames / max(total_frames, 1)) * 100
-            error_rate = (failed_frames / max(total_frames, 1)) * 100
-
-            throughput_fps = total_frames / max(time_window_hours * 3600, 1)
-
-            return {
-                "time_window_hours": time_window_hours,
-                "camera_id": camera_id,
-                "total_frames": total_frames,
-                "status_breakdown": {
-                    "pending": status_counts.get(ProcessingStatus.PENDING.value, 0),
-                    "processing": status_counts.get(ProcessingStatus.PROCESSING.value, 0),
-                    "completed": completed_frames,
-                    "failed": failed_frames,
-                    "skipped": status_counts.get(ProcessingStatus.SKIPPED.value, 0),
-                },
-                "success_rate_percent": round(success_rate, 2),
-                "error_rate_percent": round(error_rate, 2),
-                "avg_processing_time_ms": round(avg_processing_time or 0, 2),
-                "throughput_fps": round(throughput_fps, 2),
-                "detection_stats": {
-                    "total_detections": detection_stats.total_detections or 0,
-                    "total_vehicles": detection_stats.total_vehicles or 0,
-                    "frames_with_detections": detection_stats.frames_with_detections or 0,
-                    "detection_rate_percent": round(
-                        ((detection_stats.frames_with_detections or 0) / max(total_frames, 1)) * 100,
-                        2,
-                    ),
-                },
-            }
 
         except Exception as e:
             logger.error(
@@ -466,37 +416,10 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             Number of frames deleted
         """
         try:
-            cutoff_time = datetime.now(UTC) - timedelta(days=retention_days)
-            total_deleted = 0
-
-            while True:
-                # Find frames to delete in batches
-                delete_query = (
-                    select(FrameMetadata.id)
-                    .where(
-                        and_(
-                            FrameMetadata.timestamp < cutoff_time,
-                            not FrameMetadata.is_stored,  # Only delete unstored frames
-                        )
-                    )
-                    .limit(batch_size)
-                )
-
-                result = await self.session.execute(delete_query)
-                frame_ids = [row.id for row in result]
-
-                if not frame_ids:
-                    break
-
-                # Delete batch
-                deleted_count = await self.bulk_delete(frame_ids)
-                total_deleted += deleted_count
-
-                logger.debug(
-                    "Deleted frame metadata batch",
-                    batch_size=deleted_count,
-                    total_deleted=total_deleted,
-                )
+            # Use repository method for cleanup
+            total_deleted = await self.frame_repository.cleanup_old_frames(
+                older_than_days=retention_days, batch_size=batch_size
+            )
 
             logger.info(
                 "Frame metadata cleanup completed",
@@ -529,26 +452,37 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             List of recent frame metadata with detections
         """
         try:
-            # Get recent frames with detections
-            query = (
-                select(FrameMetadata)
-                .where(
-                    and_(
-                        FrameMetadata.status == ProcessingStatus.COMPLETED,
-                        FrameMetadata.has_detections == True,  # noqa: E712
-                        FrameMetadata.timestamp >= datetime.now(UTC) - timedelta(minutes=5),
-                    )
-                )
-                .options(selectinload(FrameMetadata.detection_results))
-                .order_by(desc(FrameMetadata.timestamp))
-                .limit(limit)
-            )
+            # Get recent frames for each camera and filter
+            all_recent_frames = []
 
             if camera_ids:
-                query = query.where(FrameMetadata.camera_id.in_(camera_ids))
+                # Get recent frames for specific cameras
+                for camera_id in camera_ids:
+                    recent_frames = await self.frame_repository.get_recent_frames(
+                        camera_id=camera_id, minutes=5, limit=limit // len(camera_ids)
+                    )
+                    # Filter for completed frames with detections
+                    filtered_frames = [
+                        frame for frame in recent_frames
+                        if frame.status == ProcessingStatus.COMPLETED and frame.has_detections
+                    ]
+                    all_recent_frames.extend(filtered_frames)
+            else:
+                # Get recent frames from all cameras (need to use time range query)
+                start_time = datetime.now(UTC) - timedelta(minutes=5)
+                end_time = datetime.now(UTC)
+                recent_frames = await self.frame_repository.get_by_time_range(
+                    start_time=start_time, end_time=end_time, limit=limit
+                )
+                # Filter for completed frames with detections
+                all_recent_frames = [
+                    frame for frame in recent_frames
+                    if frame.status == ProcessingStatus.COMPLETED and frame.has_detections
+                ]
 
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
+            # Sort by timestamp descending and limit
+            all_recent_frames.sort(key=lambda x: x.timestamp, reverse=True)
+            return all_recent_frames[:limit]
 
         except Exception as e:
             logger.error(
@@ -558,16 +492,102 @@ class FrameService(BaseAsyncService[FrameMetadata]):
             )
             raise DatabaseError(f"Failed to get real-time feed: {str(e)}") from e
 
+    async def get_frames_by_status(
+        self,
+        status: ProcessingStatus,
+        limit: int = 100
+    ) -> list[FrameMetadata]:
+        """Get frames by processing status.
+        
+        Args:
+            status: Processing status to filter by
+            limit: Maximum number of frames
+            
+        Returns:
+            List of frames with the specified status
+        """
+        return await self.frame_repository.get_by_status(status=status, limit=limit)
 
-class DetectionService(BaseAsyncService[DetectionResult]):
+    async def get_frames_by_time_range(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        camera_id: str | None = None,
+        limit: int = 1000
+    ) -> list[FrameMetadata]:
+        """Get frames within a time range.
+        
+        Args:
+            start_time: Start time
+            end_time: End time
+            camera_id: Optional camera ID filter
+            limit: Maximum number of frames
+            
+        Returns:
+            List of frames within the time range
+        """
+        return await self.frame_repository.get_by_time_range(
+            start_time=start_time,
+            end_time=end_time,
+            camera_id=camera_id,
+            limit=limit
+        )
+
+
+class DetectionService:
     """High-throughput async service for detection result operations."""
 
-    def __init__(self, session: AsyncSession):
-        super().__init__(session, DetectionResult)
+    def __init__(self, detection_repository: DetectionRepository):
+        self.detection_repository = detection_repository
+
+    async def get_by_id(self, detection_id: str) -> DetectionResult | None:
+        """Get detection result by ID.
+        
+        Args:
+            detection_id: Detection identifier
+            
+        Returns:
+            Detection result if found, None otherwise
+        """
+        return await self.detection_repository.get_by_id(detection_id)
+
+    async def create(self, **kwargs: Any) -> DetectionResult:
+        """Create detection result.
+        
+        Args:
+            **kwargs: Detection result fields
+            
+        Returns:
+            Created detection result
+        """
+        return await self.detection_repository.create(**kwargs)
+
+    async def update(self, detection_id: str, **kwargs: Any) -> DetectionResult:
+        """Update detection result.
+        
+        Args:
+            detection_id: Detection identifier
+            **kwargs: Fields to update
+            
+        Returns:
+            Updated detection result
+        """
+        return await self.detection_repository.update(detection_id, **kwargs)
+
+    async def delete(self, detection_id: str) -> bool:
+        """Delete detection result.
+        
+        Args:
+            detection_id: Detection identifier
+            
+        Returns:
+            True if deleted successfully
+        """
+        return await self.detection_repository.delete(detection_id)
 
     async def batch_create_detections(
-        self, batch_data: BatchDetectionResultCreateSchema
-    ) -> BatchOperationResultSchema:
+        self, batch_data: "BatchDetectionResultCreateSchema"
+    ) -> "BatchOperationResultSchema":
         """Batch create detection results for high throughput.
 
         Args:
@@ -576,6 +596,9 @@ class DetectionService(BaseAsyncService[DetectionResult]):
         Returns:
             Batch operation result with performance metrics
         """
+        # Import schema at runtime to avoid circular import
+        from ..api.schemas.database import BatchOperationResultSchema
+
         start_time = datetime.now(UTC)
         successful_items = 0
         errors = []
@@ -603,9 +626,8 @@ class DetectionService(BaseAsyncService[DetectionResult]):
                         "is_anomaly": False,
                     })
 
-                    detection = DetectionResult(**detection_dict)
+                    detection = await self.detection_repository.create(**detection_dict)
                     detection_instances.append(detection)
-                    self.session.add(detection)
 
                 except Exception as e:
                     errors.append({
@@ -614,10 +636,8 @@ class DetectionService(BaseAsyncService[DetectionResult]):
                         "data": detection_data.model_dump() if detection_data else None,
                     })
 
-            # Commit all valid detections
-            if detection_instances:
-                await self.session.commit()
-                successful_items = len(detection_instances)
+            # All detections already committed individually by repository
+            successful_items = len(detection_instances)
 
             # Calculate performance metrics
             processing_time_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
@@ -642,10 +662,76 @@ class DetectionService(BaseAsyncService[DetectionResult]):
             )
 
         except Exception as e:
-            await self.session.rollback()
             logger.error(
                 "Batch detection creation failed",
                 total_items=len(batch_data.detections),
                 error=str(e),
             )
             raise DatabaseError(f"Batch detection creation failed: {str(e)}") from e
+
+    async def get_by_frame_id(self, frame_id: str) -> list[DetectionResult]:
+        """Get detection results by frame ID.
+        
+        Args:
+            frame_id: Frame identifier
+            
+        Returns:
+            List of detection results for the frame
+        """
+        return await self.detection_repository.get_by_frame_id(frame_id)
+
+    async def get_by_camera_id(
+        self,
+        camera_id: str,
+        limit: int = 1000,
+        offset: int = 0
+    ) -> list[DetectionResult]:
+        """Get detection results by camera ID.
+        
+        Args:
+            camera_id: Camera identifier
+            limit: Maximum number of results
+            offset: Number of results to skip
+            
+        Returns:
+            List of detection results from the camera
+        """
+        return await self.detection_repository.get_by_camera_id(
+            camera_id=camera_id, limit=limit, offset=offset
+        )
+
+    async def get_detection_statistics(
+        self,
+        camera_id: str | None = None,
+        class_name: str | None = None,
+        hours: int = 24
+    ) -> dict[str, Any]:
+        """Get detection statistics.
+        
+        Args:
+            camera_id: Optional camera ID filter
+            class_name: Optional class name filter
+            hours: Number of hours to analyze
+            
+        Returns:
+            Detection statistics dictionary
+        """
+        return await self.detection_repository.get_confidence_statistics(
+            camera_id=camera_id, class_name=class_name, hours=hours
+        )
+
+    async def cleanup_old_detections(
+        self, older_than_days: int = 90, batch_size: int = 1000
+    ) -> int:
+        """Clean up old detection results.
+        
+        Args:
+            older_than_days: Delete detections older than this many days
+            batch_size: Number of detections to delete per batch
+            
+        Returns:
+            Number of detections deleted
+        """
+        return await self.detection_repository.cleanup_old_detections(
+            older_than_days=older_than_days, batch_size=batch_size
+        )

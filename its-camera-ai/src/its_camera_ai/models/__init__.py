@@ -16,7 +16,7 @@ from .analytics import (
 )
 from .base import BaseTableModel
 from .camera import Camera, CameraSettings, CameraStatus, CameraType, StreamProtocol
-from .database import DatabaseManager, create_database_engine, get_database_session
+from .database import DatabaseManager
 from .detection_result import DetectionClass, DetectionResult, VehicleType
 from .frame_metadata import FrameMetadata, FrameQuality, ProcessingStatus
 from .system_metrics import AggregatedMetrics, MetricType, MetricUnit, SystemMetrics
@@ -26,8 +26,6 @@ __all__ = [
     # Base infrastructure
     "BaseTableModel",
     "DatabaseManager",
-    "create_database_engine",
-    "get_database_session",
     # User management
     "User",
     # Camera registry

@@ -112,6 +112,18 @@ class RepositoryContainer(containers.DeclarativeContainer):
         session_factory=infrastructure.session_factory,
     )
 
+    # Alert Repository
+    alert_repository = providers.Factory(
+        "its_camera_ai.repositories.alert_repository.AlertRepository",
+        session_factory=infrastructure.session_factory,
+    )
+
+    # Analytics Repository
+    analytics_repository = providers.Factory(
+        "its_camera_ai.repositories.analytics_repository.AnalyticsRepository",
+        session_factory=infrastructure.session_factory,
+    )
+
 
 class ServiceContainer(containers.DeclarativeContainer):
     """Service container for business logic layer.
@@ -197,17 +209,18 @@ class ServiceContainer(containers.DeclarativeContainer):
     # Analytics Service - Factory for per-request instances
     analytics_service = providers.Factory(
         "its_camera_ai.services.analytics_service.AnalyticsService",
+        analytics_repository=repositories.analytics_repository,
         metrics_repository=repositories.metrics_repository,
         detection_repository=repositories.detection_repository,
-        config=config.analytics,
+        settings=config,
+        cache_service=cache_service,
     )
 
     # Alert Service - Factory for per-request instances
     alert_service = providers.Factory(
         "its_camera_ai.services.alert_service.AlertService",
-        email_service=email_service,
-        metrics_service=metrics_service,
-        config=config.alerts,
+        alert_repository=repositories.alert_repository,
+        settings=config,
     )
 
 

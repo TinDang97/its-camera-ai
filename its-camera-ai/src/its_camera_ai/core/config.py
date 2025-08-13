@@ -352,10 +352,12 @@ class CompressionConfig(BaseModel):
     formats: list[str] = Field(
         default=["jpeg", "png"], description="Supported compression formats"
     )
-    
+
 
 class RateLimit(BaseModel):
-    
+    """Rate limiting configuration."""
+    requests_per_minute: int = Field(default=100, ge=1)
+    burst_size: int = Field(default=10, ge=1)
 
 
 class Settings(BaseSettings):

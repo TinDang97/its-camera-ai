@@ -16,19 +16,15 @@ from typing import Any
 
 import aiosmtplib
 import httpx
-from sqlalchemy import and_, select
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import Settings
 from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
 from ..models.analytics import (
-    AlertNotification,
     RuleViolation,
     TrafficAnomaly,
 )
-from .base_service import BaseAsyncService
+from ..repositories.alert_repository import AlertRepository
 
 logger = get_logger(__name__)
 
@@ -699,15 +695,15 @@ class AlertRuleEngine:
         return timedelta(minutes=minutes)
 
 
-class AlertService(BaseAsyncService):
+class AlertService:
     """Comprehensive alert service for traffic monitoring notifications.
 
     Handles alert generation, delivery, and management for traffic violations,
     anomalies, and incidents with support for multiple notification channels.
     """
 
-    def __init__(self, session: AsyncSession, settings: Settings):
-        super().__init__(session, AlertNotification)
+    def __init__(self, alert_repository: AlertRepository, settings: Settings):
+        self.alert_repository = alert_repository
         self.settings = settings
         self.rule_engine = AlertRuleEngine(settings)
         self.notification_channels = self._initialize_notification_channels()
@@ -920,7 +916,7 @@ class AlertService(BaseAsyncService):
         """
         try:
             # Create notification record
-            notification = AlertNotification(
+            notification = await self.alert_repository.create_notification(
                 alert_type=alert_type,
                 reference_id=reference_id,
                 notification_channel=channel_name,
@@ -928,13 +924,7 @@ class AlertService(BaseAsyncService):
                 priority=priority,
                 subject=subject,
                 message_content=message,
-                status="pending",
-                delivery_attempts=0,
             )
-
-            self.session.add(notification)
-            await self.session.commit()
-            await self.session.refresh(notification)
 
             # Send through notification channel
             channel = self.notification_channels.get(channel_name)
@@ -942,8 +932,7 @@ class AlertService(BaseAsyncService):
                 raise AlertServiceError(f"Unknown notification channel: {channel_name}")
 
             # Update attempt count
-            notification.delivery_attempts += 1
-            notification.last_attempt_time = datetime.now(UTC)
+            attempt_count = notification.delivery_attempts + 1
 
             # Send notification
             delivery_result = await channel.send_notification(
@@ -956,19 +945,21 @@ class AlertService(BaseAsyncService):
 
             # Update notification status based on result
             if delivery_result.get("status") == "delivered":
-                notification.status = "delivered"
-                notification.sent_time = delivery_result.get(
-                    "delivered_at", datetime.now(UTC)
+                notification = await self.alert_repository.update_delivery_status(
+                    notification_id=notification.id,
+                    status="delivered",
+                    delivery_attempts=attempt_count,
+                    sent_time=delivery_result.get("delivered_at", datetime.now(UTC)),
+                    external_id=delivery_result.get("delivery_id"),
+                    delivery_details=delivery_result.get("details", {}),
                 )
-                notification.external_id = delivery_result.get("delivery_id")
-                notification.delivery_details = delivery_result.get("details", {})
             else:
-                notification.status = "failed"
-                notification.error_message = delivery_result.get(
-                    "error", "Unknown error"
+                notification = await self.alert_repository.update_delivery_status(
+                    notification_id=notification.id,
+                    status="failed",
+                    delivery_attempts=attempt_count,
+                    error_message=delivery_result.get("error", "Unknown error"),
                 )
-
-            await self.session.commit()
 
             logger.info(
                 "Alert sent",
@@ -993,9 +984,11 @@ class AlertService(BaseAsyncService):
 
             # Update notification status if record exists
             if "notification" in locals():
-                notification.status = "failed"
-                notification.error_message = str(e)
-                await self.session.commit()
+                await self.alert_repository.update_delivery_status(
+                    notification_id=notification.id,
+                    status="failed",
+                    error_message=str(e),
+                )
 
             return {
                 "alert_type": alert_type,
@@ -1107,26 +1100,15 @@ Confidence: {anomaly.confidence:.1%}
         cooldown_period = self.rule_engine.get_cooldown_period(alert_type)
         cutoff_time = datetime.now(UTC) - cooldown_period
 
-        # Check for recent similar alerts
-        query = select(AlertNotification).where(
-            and_(
-                AlertNotification.alert_type == alert_type,
-                AlertNotification.created_time >= cutoff_time,
-                AlertNotification.status.in_(["delivered", "pending"]),
-            )
+        # Check for recent similar alerts using repository
+        recent_alerts = await self.alert_repository.check_recent_similar_alerts(
+            alert_type=alert_type,
+            camera_id=camera_id,
+            event_type=event_type,
+            since=cutoff_time,
         )
 
-        # Add metadata filter for camera and event type
-        query = query.where(
-            AlertNotification.delivery_details.op("@>")(
-                {f"{alert_type}_type": event_type, "camera_id": camera_id}
-            )
-        )
-
-        result = await self.session.execute(query)
-        recent_alerts = result.scalars().first()
-
-        return recent_alerts is not None
+        return len(recent_alerts) > 0
 
     async def _update_cooldown(
         self, alert_type: str, camera_id: str, event_type: str
@@ -1151,84 +1133,21 @@ Confidence: {anomaly.confidence:.1%}
             Alert statistics dictionary
         """
         try:
-            query = select(AlertNotification)
+            start_time = None
+            end_time = None
 
-            conditions = []
             if time_range:
                 start_time, end_time = time_range
-                conditions.append(AlertNotification.created_time >= start_time)
-                conditions.append(AlertNotification.created_time <= end_time)
 
-            if camera_id:
-                conditions.append(
-                    AlertNotification.delivery_details.op("@>")(
-                        {"camera_id": camera_id}
-                    )
-                )
+            return await self.alert_repository.get_statistics(
+                start_time=start_time,
+                end_time=end_time,
+                camera_id=camera_id,
+            )
 
-            if conditions:
-                query = query.where(and_(*conditions))
-
-            result = await self.session.execute(query)
-            notifications = result.scalars().all()
-
-            # Calculate statistics
-            total_alerts = len(notifications)
-            delivered_alerts = sum(1 for n in notifications if n.status == "delivered")
-            failed_alerts = sum(1 for n in notifications if n.status == "failed")
-            pending_alerts = sum(1 for n in notifications if n.status == "pending")
-
-            # Group by channel
-            channel_stats = {}
-            for notification in notifications:
-                channel = notification.notification_channel
-                if channel not in channel_stats:
-                    channel_stats[channel] = {
-                        "total": 0,
-                        "delivered": 0,
-                        "failed": 0,
-                        "pending": 0,
-                    }
-
-                channel_stats[channel]["total"] += 1
-                channel_stats[channel][notification.status] += 1
-
-            # Group by priority
-            priority_stats = {}
-            for notification in notifications:
-                priority = notification.priority
-                if priority not in priority_stats:
-                    priority_stats[priority] = {
-                        "total": 0,
-                        "delivered": 0,
-                        "failed": 0,
-                        "pending": 0,
-                    }
-
-                priority_stats[priority]["total"] += 1
-                priority_stats[priority][notification.status] += 1
-
-            return {
-                "summary": {
-                    "total_alerts": total_alerts,
-                    "delivered_alerts": delivered_alerts,
-                    "failed_alerts": failed_alerts,
-                    "pending_alerts": pending_alerts,
-                    "delivery_rate": delivered_alerts / total_alerts
-                    if total_alerts > 0
-                    else 0.0,
-                },
-                "by_channel": channel_stats,
-                "by_priority": priority_stats,
-                "time_range": {
-                    "start": time_range[0] if time_range else None,
-                    "end": time_range[1] if time_range else None,
-                },
-            }
-
-        except SQLAlchemyError as e:
+        except DatabaseError as e:
             logger.error(f"Failed to get alert statistics: {e}")
-            raise DatabaseError(f"Failed to retrieve alert statistics: {e}")
+            raise e
 
     async def retry_failed_alerts(self, max_retries: int = 3) -> dict[str, Any]:
         """Retry failed alert notifications.
@@ -1241,20 +1160,9 @@ Confidence: {anomaly.confidence:.1%}
         """
         try:
             # Get failed notifications that haven't exceeded retry limit
-            query = (
-                select(AlertNotification)
-                .where(
-                    and_(
-                        AlertNotification.status == "failed",
-                        AlertNotification.delivery_attempts < max_retries,
-                    )
-                )
-                .order_by(AlertNotification.created_time.desc())
-                .limit(50)
+            failed_notifications = await self.alert_repository.get_failed_retryable(
+                max_attempts=max_retries, limit=50
             )
-
-            result = await self.session.execute(query)
-            failed_notifications = result.scalars().all()
 
             retry_results = []
 
@@ -1268,8 +1176,7 @@ Confidence: {anomaly.confidence:.1%}
                         continue
 
                     # Retry delivery
-                    notification.delivery_attempts += 1
-                    notification.last_attempt_time = datetime.now(UTC)
+                    attempt_count = notification.delivery_attempts + 1
 
                     delivery_result = await channel.send_notification(
                         recipient=notification.recipient,
@@ -1280,18 +1187,20 @@ Confidence: {anomaly.confidence:.1%}
 
                     # Update status based on result
                     if delivery_result.get("status") == "delivered":
-                        notification.status = "delivered"
-                        notification.sent_time = delivery_result.get(
-                            "delivered_at", datetime.now(UTC)
+                        notification = await self.alert_repository.update_delivery_status(
+                            notification_id=notification.id,
+                            status="delivered",
+                            delivery_attempts=attempt_count,
+                            sent_time=delivery_result.get("delivered_at", datetime.now(UTC)),
+                            external_id=delivery_result.get("delivery_id"),
+                            delivery_details=delivery_result.get("details", {}),
                         )
-                        notification.external_id = delivery_result.get("delivery_id")
-                        notification.delivery_details = delivery_result.get(
-                            "details", {}
-                        )
-                        notification.error_message = None
                     else:
-                        notification.error_message = delivery_result.get(
-                            "error", "Retry failed"
+                        notification = await self.alert_repository.update_delivery_status(
+                            notification_id=notification.id,
+                            status="failed",
+                            delivery_attempts=attempt_count,
+                            error_message=delivery_result.get("error", "Retry failed"),
                         )
 
                     retry_results.append(
@@ -1304,7 +1213,11 @@ Confidence: {anomaly.confidence:.1%}
 
                 except Exception as e:
                     logger.error(f"Failed to retry notification {notification.id}: {e}")
-                    notification.error_message = str(e)
+                    await self.alert_repository.update_delivery_status(
+                        notification_id=notification.id,
+                        status="failed",
+                        error_message=str(e),
+                    )
                     retry_results.append(
                         {
                             "notification_id": notification.id,
@@ -1312,8 +1225,6 @@ Confidence: {anomaly.confidence:.1%}
                             "error": str(e),
                         }
                     )
-
-            await self.session.commit()
 
             successful_retries = sum(
                 1 for r in retry_results if r["status"] == "delivered"
@@ -1326,10 +1237,9 @@ Confidence: {anomaly.confidence:.1%}
                 "results": retry_results,
             }
 
-        except SQLAlchemyError as e:
-            await self.session.rollback()
+        except DatabaseError as e:
             logger.error(f"Failed to retry alerts: {e}")
-            raise DatabaseError(f"Alert retry operation failed: {e}")
+            raise e
 
     async def acknowledge_alert(
         self,
@@ -1350,26 +1260,23 @@ Confidence: {anomaly.confidence:.1%}
             True if successfully acknowledged
         """
         try:
-            notification = await self.get_by_id(notification_id)
-            if not notification:
-                return False
-
-            notification.acknowledged_time = datetime.now(UTC)
-            notification.acknowledged_by = acknowledged_by
-            notification.response_action = response_action
-            notification.response_notes = notes
-
-            await self.session.commit()
-
-            logger.info(
-                "Alert acknowledged",
+            notification = await self.alert_repository.acknowledge_notification(
                 notification_id=notification_id,
                 acknowledged_by=acknowledged_by,
+                response_action=response_action,
+                response_notes=notes,
             )
 
-            return True
+            if notification:
+                logger.info(
+                    "Alert acknowledged",
+                    notification_id=notification_id,
+                    acknowledged_by=acknowledged_by,
+                )
+                return True
+            else:
+                return False
 
-        except SQLAlchemyError as e:
-            await self.session.rollback()
+        except DatabaseError as e:
             logger.error(f"Failed to acknowledge alert: {e}")
             return False

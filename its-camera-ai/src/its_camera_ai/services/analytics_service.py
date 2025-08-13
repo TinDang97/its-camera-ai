@@ -12,9 +12,6 @@ from typing import Any
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sqlalchemy import and_, func, or_, select
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.schemas.analytics import (
     TrafficMetrics as TrafficMetricsResponse,
@@ -23,15 +20,10 @@ from ..core.config import Settings
 from ..core.exceptions import DatabaseError
 from ..core.logging import get_logger
 from ..models.analytics import (
-    RuleViolation,
-    SpeedLimit,
-    TrafficAnomaly,
-    TrafficMetrics,
     VehicleTrajectory,
     ViolationType,
 )
 from ..models.detection_result import DetectionResult
-from .base_service import BaseAsyncService
 from .cache import CacheService
 
 logger = get_logger(__name__)
@@ -46,9 +38,9 @@ class AnalyticsServiceError(Exception):
 class RuleEngine:
     """Traffic rule evaluation engine with configurable rules."""
 
-    def __init__(self, settings: Settings, session: AsyncSession | None = None, cache_service: CacheService | None = None):
+    def __init__(self, settings: Settings, analytics_repository = None, cache_service: CacheService | None = None):
         self.settings = settings
-        self.session = session
+        self.analytics_repository = analytics_repository
         self.cache_service = cache_service
         self._rules = self._load_default_rules()
 
@@ -245,72 +237,28 @@ class RuleEngine:
         Returns:
             Speed limit in km/h or None if not found
         """
-        if not self.session:
+        if not self.analytics_repository:
             return None
 
         try:
-            # Build query for active speed limits
-            query = select(SpeedLimit).where(
-                and_(
-                    SpeedLimit.enforcement_enabled,
-                    SpeedLimit.valid_from <= check_time,
-                    or_(
-                        SpeedLimit.valid_until.is_(None),
-                        SpeedLimit.valid_until > check_time
-                    )
-                )
+            speed_limit = await self.analytics_repository.get_speed_limit(
+                zone_id=zone_id,
+                vehicle_type=vehicle_type,
+                check_time=check_time,
             )
 
-            # Add zone and vehicle type filters
-            if zone_id:
-                query = query.where(
-                    or_(
-                        SpeedLimit.zone_id == zone_id,
-                        SpeedLimit.zone_id == "default"  # Fallback to default zone
-                    )
-                )
-            else:
-                query = query.where(SpeedLimit.zone_id == "default")
-
-            query = query.where(
-                or_(
-                    SpeedLimit.vehicle_type == vehicle_type,
-                    SpeedLimit.vehicle_type == "general"  # Fallback to general
-                )
-            )
-
-            # Order by priority (lower number = higher priority) and specificity
-            query = query.order_by(
-                SpeedLimit.priority.asc(),
-                SpeedLimit.zone_id.desc(),  # Specific zones before default
-                SpeedLimit.vehicle_type.desc()  # Specific vehicle types before general
-            )
-
-            result = await self.session.execute(query)
-            speed_limits = result.scalars().all()
-
-            # Find the best matching speed limit
-            for limit in speed_limits:
-                # Check time-based restrictions
-                if not limit.is_valid_at(check_time):
-                    continue
-
-                # Check environmental conditions
-                if not limit.applies_to_conditions(weather, visibility):
-                    continue
-
+            if speed_limit and speed_limit.applies_to_conditions(weather, visibility):
                 logger.debug(
-                    f"Found speed limit: {limit.speed_limit_kmh} km/h",
+                    f"Found speed limit: {speed_limit.speed_limit_kmh} km/h",
                     zone_id=zone_id,
                     vehicle_type=vehicle_type,
-                    limit_id=limit.id
+                    limit_id=speed_limit.id
                 )
-
-                return limit.speed_limit_kmh
+                return speed_limit.speed_limit_kmh
 
             return None
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to query speed limit from database: {e}")
             return None
 
@@ -629,18 +577,27 @@ class AnomalyDetector:
             return "pattern_deviation"
 
 
-class AnalyticsService(BaseAsyncService):
+class AnalyticsService:
     """Comprehensive analytics service for traffic monitoring and insights.
 
     Provides real-time traffic analytics, rule-based violation detection,
     speed calculations, trajectory analysis, and ML-based anomaly detection.
     """
 
-    def __init__(self, session: AsyncSession, settings: Settings, cache_service: CacheService | None = None):
-        super().__init__(session, TrafficMetrics)
+    def __init__(
+        self,
+        analytics_repository,
+        metrics_repository,
+        detection_repository,
+        settings: Settings,
+        cache_service: CacheService | None = None,
+    ):
+        self.analytics_repository = analytics_repository
+        self.metrics_repository = metrics_repository
+        self.detection_repository = detection_repository
         self.settings = settings
         self.cache_service = cache_service
-        self.rule_engine = RuleEngine(settings, session, cache_service)
+        self.rule_engine = RuleEngine(settings, analytics_repository, cache_service)
         self.speed_calculator = SpeedCalculator()
         self.anomaly_detector = AnomalyDetector()
         self._initialize_anomaly_detector()
@@ -662,40 +619,28 @@ class AnalyticsService(BaseAsyncService):
             end_time = datetime.now(UTC)
             start_time = end_time - timedelta(days=30)
 
-            query = (
-                select(TrafficMetrics)
-                .where(
-                    and_(
-                        TrafficMetrics.timestamp >= start_time,
-                        TrafficMetrics.timestamp <= end_time,
-                        TrafficMetrics.aggregation_period
-                        == "1hour",  # Use hourly aggregations
-                    )
-                )
-                .order_by(TrafficMetrics.timestamp.desc())
-                .limit(1000)
+            # Get all cameras' historical data for training
+            aggregated_metrics = await self.analytics_repository.get_aggregated_metrics(
+                start_time=start_time,
+                end_time=end_time,
+                aggregation_period="1hour"
             )
 
-            result = await self.session.execute(query)
-            metrics = result.scalars().all()
+            # Return training data in the expected format
+            if aggregated_metrics["record_count"] > 0:
+                return [{
+                    "vehicle_count": aggregated_metrics["total_vehicles"],
+                    "average_speed": aggregated_metrics["avg_speed"],
+                    "traffic_density": aggregated_metrics["avg_density"],
+                    "flow_rate": 0.0,  # Would need more specific query
+                    "occupancy_rate": aggregated_metrics["avg_occupancy"],
+                    "queue_length": 0.0,  # Would need more specific query
+                    "timestamp": end_time,
+                }]
+            else:
+                return []
 
-            training_data = []
-            for metric in metrics:
-                training_data.append(
-                    {
-                        "vehicle_count": metric.total_vehicles or 0,
-                        "average_speed": metric.average_speed or 0.0,
-                        "traffic_density": metric.traffic_density or 0.0,
-                        "flow_rate": metric.flow_rate or 0.0,
-                        "occupancy_rate": metric.occupancy_rate or 0.0,
-                        "queue_length": metric.queue_length or 0.0,
-                        "timestamp": metric.timestamp,
-                    }
-                )
-
-            return training_data
-
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to fetch training data: {e}")
             return []
 
@@ -868,32 +813,31 @@ class AnalyticsService(BaseAsyncService):
     async def _store_violations(self, violations: list[dict[str, Any]]) -> None:
         """Store detected violations in the database."""
         try:
-            violation_records = []
+            violation_data = []
 
             for violation in violations:
-                record = RuleViolation(
-                    violation_type=violation["violation_type"],
-                    severity=violation["severity"],
-                    detection_time=violation["detection_time"],
-                    camera_id=violation["camera_id"],
-                    vehicle_track_id=violation.get("track_id"),
-                    license_plate=violation.get("license_plate"),
-                    vehicle_type=violation.get("vehicle_type"),
-                    rule_definition=violation["rule_definition"],
-                    measured_value=violation.get("measured_value"),
-                    threshold_value=violation.get("threshold_value"),
-                    detection_confidence=violation.get("confidence", 0.8),
-                )
-                violation_records.append(record)
+                violation_data.append({
+                    "violation_type": violation["violation_type"],
+                    "severity": violation["severity"],
+                    "detection_time": violation["detection_time"],
+                    "camera_id": violation["camera_id"],
+                    "vehicle_track_id": violation.get("track_id"),
+                    "license_plate": violation.get("license_plate"),
+                    "vehicle_type": violation.get("vehicle_type"),
+                    "rule_definition": violation["rule_definition"],
+                    "measured_value": violation.get("measured_value"),
+                    "threshold_value": violation.get("threshold_value"),
+                    "detection_confidence": violation.get("confidence", 0.8),
+                })
 
-            # Bulk insert violations
-            self.session.add_all(violation_records)
-            await self.session.commit()
+            # Use repository to create violations in batch
+            violation_records = await self.analytics_repository.create_rule_violations_batch(
+                violation_data
+            )
 
             logger.info(f"Stored {len(violation_records)} traffic violations")
 
-        except SQLAlchemyError as e:
-            await self.session.rollback()
+        except Exception as e:
             logger.error(f"Failed to store violations: {e}")
 
     async def _detect_real_time_anomalies(
@@ -927,39 +871,38 @@ class AnalyticsService(BaseAsyncService):
     ) -> None:
         """Store detected anomalies in the database."""
         try:
-            anomaly_records = []
+            anomaly_data = []
 
             for anomaly in anomalies:
                 if anomaly["anomaly_score"] < 0.3:  # Skip low-confidence anomalies
                     continue
 
-                record = TrafficAnomaly(
-                    anomaly_type="traffic_pattern",
-                    severity=anomaly["severity"],
-                    detection_time=datetime.now(UTC),
-                    camera_id=camera_id,
-                    anomaly_score=anomaly["anomaly_score"],
-                    confidence=min(1.0, anomaly["anomaly_score"] * 1.2),
-                    detection_method="isolation_forest",
-                    probable_cause=anomaly.get("probable_cause", "unknown"),
-                    model_name="IsolationForest",
-                    model_version="1.0",
-                    model_confidence=anomaly["anomaly_score"],
-                    detailed_analysis={
+                anomaly_data.append({
+                    "anomaly_type": "traffic_pattern",
+                    "severity": anomaly["severity"],
+                    "detection_time": datetime.now(UTC),
+                    "camera_id": camera_id,
+                    "anomaly_score": anomaly["anomaly_score"],
+                    "confidence": min(1.0, anomaly["anomaly_score"] * 1.2),
+                    "detection_method": "isolation_forest",
+                    "probable_cause": anomaly.get("probable_cause", "unknown"),
+                    "model_name": "IsolationForest",
+                    "model_version": "1.0",
+                    "model_confidence": anomaly["anomaly_score"],
+                    "detailed_analysis": {
                         "features": anomaly.get("features", []),
                         "data_point": anomaly["data_point"],
                     },
-                )
-                anomaly_records.append(record)
+                })
 
-            if anomaly_records:
-                self.session.add_all(anomaly_records)
-                await self.session.commit()
+            if anomaly_data:
+                anomaly_records = await self.analytics_repository.create_traffic_anomalies_batch(
+                    anomaly_data
+                )
 
                 logger.info(f"Stored {len(anomaly_records)} traffic anomalies")
 
-        except SQLAlchemyError as e:
-            await self.session.rollback()
+        except Exception as e:
             logger.error(f"Failed to store anomalies: {e}")
 
     async def _update_trajectory_analysis(
@@ -991,15 +934,9 @@ class AnalyticsService(BaseAsyncService):
             return
 
         # Get existing trajectory or create new one
-        query = select(VehicleTrajectory).where(
-            and_(
-                VehicleTrajectory.vehicle_track_id == track_id,
-                VehicleTrajectory.camera_id == camera_id,
-            )
+        trajectory = await self.analytics_repository.get_vehicle_trajectory(
+            track_id, camera_id
         )
-
-        result = await self.session.execute(query)
-        trajectory = result.scalar_one_or_none()
 
         # Prepare path points from detections
         path_points = []
@@ -1033,35 +970,72 @@ class AnalyticsService(BaseAsyncService):
             # Recalculate metrics
             await self._calculate_trajectory_metrics(trajectory)
 
+            # Update trajectory data
+            trajectory_data = {
+                "end_time": trajectory.end_time,
+                "duration_seconds": trajectory.duration_seconds,
+                "path_points": trajectory.path_points,
+                "total_distance": trajectory.total_distance,
+                "straight_line_distance": trajectory.straight_line_distance,
+                "path_efficiency": trajectory.path_efficiency,
+                "average_speed": trajectory.average_speed,
+                "max_speed": trajectory.max_speed,
+                "is_anomalous": getattr(trajectory, 'is_anomalous', False),
+                "anomaly_score": getattr(trajectory, 'anomaly_score', None),
+                "anomaly_reasons": getattr(trajectory, 'anomaly_reasons', None),
+            }
+
+            await self.analytics_repository.create_or_update_trajectory({
+                "vehicle_track_id": track_id,
+                "camera_id": camera_id,
+                **trajectory_data
+            })
+
         else:
             # Create new trajectory
             start_time = min(d.created_at for d in detections)
             end_time = max(d.created_at for d in detections)
 
-            trajectory = VehicleTrajectory(
-                vehicle_track_id=track_id,
-                camera_id=camera_id,
-                start_time=start_time,
-                end_time=end_time,
-                duration_seconds=(end_time - start_time).total_seconds(),
-                path_points=path_points,
-                total_distance=0.0,
-                straight_line_distance=0.0,
-                path_efficiency=1.0,
-                average_speed=0.0,
-                max_speed=0.0,
-                vehicle_type=detections[0].vehicle_type or detections[0].class_name,
-                license_plate=detections[0].license_plate,
-                tracking_quality=statistics.mean(
+            # Create a temporary trajectory object for metrics calculation
+            temp_trajectory = type('Trajectory', (), {
+                'path_points': path_points,
+                'total_distance': 0.0,
+                'straight_line_distance': 0.0,
+                'path_efficiency': 1.0,
+                'average_speed': 0.0,
+                'max_speed': 0.0,
+                'is_anomalous': False,
+                'anomaly_score': None,
+                'anomaly_reasons': None,
+            })()
+
+            await self._calculate_trajectory_metrics(temp_trajectory)
+
+            # Create trajectory via repository
+            trajectory_data = {
+                "vehicle_track_id": track_id,
+                "camera_id": camera_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "duration_seconds": (end_time - start_time).total_seconds(),
+                "path_points": path_points,
+                "total_distance": temp_trajectory.total_distance,
+                "straight_line_distance": temp_trajectory.straight_line_distance,
+                "path_efficiency": temp_trajectory.path_efficiency,
+                "average_speed": temp_trajectory.average_speed,
+                "max_speed": temp_trajectory.max_speed,
+                "vehicle_type": detections[0].vehicle_type or detections[0].class_name,
+                "license_plate": detections[0].license_plate,
+                "tracking_quality": statistics.mean(
                     d.detection_quality for d in detections
                 ),
-                path_completeness=1.0,
-            )
+                "path_completeness": 1.0,
+                "is_anomalous": temp_trajectory.is_anomalous,
+                "anomaly_score": temp_trajectory.anomaly_score,
+                "anomaly_reasons": temp_trajectory.anomaly_reasons,
+            }
 
-            await self._calculate_trajectory_metrics(trajectory)
-            self.session.add(trajectory)
-
-        await self.session.commit()
+            await self.analytics_repository.create_or_update_trajectory(trajectory_data)
 
     async def _calculate_trajectory_metrics(
         self, trajectory: VehicleTrajectory
@@ -1136,22 +1110,14 @@ class AnalyticsService(BaseAsyncService):
         start_time, end_time = time_range
 
         try:
-            # Query aggregated metrics from database
-            query = (
-                select(TrafficMetrics)
-                .where(
-                    and_(
-                        TrafficMetrics.camera_id == camera_id,
-                        TrafficMetrics.timestamp >= start_time,
-                        TrafficMetrics.timestamp <= end_time,
-                        TrafficMetrics.aggregation_period == aggregation_period,
-                    )
-                )
-                .order_by(TrafficMetrics.timestamp)
+            # Query aggregated metrics from repository
+            metrics = await self.analytics_repository.get_traffic_metrics_by_camera(
+                camera_id=camera_id,
+                start_time=start_time,
+                end_time=end_time,
+                aggregation_period=aggregation_period,
+                limit=10000  # Large limit for time range queries
             )
-
-            result = await self.session.execute(query)
-            metrics = result.scalars().all()
 
             # Convert to response format
             response_metrics = []
@@ -1185,7 +1151,7 @@ class AnalyticsService(BaseAsyncService):
 
             return response_metrics
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to calculate traffic metrics: {e}")
             raise DatabaseError(f"Traffic metrics calculation failed: {e}")
 
@@ -1209,19 +1175,12 @@ class AnalyticsService(BaseAsyncService):
     ) -> list[dict[str, Any]]:
         """Get active traffic violations with filtering options."""
         try:
-            query = select(RuleViolation).where(RuleViolation.status == "active")
-
-            if camera_id:
-                query = query.where(RuleViolation.camera_id == camera_id)
-            if violation_type:
-                query = query.where(RuleViolation.violation_type == violation_type)
-            if severity:
-                query = query.where(RuleViolation.severity == severity)
-
-            query = query.order_by(RuleViolation.detection_time.desc()).limit(limit)
-
-            result = await self.session.execute(query)
-            violations = result.scalars().all()
+            violations = await self.analytics_repository.get_active_violations(
+                camera_id=camera_id,
+                violation_type=violation_type,
+                severity=severity,
+                limit=limit,
+            )
 
             return [
                 {
@@ -1238,7 +1197,7 @@ class AnalyticsService(BaseAsyncService):
                 for violation in violations
             ]
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to get active violations: {e}")
             raise DatabaseError(f"Failed to retrieve violations: {e}")
 
@@ -1252,24 +1211,13 @@ class AnalyticsService(BaseAsyncService):
     ) -> list[dict[str, Any]]:
         """Get detected traffic anomalies with filtering options."""
         try:
-            query = select(TrafficAnomaly)
-
-            conditions = [TrafficAnomaly.anomaly_score >= min_score]
-
-            if camera_id:
-                conditions.append(TrafficAnomaly.camera_id == camera_id)
-            if anomaly_type:
-                conditions.append(TrafficAnomaly.anomaly_type == anomaly_type)
-            if time_range:
-                start_time, end_time = time_range
-                conditions.append(TrafficAnomaly.detection_time >= start_time)
-                conditions.append(TrafficAnomaly.detection_time <= end_time)
-
-            query = query.where(and_(*conditions))
-            query = query.order_by(TrafficAnomaly.detection_time.desc()).limit(limit)
-
-            result = await self.session.execute(query)
-            anomalies = result.scalars().all()
+            anomalies = await self.analytics_repository.get_traffic_anomalies(
+                camera_id=camera_id,
+                anomaly_type=anomaly_type,
+                min_score=min_score,
+                time_range=time_range,
+                limit=limit,
+            )
 
             return [
                 {
@@ -1286,7 +1234,7 @@ class AnalyticsService(BaseAsyncService):
                 for anomaly in anomalies
             ]
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to get traffic anomalies: {e}")
             raise DatabaseError(f"Failed to retrieve anomalies: {e}")
 
@@ -1300,80 +1248,24 @@ class AnalyticsService(BaseAsyncService):
         start_time, end_time = time_range
 
         try:
+            # Use repository to get analytics summary
+            summary_data = await self.analytics_repository.get_analytics_summary(
+                camera_ids=camera_ids,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
             report_data = {
                 "report_type": report_type,
-                "time_range": {"start": start_time, "end": end_time},
-                "cameras": camera_ids,
-                "generated_at": datetime.now(UTC),
+                "time_range": summary_data["time_range"],
+                "cameras": summary_data["cameras"],
+                "generated_at": summary_data["generated_at"],
+                "summary": summary_data["summary"],
+                "camera_summaries": [],  # Could be extended to include per-camera details
             }
-
-            # Aggregate metrics across cameras
-            total_vehicles = 0
-            total_violations = 0
-            total_anomalies = 0
-            camera_summaries = []
-
-            for camera_id in camera_ids:
-                # Get traffic metrics
-                metrics_query = select(func.sum(TrafficMetrics.total_vehicles)).where(
-                    and_(
-                        TrafficMetrics.camera_id == camera_id,
-                        TrafficMetrics.timestamp >= start_time,
-                        TrafficMetrics.timestamp <= end_time,
-                    )
-                )
-                metrics_result = await self.session.execute(metrics_query)
-                camera_vehicles = metrics_result.scalar() or 0
-
-                # Get violations count
-                violations_query = select(func.count(RuleViolation.id)).where(
-                    and_(
-                        RuleViolation.camera_id == camera_id,
-                        RuleViolation.detection_time >= start_time,
-                        RuleViolation.detection_time <= end_time,
-                    )
-                )
-                violations_result = await self.session.execute(violations_query)
-                camera_violations = violations_result.scalar() or 0
-
-                # Get anomalies count
-                anomalies_query = select(func.count(TrafficAnomaly.id)).where(
-                    and_(
-                        TrafficAnomaly.camera_id == camera_id,
-                        TrafficAnomaly.detection_time >= start_time,
-                        TrafficAnomaly.detection_time <= end_time,
-                    )
-                )
-                anomalies_result = await self.session.execute(anomalies_query)
-                camera_anomalies = anomalies_result.scalar() or 0
-
-                camera_summaries.append(
-                    {
-                        "camera_id": camera_id,
-                        "total_vehicles": camera_vehicles,
-                        "violations": camera_violations,
-                        "anomalies": camera_anomalies,
-                    }
-                )
-
-                total_vehicles += camera_vehicles
-                total_violations += camera_violations
-                total_anomalies += camera_anomalies
-
-            report_data.update(
-                {
-                    "summary": {
-                        "total_vehicles": total_vehicles,
-                        "total_violations": total_violations,
-                        "total_anomalies": total_anomalies,
-                        "cameras_analyzed": len(camera_ids),
-                    },
-                    "camera_summaries": camera_summaries,
-                }
-            )
 
             return report_data
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to generate analytics report: {e}")
             raise DatabaseError(f"Report generation failed: {e}")

@@ -32,6 +32,14 @@ class BaseRepository[T: BaseTableModel]:
         self.session_factory = session_factory
         self.model = model
 
+    def _get_session(self) -> AsyncContextManager[AsyncSession]:
+        """Get async session context manager.
+
+        Returns:
+            Async session context manager
+        """
+        return self.session_factory()
+
     async def create(self, **kwargs: Any) -> T:
         """Create a new model instance.
 

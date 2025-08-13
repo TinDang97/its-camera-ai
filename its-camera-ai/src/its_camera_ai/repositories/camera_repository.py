@@ -28,6 +28,15 @@ class CameraRepository(BaseRepository[Camera]):
 
     def __init__(self, session_factory: sessionmaker[AsyncSession]):
         super().__init__(session_factory, Camera)
+        self._session_factory = session_factory
+
+    def _get_session(self) -> AsyncSession:
+        """Get async session.
+
+        Returns:
+            Async session
+        """
+        return self._session_factory()
 
     async def get_by_name(self, name: str) -> Camera | None:
         """Get camera by name.
