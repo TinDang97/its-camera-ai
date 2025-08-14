@@ -308,6 +308,32 @@ class ServiceContainer(containers.DeclarativeContainer):
         settings=config,
     )
 
+    # ML Pipeline Integration Services
+
+    # ML Analytics Connector - Singleton for shared processing state
+    ml_analytics_connector = providers.Singleton(
+        "its_camera_ai.services.ml_analytics_connector.MLAnalyticsConnector",
+        # Note: batch_processor would be injected when ML module is available
+        unified_analytics=unified_analytics_service,
+        redis_client=infrastructure.redis_client,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Quality Score Calculator - Singleton for shared caching
+    quality_score_calculator = providers.Singleton(
+        "its_camera_ai.ml.quality_score_calculator.QualityScoreCalculator",
+        cache_service=cache_service,
+    )
+
+    # Model Metrics Service - Singleton for metrics tracking
+    model_metrics_service = providers.Singleton(
+        "its_camera_ai.services.model_metrics_service.ModelMetricsService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
 
 class ApplicationContainer(containers.DeclarativeContainer):
     """Main application container that wires all dependencies.

@@ -28,12 +28,13 @@ logger = get_logger(__name__)
 
 class AnalyticsServiceError(Exception):
     """Analytics service specific exceptions."""
+
     pass
 
 
 class AnalyticsAggregationService:
     """High-performance analytics aggregation service with TimescaleDB integration.
-    
+
     This service follows single responsibility principle - it only handles
     metric aggregation and statistical analysis.
     """
@@ -45,7 +46,7 @@ class AnalyticsAggregationService:
         settings: Settings,
     ):
         """Initialize with injected dependencies.
-        
+
         Args:
             analytics_repository: Repository for analytics data access
             cache_service: Redis cache service
@@ -97,7 +98,7 @@ class AnalyticsAggregationService:
         include_quality_check: bool = True,
     ) -> list[AggregatedMetricsDTO]:
         """Aggregate traffic metrics with caching and optimization.
-        
+
         Args:
             camera_ids: List of camera IDs to aggregate
             time_window: Time window for aggregation
@@ -105,10 +106,10 @@ class AnalyticsAggregationService:
             start_time: Optional start time (defaults to time_window ago)
             end_time: Optional end time (defaults to now)
             include_quality_check: Whether to include data quality assessment
-            
+
         Returns:
             List of aggregated metrics DTOs
-            
+
         Raises:
             AnalyticsServiceError: If aggregation fails
         """
@@ -152,7 +153,9 @@ class AnalyticsAggregationService:
                     aggregated_results.append(aggregated)
 
                 except Exception as e:
-                    logger.error(f"Failed to aggregate metrics for camera {camera_id}: {e}")
+                    logger.error(
+                        f"Failed to aggregate metrics for camera {camera_id}: {e}"
+                    )
                     continue
 
             # Cache results
@@ -168,7 +171,7 @@ class AnalyticsAggregationService:
 
         except Exception as e:
             logger.error(f"Traffic metrics aggregation failed: {e}")
-            raise AnalyticsServiceError(f"Aggregation failed: {str(e)}")
+            raise AnalyticsServiceError(f"Aggregation failed: {str(e)}") from e
 
     async def _fetch_raw_metrics(
         self,
@@ -178,13 +181,13 @@ class AnalyticsAggregationService:
         aggregation_level: AggregationLevel,
     ) -> list[dict[str, Any]]:
         """Fetch raw metrics from repository.
-        
+
         Args:
             camera_id: Camera identifier
             start_time: Start of time range
             end_time: End of time range
             aggregation_level: Aggregation level
-            
+
         Returns:
             List of raw metric data points
         """
@@ -241,7 +244,7 @@ class AnalyticsAggregationService:
         include_quality_check: bool,
     ) -> AggregatedMetricsDTO:
         """Aggregate raw metrics with statistical analysis.
-        
+
         Args:
             camera_id: Camera identifier
             raw_metrics: Raw metric data points
@@ -250,7 +253,7 @@ class AnalyticsAggregationService:
             start_time: Start time
             end_time: End time
             include_quality_check: Whether to assess data quality
-            
+
         Returns:
             Aggregated metrics DTO
         """
@@ -293,10 +296,10 @@ class AnalyticsAggregationService:
         self, metrics: list[dict[str, Any]]
     ) -> VehicleStatistics:
         """Calculate vehicle-related statistics.
-        
+
         Args:
             metrics: Raw metric data points
-            
+
         Returns:
             Vehicle statistics
         """
@@ -324,10 +327,10 @@ class AnalyticsAggregationService:
         self, metrics: list[dict[str, Any]]
     ) -> SpeedStatistics:
         """Calculate speed-related statistics.
-        
+
         Args:
             metrics: Raw metric data points
-            
+
         Returns:
             Speed statistics
         """
@@ -349,14 +352,12 @@ class AnalyticsAggregationService:
             percentile_85_speed=np.percentile(speeds, 85),
         )
 
-    def _assess_data_quality(
-        self, metrics: list[dict[str, Any]]
-    ) -> DataQualityMetrics:
+    def _assess_data_quality(self, metrics: list[dict[str, Any]]) -> DataQualityMetrics:
         """Assess data quality and detect outliers.
-        
+
         Args:
             metrics: Raw metric data points
-            
+
         Returns:
             Data quality metrics
         """
@@ -415,14 +416,14 @@ class AnalyticsAggregationService:
         end_time: datetime,
     ) -> str:
         """Build cache key for aggregation results.
-        
+
         Args:
             camera_ids: List of camera IDs
             time_window: Time window
             aggregation_level: Aggregation level
             start_time: Start time
             end_time: End time
-            
+
         Returns:
             Cache key string
         """
@@ -436,10 +437,10 @@ class AnalyticsAggregationService:
         self, cache_key: str
     ) -> list[AggregatedMetricsDTO] | None:
         """Get cached aggregation result.
-        
+
         Args:
             cache_key: Cache key
-            
+
         Returns:
             Cached results or None
         """
@@ -447,8 +448,7 @@ class AnalyticsAggregationService:
             cached_data = await self.cache_service.get_json(cache_key)
             if cached_data:
                 return [
-                    self._deserialize_aggregated_metrics(item)
-                    for item in cached_data
+                    self._deserialize_aggregated_metrics(item) for item in cached_data
                 ]
             return None
         except Exception as e:
@@ -462,7 +462,7 @@ class AnalyticsAggregationService:
         time_window: TimeWindow,
     ) -> None:
         """Cache aggregation results.
-        
+
         Args:
             cache_key: Cache key
             results: Results to cache
@@ -480,10 +480,10 @@ class AnalyticsAggregationService:
 
     def _serialize_aggregated_metrics(self, metrics: AggregatedMetricsDTO) -> dict:
         """Serialize AggregatedMetricsDTO to dict for caching.
-        
+
         Args:
             metrics: Metrics DTO
-            
+
         Returns:
             Serialized dict
         """
@@ -523,10 +523,10 @@ class AnalyticsAggregationService:
 
     def _deserialize_aggregated_metrics(self, data: dict) -> AggregatedMetricsDTO:
         """Deserialize dict to AggregatedMetricsDTO.
-        
+
         Args:
             data: Serialized dict
-            
+
         Returns:
             Metrics DTO
         """
@@ -551,13 +551,13 @@ class AnalyticsAggregationService:
         time_window: TimeWindow,
     ) -> list[dict[str, Any]]:
         """Generate mock metrics for testing.
-        
+
         Args:
             camera_id: Camera identifier
             start_time: Start time
             end_time: End time
             time_window: Time window
-            
+
         Returns:
             List of mock metric data
         """

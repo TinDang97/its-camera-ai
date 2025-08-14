@@ -16,10 +16,20 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import grpc
 import numpy as np
+import psutil
+
+try:
+    import pynvml
+    PYNVML_AVAILABLE = True
+except ImportError:
+    PYNVML_AVAILABLE = False
+    pynvml = None
 
 # Internal imports
 from ..core.logging import get_logger
@@ -34,6 +44,245 @@ from .streaming_service import (
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class SystemMetrics:
+    """Comprehensive system metrics for monitoring."""
+    cpu_usage_percent: float
+    cpu_per_core: list[float]
+    memory_used_gb: float
+    memory_total_gb: float
+    memory_percent: float
+    gpu_metrics: list[dict[str, Any]]
+    process_cpu_percent: float
+    process_memory_mb: float
+    timestamp: datetime
+
+
+class EnhancedMonitoringService:
+    """Enhanced monitoring service with CPU/GPU tracking.
+    
+    Provides comprehensive system monitoring including:
+    - CPU utilization (overall and per-core)
+    - Memory usage (system and process-specific)
+    - GPU utilization and memory (NVIDIA GPUs)
+    - Temperature and power monitoring
+    - Performance metrics for Prometheus export
+    """
+
+    def __init__(self):
+        """Initialize monitoring service."""
+        # Initialize NVML for GPU monitoring
+        self.gpu_available = False
+        self.gpu_count = 0
+
+        if PYNVML_AVAILABLE:
+            try:
+                pynvml.nvmlInit()
+                self.gpu_count = pynvml.nvmlDeviceGetCount()
+                self.gpu_available = True
+                logger.info(f"GPU monitoring initialized with {self.gpu_count} GPUs")
+            except Exception as e:
+                logger.warning(f"GPU monitoring not available: {e}")
+        else:
+            logger.warning("pynvml not available - GPU monitoring disabled")
+
+        # Process monitoring
+        self.process = psutil.Process()
+
+        # Performance tracking
+        self.metrics_history = []
+        self.max_history = 100
+
+        logger.info("EnhancedMonitoringService initialized")
+
+    async def get_system_metrics(self) -> SystemMetrics:
+        """Get comprehensive system metrics.
+        
+        Returns:
+            SystemMetrics with current system state
+        """
+        try:
+            # CPU Metrics
+            cpu_percent = psutil.cpu_percent(interval=0.1, percpu=True)
+            cpu_avg = sum(cpu_percent) / len(cpu_percent)
+
+            # Memory Metrics
+            memory = psutil.virtual_memory()
+
+            # GPU Metrics (if available)
+            gpu_metrics = []
+            if self.gpu_available and self.gpu_count > 0:
+                gpu_metrics = await self._collect_gpu_metrics()
+
+            # Process-specific metrics
+            process_cpu = self.process.cpu_percent()
+            process_memory = self.process.memory_info()
+
+            metrics = SystemMetrics(
+                cpu_usage_percent=cpu_avg,
+                cpu_per_core=cpu_percent,
+                memory_used_gb=memory.used / (1024**3),
+                memory_total_gb=memory.total / (1024**3),
+                memory_percent=memory.percent,
+                gpu_metrics=gpu_metrics,
+                process_cpu_percent=process_cpu,
+                process_memory_mb=process_memory.rss / (1024**2),
+                timestamp=datetime.now(UTC)
+            )
+
+            # Store in history
+            self._store_metrics_history(metrics)
+
+            return metrics
+
+        except Exception as e:
+            logger.error(f"Failed to collect system metrics: {e}")
+            # Return default metrics on error
+            return SystemMetrics(
+                cpu_usage_percent=0.0,
+                cpu_per_core=[],
+                memory_used_gb=0.0,
+                memory_total_gb=0.0,
+                memory_percent=0.0,
+                gpu_metrics=[],
+                process_cpu_percent=0.0,
+                process_memory_mb=0.0,
+                timestamp=datetime.now(UTC)
+            )
+
+    async def _collect_gpu_metrics(self) -> list[dict[str, Any]]:
+        """Collect GPU metrics from all available devices.
+        
+        Returns:
+            List of GPU metric dictionaries
+        """
+        gpu_metrics = []
+
+        try:
+            for i in range(self.gpu_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+
+                # GPU utilization
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+
+                # GPU memory
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+
+                # GPU temperature
+                temp = pynvml.nvmlDeviceGetTemperature(
+                    handle, pynvml.NVML_TEMPERATURE_GPU
+                )
+
+                # Power usage (if supported)
+                power = 0.0
+                try:
+                    power = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # mW to W
+                except:
+                    pass  # Power monitoring not supported on all GPUs
+
+                # GPU name
+                gpu_name = "Unknown"
+                try:
+                    gpu_name = pynvml.nvmlDeviceGetName(handle).decode('utf-8')
+                except:
+                    pass
+
+                gpu_metrics.append({
+                    "gpu_id": i,
+                    "name": gpu_name,
+                    "utilization_percent": util.gpu,
+                    "memory_utilization_percent": util.memory,
+                    "memory_used_mb": mem_info.used / (1024**2),
+                    "memory_total_mb": mem_info.total / (1024**2),
+                    "memory_free_mb": mem_info.free / (1024**2),
+                    "temperature_celsius": temp,
+                    "power_watts": power,
+                    "memory_usage_percent": (mem_info.used / mem_info.total) * 100
+                })
+
+        except Exception as e:
+            logger.warning(f"GPU metrics collection failed: {e}")
+
+        return gpu_metrics
+
+    def _store_metrics_history(self, metrics: SystemMetrics) -> None:
+        """Store metrics in history for trend analysis.
+        
+        Args:
+            metrics: Current system metrics
+        """
+        self.metrics_history.append(metrics)
+
+        # Keep only recent history
+        if len(self.metrics_history) > self.max_history:
+            self.metrics_history = self.metrics_history[-self.max_history:]
+
+    def get_metrics_summary(self) -> dict[str, Any]:
+        """Get summary of recent metrics.
+        
+        Returns:
+            Metrics summary dictionary
+        """
+        if not self.metrics_history:
+            return {}
+
+        recent_metrics = self.metrics_history[-10:]  # Last 10 readings
+
+        cpu_values = [m.cpu_usage_percent for m in recent_metrics]
+        memory_values = [m.memory_percent for m in recent_metrics]
+
+        summary = {
+            "cpu": {
+                "current": cpu_values[-1] if cpu_values else 0,
+                "average": sum(cpu_values) / len(cpu_values) if cpu_values else 0,
+                "max": max(cpu_values) if cpu_values else 0
+            },
+            "memory": {
+                "current": memory_values[-1] if memory_values else 0,
+                "average": sum(memory_values) / len(memory_values) if memory_values else 0,
+                "max": max(memory_values) if memory_values else 0
+            },
+            "gpu_count": self.gpu_count,
+            "history_length": len(self.metrics_history)
+        }
+
+        return summary
+
+    async def export_prometheus_metrics(self) -> dict[str, Any]:
+        """Export metrics in Prometheus format.
+        
+        Returns:
+            Prometheus-compatible metrics dictionary
+        """
+        try:
+            metrics = await self.get_system_metrics()
+
+            prometheus_metrics = {
+                "ml_cpu_usage_percent": metrics.cpu_usage_percent,
+                "ml_memory_usage_percent": metrics.memory_percent,
+                "ml_memory_used_gb": metrics.memory_used_gb,
+                "ml_process_cpu_percent": metrics.process_cpu_percent,
+                "ml_process_memory_mb": metrics.process_memory_mb,
+                "ml_gpu_count": len(metrics.gpu_metrics)
+            }
+
+            # Add per-GPU metrics
+            for gpu in metrics.gpu_metrics:
+                gpu_id = gpu["gpu_id"]
+                prometheus_metrics.update({
+                    f"ml_gpu_{gpu_id}_utilization_percent": gpu["utilization_percent"],
+                    f"ml_gpu_{gpu_id}_memory_used_mb": gpu["memory_used_mb"],
+                    f"ml_gpu_{gpu_id}_temperature_celsius": gpu["temperature_celsius"],
+                    f"ml_gpu_{gpu_id}_power_watts": gpu["power_watts"]
+                })
+
+            return prometheus_metrics
+
+        except Exception as e:
+            logger.error(f"Prometheus metrics export failed: {e}")
+            return {}
 
 
 class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
@@ -56,7 +305,10 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
         self.server: grpc.aio.Server | None = None
         self.is_serving = False
 
-        logger.info("StreamingServiceImpl initialized")
+        # Initialize enhanced monitoring
+        self.monitoring_service = EnhancedMonitoringService()
+
+        logger.info("StreamingServiceImpl initialized with enhanced monitoring")
 
     async def start_server(self, host: str = "127.0.0.1", port: int = 50051) -> None:
         """Start the gRPC server."""
@@ -551,7 +803,7 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                 throughput_fps=processing_metrics.get("throughput_fps", 0.0),
                 error_count=processing_metrics.get("error_count", 0),
                 memory_usage_mb=processing_metrics.get("memory_usage_mb", 0.0),
-                cpu_usage_percent=0.0,  # TODO: Implement CPU monitoring
+                cpu_usage_percent=await self._get_cpu_usage(),  # Fixed: Implemented CPU monitoring
                 active_connections=processing_metrics.get("active_connections", 0),
             )
 
@@ -628,6 +880,138 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
         except Exception as e:
             logger.error(f"Frame encoding error: {e}")
             return frame_pb.ImageData()
+
+    async def _get_cpu_usage(self) -> float:
+        """Get current CPU usage percentage.
+        
+        Returns:
+            CPU usage as percentage (0.0-100.0)
+        """
+        try:
+            metrics = await self.monitoring_service.get_system_metrics()
+            return metrics.cpu_usage_percent
+        except Exception as e:
+            logger.warning(f"Failed to get CPU usage: {e}")
+            return 0.0
+
+    async def GetDetailedSystemMetrics(
+        self, request: pb.SystemMetricsRequest, context: grpc.aio.ServicerContext
+    ) -> pb.DetailedSystemMetricsResponse:
+        """Get detailed system metrics including GPU monitoring."""
+        logger.info("GetDetailedSystemMetrics called")
+
+        try:
+            # Get comprehensive system metrics
+            system_metrics = await self.monitoring_service.get_system_metrics()
+
+            # Get processing metrics
+            processing_metrics = self.streaming_processor.get_processing_metrics()
+
+            # Create detailed performance metrics
+            detailed_perf = pb.DetailedPerformanceMetrics(
+                frames_processed=processing_metrics.get("frames_processed", 0),
+                frames_rejected=processing_metrics.get("frames_rejected", 0),
+                avg_processing_time_ms=processing_metrics.get("avg_processing_time_ms", 0.0),
+                throughput_fps=processing_metrics.get("throughput_fps", 0.0),
+                error_count=processing_metrics.get("error_count", 0),
+                memory_usage_mb=processing_metrics.get("memory_usage_mb", 0.0),
+                cpu_usage_percent=system_metrics.cpu_usage_percent,
+                process_cpu_percent=system_metrics.process_cpu_percent,
+                process_memory_mb=system_metrics.process_memory_mb,
+                active_connections=processing_metrics.get("active_connections", 0),
+            )
+
+            # Add per-core CPU metrics
+            for i, cpu_usage in enumerate(system_metrics.cpu_per_core):
+                cpu_core = pb.CPUCoreMetrics(
+                    core_id=i,
+                    usage_percent=cpu_usage
+                )
+                detailed_perf.cpu_cores.append(cpu_core)
+
+            # Add GPU metrics
+            for gpu_data in system_metrics.gpu_metrics:
+                gpu_metric = pb.GPUMetrics(
+                    gpu_id=gpu_data["gpu_id"],
+                    name=gpu_data["name"],
+                    utilization_percent=gpu_data["utilization_percent"],
+                    memory_utilization_percent=gpu_data["memory_utilization_percent"],
+                    memory_used_mb=gpu_data["memory_used_mb"],
+                    memory_total_mb=gpu_data["memory_total_mb"],
+                    memory_free_mb=gpu_data["memory_free_mb"],
+                    temperature_celsius=gpu_data["temperature_celsius"],
+                    power_watts=gpu_data["power_watts"]
+                )
+                detailed_perf.gpu_metrics.append(gpu_metric)
+
+            # System memory metrics
+            system_memory = pb.SystemMemoryMetrics(
+                total_gb=system_metrics.memory_total_gb,
+                used_gb=system_metrics.memory_used_gb,
+                available_gb=system_metrics.memory_total_gb - system_metrics.memory_used_gb,
+                usage_percent=system_metrics.memory_percent
+            )
+
+            # Get queue metrics if requested
+            queue_metrics = []
+            if request.include_queue_metrics and self.redis_manager:
+                all_metrics = await self.redis_manager.get_all_metrics()
+                for _queue_name, metrics in all_metrics.items():
+                    queue_metric = frame_pb.QueueMetrics(
+                        queue_name=metrics.queue_name,
+                        pending_count=metrics.pending_count,
+                        processing_count=metrics.processing_count,
+                        completed_count=metrics.completed_count,
+                        failed_count=metrics.failed_count,
+                        avg_processing_time_ms=metrics.avg_processing_time_ms,
+                        throughput_fps=metrics.throughput_fps,
+                    )
+                    queue_metrics.append(queue_metric)
+
+            return pb.DetailedSystemMetricsResponse(
+                queue_metrics=queue_metrics,
+                performance_metrics=detailed_perf,
+                system_memory=system_memory,
+                timestamp=time.time(),
+                uptime_seconds=time.time() - processing_metrics.get("start_time", time.time()),
+                system_load_avg=system_metrics.cpu_usage_percent / 100.0
+            )
+
+        except Exception as e:
+            logger.error(f"GetDetailedSystemMetrics error: {e}")
+            await context.abort(
+                grpc.StatusCode.INTERNAL, f"Detailed metrics collection failed: {e}"
+            )
+
+    async def GetPrometheusMetrics(
+        self, request: pb.PrometheusMetricsRequest, context: grpc.aio.ServicerContext
+    ) -> pb.PrometheusMetricsResponse:
+        """Export metrics in Prometheus format."""
+        logger.info("GetPrometheusMetrics called")
+
+        try:
+            prometheus_metrics = await self.monitoring_service.export_prometheus_metrics()
+
+            # Convert to protobuf format
+            metric_entries = []
+            for name, value in prometheus_metrics.items():
+                metric_entry = pb.PrometheusMetric(
+                    name=name,
+                    value=float(value),
+                    timestamp=time.time()
+                )
+                metric_entries.append(metric_entry)
+
+            return pb.PrometheusMetricsResponse(
+                metrics=metric_entries,
+                timestamp=time.time()
+            )
+
+        except Exception as e:
+            logger.error(f"GetPrometheusMetrics error: {e}")
+            await context.abort(
+                grpc.StatusCode.INTERNAL, f"Prometheus metrics export failed: {e}"
+            )
 
 
 class StreamingServer:
