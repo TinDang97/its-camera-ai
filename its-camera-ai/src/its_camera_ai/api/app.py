@@ -20,6 +20,7 @@ from ..containers import ApplicationContainer
 from ..core.config import Settings, get_settings
 from ..core.exceptions import ITSCameraAIError
 from ..core.logging import get_logger, setup_logging
+from .docs import OpenAPIGenerator
 from .middleware import (
     APIKeyAuthMiddleware,
     CSRFProtectionMiddleware,
@@ -35,6 +36,7 @@ from .routers import (
     cameras,
     health,
     models,
+    realtime,
     system,
 )
 
@@ -75,6 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "src.its_camera_ai.api.routers.system",
                 "src.its_camera_ai.api.routers.health",
                 "src.its_camera_ai.api.routers.models",
+                "src.its_camera_ai.api.routers.realtime",
                 "src.its_camera_ai.api.dependencies",
                 "src.its_camera_ai.cli.commands.auth",
                 "src.its_camera_ai.cli.commands.services",
@@ -134,6 +137,9 @@ def create_app_with_di(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json" if not settings.is_production() else None,
         lifespan=lifespan,
     )
+
+    # Customize OpenAPI documentation
+    app.openapi = lambda: OpenAPIGenerator.customize_openapi(app)
 
     # Store settings in app state (container will be bound during lifespan)
     app.state.settings = settings
@@ -292,6 +298,8 @@ def _include_routers(app: FastAPI) -> None:
     app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
 
     app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
+
+    app.include_router(realtime.router, prefix="/api/v1/realtime", tags=["realtime"])
 
 
 # Create the main app instance with dependency injection

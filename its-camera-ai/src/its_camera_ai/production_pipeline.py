@@ -24,12 +24,11 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 # Import all pipeline components
-from .data.streaming_processor import StreamProcessor, create_stream_processor
 from .ml.federated_learning import (
     ClientInfo,
     FederatedCoordinator,
@@ -46,6 +45,8 @@ from .ml.production_monitoring import (
 )
 
 logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from .flow.streaming_processor import StreamProcessor
 
 
 class PipelineStatus(Enum):
@@ -145,14 +146,14 @@ class ProductionOrchestrator:
         self.health_check_interval = 30  # seconds
         self.last_health_check = 0.0
 
-        logger.info(
+        self.logger.info(
             f"Production orchestrator initialized for {config.deployment_mode.value} environment"
         )
 
     async def initialize(self):
         """Initialize all pipeline components."""
 
-        logger.info("Initializing production pipeline components...")
+        self.logger.info("Initializing production pipeline components...")
         self.status = PipelineStatus.INITIALIZING
 
         try:
@@ -169,24 +170,24 @@ class ProductionOrchestrator:
             if self.config.federated_learning_enabled:
                 await self._initialize_federated_learning()
 
-            logger.info("All pipeline components initialized successfully")
+            self.logger.info("All pipeline components initialized successfully")
 
         except Exception as e:
             self.status = PipelineStatus.ERROR
-            logger.error(f"Pipeline initialization failed: {e}")
+            self.logger.error(f"Pipeline initialization failed: {e}")
             raise
 
     async def _initialize_data_pipeline(self):
         """Initialize data processing pipeline."""
 
         self.stream_processor = await create_stream_processor()
-        logger.info("Data processing pipeline initialized")
+        self.logger.info("Data processing pipeline initialized")
 
     async def _initialize_ml_pipeline(self):
         """Initialize ML training and inference pipeline."""
 
         self.ml_pipeline = await create_production_pipeline()
-        logger.info("ML pipeline initialized")
+        self.logger.info("ML pipeline initialized")
 
     async def _initialize_monitoring(self):
         """Initialize production monitoring and alerting."""
@@ -208,18 +209,18 @@ class ProductionOrchestrator:
         self.monitoring_dashboard = await create_production_monitoring_system(
             models_config, alert_config
         )
-        logger.info("Production monitoring initialized")
+        self.logger.info("Production monitoring initialized")
 
     async def _initialize_federated_learning(self):
         """Initialize federated learning coordinator."""
 
         self.federated_coordinator = await create_federated_coordinator()
-        logger.info("Federated learning coordinator initialized")
+        self.logger.info("Federated learning coordinator initialized")
 
     async def start(self):
         """Start the complete production pipeline."""
 
-        logger.info("Starting production pipeline...")
+        self.logger.info("Starting production pipeline...")
         self.status = PipelineStatus.STARTING
         self.start_time = time.time()
 
@@ -244,11 +245,11 @@ class ProductionOrchestrator:
             asyncio.create_task(self._auto_scaler())
 
             self.status = PipelineStatus.RUNNING
-            logger.info("Production pipeline started successfully")
+            self.logger.info("Production pipeline started successfully")
 
         except Exception as e:
             self.status = PipelineStatus.ERROR
-            logger.error(f"Pipeline startup failed: {e}")
+            self.logger.error(f"Pipeline startup failed: {e}")
             raise
 
     async def _register_default_edge_nodes(self):
@@ -271,7 +272,7 @@ class ProductionOrchestrator:
         for node in edge_nodes:
             await self.federated_coordinator.register_client(node)
 
-        logger.info(f"Registered {len(edge_nodes)} default edge nodes")
+        self.logger.info(f"Registered {len(edge_nodes)} default edge nodes")
 
     async def _pipeline_health_monitor(self):
         """Monitor overall pipeline health."""
@@ -303,7 +304,7 @@ class ProductionOrchestrator:
                 await asyncio.sleep(self.health_check_interval)
 
             except Exception as e:
-                logger.error(f"Health monitoring error: {e}")
+                self.logger.error(f"Health monitoring error: {e}")
                 await asyncio.sleep(self.health_check_interval)
 
     async def _collect_health_metrics(self) -> dict[str, Any]:
@@ -410,7 +411,7 @@ class ProductionOrchestrator:
         if health_data["overall_health"] < 70:
             if self.status == PipelineStatus.RUNNING:
                 self.status = PipelineStatus.DEGRADED
-                logger.warning(
+                self.logger.warning(
                     f"System health degraded: {health_data['overall_health']:.1f}%"
                 )
         elif (
@@ -418,13 +419,13 @@ class ProductionOrchestrator:
             and self.status == PipelineStatus.DEGRADED
         ):
             self.status = PipelineStatus.RUNNING
-            logger.info("System health recovered")
+            self.logger.info("System health recovered")
 
         # Check component-specific issues
         if "stream_processor" in health_data:
             stream_health = health_data["stream_processor"]
             if stream_health["error_rate"] > 0.05:  # 5% error rate
-                logger.warning(
+                self.logger.warning(
                     f"High stream processing error rate: {stream_health['error_rate']:.2%}"
                 )
 
@@ -434,14 +435,14 @@ class ProductionOrchestrator:
                 ml_health["inference_engine_fps"]
                 < self.config.target_throughput_fps * 0.5
             ):
-                logger.warning(
+                self.logger.warning(
                     f"Low inference throughput: {ml_health['inference_engine_fps']} FPS"
                 )
 
     def _log_health_summary(self, health_data: dict[str, Any]):
         """Log comprehensive health summary."""
 
-        logger.info(
+        self.logger.info(
             f"Pipeline Health Summary: "
             f"Overall={health_data['overall_health']:.1f}%, "
             f"Uptime={health_data['uptime_hours']:.1f}h, "
@@ -451,7 +452,7 @@ class ProductionOrchestrator:
 
         for component, data in health_data.items():
             if isinstance(data, dict) and "health_score" in data:
-                logger.debug(f"{component}: {data['health_score']:.1f}% health")
+                self.logger.debug(f"{component}: {data['health_score']:.1f}% health")
 
     async def _performance_optimizer(self):
         """Continuously optimize pipeline performance."""
@@ -468,7 +469,7 @@ class ProductionOrchestrator:
                 await asyncio.sleep(300)  # Every 5 minutes
 
             except Exception as e:
-                logger.error(f"Performance optimization error: {e}")
+                self.logger.error(f"Performance optimization error: {e}")
                 await asyncio.sleep(300)
 
     async def _collect_performance_metrics(self) -> dict[str, Any]:
@@ -511,13 +512,13 @@ class ProductionOrchestrator:
                 inference_metrics["p95_latency_ms"]
                 > self.config.target_latency_ms * 1.2
             ):
-                logger.info(
+                self.logger.info(
                     "High inference latency detected - consider model quantization"
                 )
 
             # If GPU utilization is low, increase batch size
             if inference_metrics["gpu_utilization"] < 50 and self.ml_pipeline:
-                logger.info("Low GPU utilization - consider increasing batch size")
+                self.logger.info("Low GPU utilization - consider increasing batch size")
 
     async def _auto_scaler(self):
         """Auto-scale pipeline components based on load."""
@@ -531,7 +532,7 @@ class ProductionOrchestrator:
                 await asyncio.sleep(60)  # Check every minute
 
             except Exception as e:
-                logger.error(f"Auto-scaling error: {e}")
+                self.logger.error(f"Auto-scaling error: {e}")
                 await asyncio.sleep(60)
 
     async def _evaluate_scaling_needs(self):
@@ -551,12 +552,12 @@ class ProductionOrchestrator:
 
             if inference_fps > self.config.target_throughput_fps * 0.9:
                 scale_up_needed = True
-                logger.info(
+                self.logger.info(
                     "High inference load detected - scaling consideration needed"
                 )
             elif inference_fps < self.config.target_throughput_fps * 0.3:
                 scale_down_possible = True
-                logger.info("Low inference load detected - scale down possible")
+                self.logger.info("Low inference load detected - scale down possible")
 
         # Apply scaling decisions
         if scale_up_needed:
@@ -567,7 +568,7 @@ class ProductionOrchestrator:
     async def _scale_up(self):
         """Scale up pipeline components."""
 
-        logger.info("Scaling up pipeline components")
+        self.logger.info("Scaling up pipeline components")
         self.status = PipelineStatus.SCALING
 
         # In production, this would trigger Kubernetes scaling
@@ -579,7 +580,7 @@ class ProductionOrchestrator:
     async def _scale_down(self):
         """Scale down pipeline components."""
 
-        logger.info("Scaling down pipeline components")
+        self.logger.info("Scaling down pipeline components")
         self.status = PipelineStatus.SCALING
 
         # In production, this would reduce worker count
@@ -597,7 +598,7 @@ class ProductionOrchestrator:
 
         if success:
             self.active_cameras.add(camera_config["camera_id"])
-            logger.info(f"Added camera stream: {camera_config['camera_id']}")
+            self.logger.info(f"Added camera stream: {camera_config['camera_id']}")
 
         return success
 
@@ -606,7 +607,7 @@ class ProductionOrchestrator:
 
         if camera_id in self.active_cameras:
             self.active_cameras.remove(camera_id)
-            logger.info(f"Removed camera stream: {camera_id}")
+            self.logger.info(f"Removed camera stream: {camera_id}")
             return True
 
         return False
@@ -621,7 +622,7 @@ class ProductionOrchestrator:
             await self.ml_pipeline.trigger_retraining(reason)
             return True
         except Exception as e:
-            logger.error(f"Model retraining trigger failed: {e}")
+            self.logger.error(f"Model retraining trigger failed: {e}")
             return False
 
     async def start_federated_round(self) -> bool:
@@ -633,7 +634,7 @@ class ProductionOrchestrator:
         try:
             return await self.federated_coordinator.start_federated_training()
         except Exception as e:
-            logger.error(f"Federated training start failed: {e}")
+            self.logger.error(f"Federated training start failed: {e}")
             return False
 
     def get_pipeline_status(self) -> dict[str, Any]:
@@ -660,7 +661,7 @@ class ProductionOrchestrator:
     async def stop(self):
         """Stop the complete production pipeline."""
 
-        logger.info("Stopping production pipeline...")
+        self.logger.info("Stopping production pipeline...")
         self.status = PipelineStatus.STOPPING
 
         try:
@@ -678,11 +679,11 @@ class ProductionOrchestrator:
                 await self.monitoring_dashboard.stop()
 
             self.status = PipelineStatus.STOPPED
-            logger.info("Production pipeline stopped")
+            self.logger.info("Production pipeline stopped")
 
         except Exception as e:
             self.status = PipelineStatus.ERROR
-            logger.error(f"Pipeline shutdown error: {e}")
+            self.logger.error(f"Pipeline shutdown error: {e}")
 
 
 # Factory functions
@@ -733,7 +734,9 @@ async def deploy_its_camera_ai_pipeline(
 ) -> ProductionOrchestrator:
     """Deploy complete ITS Camera AI production pipeline."""
 
-    logger.info(f"Deploying ITS Camera AI pipeline in {deployment_mode.value} mode")
+    self.logger.info(
+        f"Deploying ITS Camera AI pipeline in {deployment_mode.value} mode"
+    )
 
     # Create orchestrator
     orchestrator = await create_production_orchestrator(config_path, deployment_mode)
@@ -741,7 +744,7 @@ async def deploy_its_camera_ai_pipeline(
     # Start pipeline
     await orchestrator.start()
 
-    logger.info("ITS Camera AI pipeline deployment completed")
+    self.logger.info("ITS Camera AI pipeline deployment completed")
     return orchestrator
 
 

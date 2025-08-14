@@ -43,6 +43,9 @@ from .commands import (
     monitoring as monitoring_commands,
 )
 from .commands import (
+    performance as performance_commands,
+)
+from .commands import (
     security as security_commands,
 )
 from .commands import (
@@ -82,6 +85,9 @@ app.add_typer(
     monitoring_commands.app, name="monitor", help="📈 System monitoring and health"
 )
 app.add_typer(config_commands.app, name="config", help="⚙️ Configuration management")
+app.add_typer(
+    performance_commands.performance_cli, name="performance", help="⚡ Performance optimization and monitoring"
+)
 
 # Add enhanced CLI features
 app.add_typer(completion.app, name="completion", help="🔧 Shell completion management")

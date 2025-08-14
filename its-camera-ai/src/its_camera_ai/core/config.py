@@ -110,10 +110,31 @@ class SecurityConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable authentication")
     # JWT Settings
     secret_key: str = Field(
-        default="change-me-in-production",
+        default_factory=lambda: os.getenv("SECRET_KEY") or "change-me-in-production",
         min_length=32,
         description="Secret key for JWT tokens",
     )
+
+    @field_validator('secret_key')
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        """Validate secret key strength."""
+        weak_secrets = {
+            "change-me-in-production",
+            "secret",
+            "password",
+            "admin",
+            "test",
+            "development"
+        }
+
+        if v.lower() in weak_secrets:
+            raise ValueError(f"Secret key '{v}' is a default/weak value. Use a cryptographically secure key.")
+
+        if len(v) < 32:
+            raise ValueError("Secret key must be at least 32 characters long")
+
+        return v
     algorithm: str = Field(
         default="RS256", description="JWT algorithm (RS256 recommended for production)"
     )
@@ -385,6 +406,91 @@ class MinIOConfig(BaseModel):
     log_retention_days: int = Field(default=90, description="Log retention (days)")
 
 
+class MLStreamingConfig(BaseModel):
+    """ML streaming configuration for AI-annotated video streams."""
+
+    # Detection Configuration
+    confidence_threshold: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Object detection confidence threshold"
+    )
+    nms_threshold: float = Field(
+        default=0.4, ge=0.0, le=1.0,
+        description="Non-maximum suppression threshold"
+    )
+    max_detections: int = Field(
+        default=100, ge=1, le=1000,
+        description="Maximum number of detections per frame"
+    )
+    classes_to_detect: list[str] = Field(
+        default=["car", "truck", "bus", "motorcycle", "bicycle", "person"],
+        description="Object classes to detect"
+    )
+
+    # Performance Configuration
+    target_latency_ms: float = Field(
+        default=50.0, ge=10.0, le=1000.0,
+        description="Target ML processing latency in milliseconds"
+    )
+    batch_size: int = Field(
+        default=8, ge=1, le=64,
+        description="ML inference batch size"
+    )
+    enable_gpu_acceleration: bool = Field(
+        default=True, description="Enable GPU acceleration for ML inference"
+    )
+
+    # Annotation Style Configuration
+    show_confidence: bool = Field(
+        default=True, description="Show confidence scores in annotations"
+    )
+    show_class_labels: bool = Field(
+        default=True, description="Show class labels in annotations"
+    )
+    box_thickness: int = Field(
+        default=2, ge=1, le=10, description="Bounding box line thickness"
+    )
+    font_scale: float = Field(
+        default=0.6, ge=0.1, le=2.0, description="Text font scale"
+    )
+
+    # Vehicle-Specific Settings
+    vehicle_priority: bool = Field(
+        default=True, description="Boost confidence for vehicle detections"
+    )
+    emergency_vehicle_detection: bool = Field(
+        default=True, description="Enable emergency vehicle detection"
+    )
+    confidence_boost_factor: float = Field(
+        default=1.1, ge=1.0, le=2.0, description="Vehicle confidence boost factor"
+    )
+
+    # Model Configuration
+    model_path: str = Field(
+        default="models/yolo11n.pt", description="Path to YOLO11 model file"
+    )
+    use_tensorrt: bool = Field(
+        default=True, description="Use TensorRT optimization"
+    )
+    use_fp16: bool = Field(
+        default=True, description="Use FP16 precision"
+    )
+
+    # Streaming Integration
+    enable_metadata_streaming: bool = Field(
+        default=True, description="Stream detection metadata alongside video"
+    )
+    metadata_include_performance: bool = Field(
+        default=True, description="Include performance metrics in metadata"
+    )
+    enable_detection_history: bool = Field(
+        default=True, description="Maintain detection history for analytics"
+    )
+    detection_history_limit: int = Field(
+        default=1000, ge=100, le=10000, description="Maximum detection history entries"
+    )
+
+
 class CompressionConfig(BaseModel):
     """Compression settings."""
 
@@ -402,6 +508,206 @@ class RateLimit(BaseModel):
     """Rate limiting configuration."""
     requests_per_minute: int = Field(default=100, ge=1)
     burst_size: int = Field(default=10, ge=1)
+
+
+class StreamingConfig(BaseModel):
+    """Streaming service configuration."""
+
+    # Core streaming settings
+    min_resolution: tuple[int, int] = Field(
+        default=(640, 480), description="Minimum frame resolution (width, height)"
+    )
+    min_quality_score: float = Field(
+        default=0.5, ge=0.0, le=1.0, description="Minimum quality score threshold"
+    )
+    max_blur_threshold: float = Field(
+        default=100.0, ge=0.0, description="Maximum blur threshold"
+    )
+    max_concurrent_streams: int = Field(
+        default=100, ge=1, description="Maximum concurrent camera streams"
+    )
+    frame_processing_timeout: float = Field(
+        default=0.01, ge=0.001, description="Frame processing timeout in seconds (10ms)"
+    )
+
+    # gRPC server settings
+    grpc_host: str = Field(
+        default="127.0.0.1", description="gRPC server host"
+    )
+    grpc_port: int = Field(
+        default=50051, ge=1024, le=65535, description="gRPC server port"
+    )
+
+    # Performance settings
+    batch_size: int = Field(
+        default=10, ge=1, description="Frame batch size for processing"
+    )
+    queue_max_length: int = Field(
+        default=10000, ge=100, description="Maximum queue length"
+    )
+    worker_threads: int = Field(
+        default=4, ge=1, description="Number of worker threads"
+    )
+
+    # Health monitoring
+    health_check_interval: int = Field(
+        default=30, ge=5, description="Health check interval in seconds"
+    )
+    metrics_collection_interval: int = Field(
+        default=10, ge=1, description="Metrics collection interval in seconds"
+    )
+
+
+class PerformanceConfig(BaseModel):
+    """Performance optimization configuration."""
+
+    # Performance optimization strategy
+    enabled: bool = Field(
+        default=True, description="Enable performance optimization"
+    )
+    strategy: str = Field(
+        default="latency_optimized",
+        description="Optimization strategy: latency_optimized, memory_optimized, balanced"
+    )
+    target_latency_ms: float = Field(
+        default=100.0, ge=10.0, le=1000.0, description="Target end-to-end latency in ms"
+    )
+    max_concurrent_streams: int = Field(
+        default=100, ge=1, le=1000, description="Maximum concurrent streams to optimize for"
+    )
+
+    # GPU optimization
+    gpu_optimization_enabled: bool = Field(
+        default=True, description="Enable GPU memory optimization"
+    )
+    gpu_memory_pool_size_gb: float = Field(
+        default=8.0, ge=1.0, description="GPU memory pool size in GB"
+    )
+    enable_tensorrt: bool = Field(
+        default=True, description="Enable TensorRT optimization"
+    )
+    tensorrt_precision: str = Field(
+        default="fp16", description="TensorRT precision: fp32, fp16, int8"
+    )
+
+    # Caching configuration
+    caching_enabled: bool = Field(
+        default=True, description="Enable multi-level caching"
+    )
+    l1_cache_size_mb: int = Field(
+        default=512, ge=64, description="L1 cache size in MB"
+    )
+    l2_cache_enabled: bool = Field(
+        default=True, description="Enable L2 Redis cache"
+    )
+    cache_ttl_seconds: int = Field(
+        default=300, ge=60, description="Cache TTL in seconds"
+    )
+
+    # Connection pooling
+    redis_pool_size: int = Field(
+        default=50, ge=5, description="Redis connection pool size"
+    )
+    database_pool_size: int = Field(
+        default=20, ge=5, description="Database connection pool size"
+    )
+    ffmpeg_pool_size: int = Field(
+        default=10, ge=2, description="FFMPEG process pool size"
+    )
+
+    # Latency monitoring
+    latency_monitoring_enabled: bool = Field(
+        default=True, description="Enable latency SLA monitoring"
+    )
+    latency_sla_ms: float = Field(
+        default=100.0, ge=10.0, description="Latency SLA in milliseconds"
+    )
+    enable_sla_alerts: bool = Field(
+        default=True, description="Enable SLA violation alerts"
+    )
+
+    # Adaptive quality management
+    adaptive_quality_enabled: bool = Field(
+        default=True, description="Enable adaptive quality management"
+    )
+    default_quality: str = Field(
+        default="high", description="Default quality level: low, medium, high"
+    )
+    quality_adjustment_interval: int = Field(
+        default=30, ge=5, description="Quality adjustment interval in seconds"
+    )
+    priority_camera_ids: list[str] = Field(
+        default_factory=list, description="Priority camera IDs for quality protection"
+    )
+
+
+class SSEStreamingConfig(BaseModel):
+    """SSE (Server-Sent Events) streaming configuration."""
+
+    # Connection management
+    max_concurrent_connections: int = Field(
+        default=100, ge=1, description="Maximum concurrent SSE connections"
+    )
+    fragment_duration_ms: int = Field(
+        default=2000, ge=500, description="MP4 fragment duration in milliseconds"
+    )
+    heartbeat_interval: int = Field(
+        default=30, ge=5, description="Heartbeat interval in seconds"
+    )
+    connection_timeout: int = Field(
+        default=300, ge=60, description="Connection timeout in seconds"
+    )
+
+    # Quality settings
+    quality_presets: dict[str, dict[str, int]] = Field(
+        default={
+            "low": {"bitrate": 500, "jpeg_quality": 60},
+            "medium": {"bitrate": 2000, "jpeg_quality": 85},
+            "high": {"bitrate": 5000, "jpeg_quality": 95},
+        },
+        description="Quality presets for different stream qualities"
+    )
+
+    # Buffer management
+    stream_buffer_size: int = Field(
+        default=100, ge=10, description="Stream buffer size per connection"
+    )
+    fragment_buffer_size: int = Field(
+        default=50, ge=5, description="Fragment buffer size"
+    )
+
+    # Performance optimization
+    enable_compression: bool = Field(
+        default=True, description="Enable fragment compression"
+    )
+    compression_level: int = Field(
+        default=6, ge=1, le=9, description="Compression level (1-9)"
+    )
+
+    # Monitoring
+    enable_metrics: bool = Field(
+        default=True, description="Enable SSE metrics collection"
+    )
+    metrics_interval: int = Field(
+        default=10, ge=1, description="Metrics collection interval in seconds"
+    )
+
+    # Dual-channel settings
+    sync_tolerance_ms: float = Field(
+        default=50.0, ge=1.0, description="Channel synchronization tolerance in milliseconds"
+    )
+    sync_check_interval: float = Field(
+        default=1.0, ge=0.1, description="Synchronization check interval in seconds"
+    )
+    max_sync_violations: int = Field(
+        default=10, ge=1, description="Maximum sync violations before marking stream degraded"
+    )
+    enable_dual_channel: bool = Field(
+        default=True, description="Enable dual-channel streaming support"
+    )
+    channel_switch_timeout: float = Field(
+        default=0.1, ge=0.01, description="Channel switching timeout in seconds"
+    )
 
 
 class Settings(BaseSettings):
@@ -434,10 +740,14 @@ class Settings(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     redis_queue: RedisQueueConfig = Field(default_factory=RedisQueueConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
+    ml_streaming: MLStreamingConfig = Field(default_factory=MLStreamingConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     compression: CompressionConfig = Field(default_factory=CompressionConfig)
     minio: MinIOConfig = Field(default_factory=MinIOConfig)
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)
+    sse_streaming: SSEStreamingConfig = Field(default_factory=SSEStreamingConfig)
+    performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
 
     rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
 

@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "dev:api": "node scripts/dev-server.js",
+    "dev:full": "concurrently \"npm run dev:api\" \"npm run dev\""
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",
@@ -37,9 +39,13 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.0",
+    "cors": "^2.8.5",
     "eslint": "^9",
     "eslint-config-next": "15.4.6",
+    "express": "^5.1.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "ws": "^8.18.3"
   }
 }

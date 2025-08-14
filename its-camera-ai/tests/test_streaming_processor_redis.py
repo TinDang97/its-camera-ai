@@ -86,7 +86,7 @@ class TestRedisStreamProcessor:
         """Test processor startup sequence."""
         with (
             patch(
-                "its_camera_ai.data.redis_queue_manager.RedisQueueManager"
+                "its_camera_ai.flow.redis_queue_manager.RedisQueueManager"
             ) as mock_manager_class,
             patch(
                 "its_camera_ai.data.grpc_serialization.ProcessedFrameSerializer"
@@ -133,7 +133,7 @@ class TestRedisStreamProcessor:
     async def test_frame_enqueuing(self, redis_config, sample_frame_data):
         """Test enqueueing frames for processing."""
         with patch(
-            "its_camera_ai.data.redis_queue_manager.RedisQueueManager"
+            "its_camera_ai.flow.redis_queue_manager.RedisQueueManager"
         ) as mock_manager_class:
             mock_manager = AsyncMock()
             mock_manager_class.return_value = mock_manager

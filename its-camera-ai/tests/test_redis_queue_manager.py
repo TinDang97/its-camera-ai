@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from its_camera_ai.data.redis_queue_manager import (
+from its_camera_ai.flow.redis_queue_manager import (
     QueueConfig,
     QueueMetrics,
     QueueStatus,

@@ -21,7 +21,7 @@ import pytest
 from faker import Faker
 
 from src.its_camera_ai.core.exceptions import CircuitBreakerError, ServiceMeshError
-from src.its_camera_ai.data.redis_queue_manager import RedisQueueManager
+from src.its_camera_ai.flow.redis_queue_manager import RedisQueueManager
 from src.its_camera_ai.services.service_mesh import (
     LoadBalancer,
     LoadBalancingStrategy,
@@ -61,7 +61,9 @@ class TestSystemLoadBenchmarks:
 
     async def setup_service_mesh(self):
         """Set up service mesh for testing."""
-        with patch("src.its_camera_ai.services.service_mesh.redis.from_url") as mock_redis_factory:
+        with patch(
+            "src.its_camera_ai.services.service_mesh.redis.from_url"
+        ) as mock_redis_factory:
             mock_redis_client = AsyncMock()
             mock_redis_client.ping.return_value = True
             mock_redis_client.keys.return_value = []
@@ -86,7 +88,11 @@ class TestSystemLoadBenchmarks:
             # Create diverse camera configurations
             configs = []
             resolutions = [(640, 480), (1280, 720), (1920, 1080), (3840, 2160)]
-            protocols = [StreamProtocol.RTSP, StreamProtocol.HTTP, StreamProtocol.WEBRTC]
+            protocols = [
+                StreamProtocol.RTSP,
+                StreamProtocol.HTTP,
+                StreamProtocol.WEBRTC,
+            ]
 
             for i in range(150):  # 150 cameras (above 100 requirement)
                 config = CameraConfig(
@@ -101,14 +107,21 @@ class TestSystemLoadBenchmarks:
 
             # Register all cameras
             with patch.object(
-                self.streaming_processor.connection_manager, "connect_camera", return_value=True
+                self.streaming_processor.connection_manager,
+                "connect_camera",
+                return_value=True,
             ):
                 registration_start = time.perf_counter()
-                tasks = [self.streaming_processor.register_camera(config) for config in configs]
+                tasks = [
+                    self.streaming_processor.register_camera(config)
+                    for config in configs
+                ]
                 registrations = await asyncio.gather(*tasks)
                 registration_time = time.perf_counter() - registration_start
 
-                successful_registrations = sum(1 for reg in registrations if reg.success)
+                successful_registrations = sum(
+                    1 for reg in registrations if reg.success
+                )
 
                 # Simulate continuous frame processing for 10 seconds
                 processing_start = time.perf_counter()
@@ -126,8 +139,10 @@ class TestSystemLoadBenchmarks:
                         frame = np.random.randint(0, 255, (h, w, 3), dtype=np.uint8)
 
                         try:
-                            result = await self.streaming_processor._process_single_frame(
-                                config.camera_id, frame, config
+                            result = (
+                                await self.streaming_processor._process_single_frame(
+                                    config.camera_id, frame, config
+                                )
                             )
                             if result:
                                 frames_for_camera += 1
@@ -141,7 +156,10 @@ class TestSystemLoadBenchmarks:
                     return frames_for_camera
 
                 # Process frames for all cameras concurrently
-                camera_tasks = [process_camera_frames(config) for config in configs[:successful_registrations]]
+                camera_tasks = [
+                    process_camera_frames(config)
+                    for config in configs[:successful_registrations]
+                ]
                 await asyncio.gather(*camera_tasks, return_exceptions=True)
 
                 actual_processing_time = time.perf_counter() - processing_start
@@ -161,7 +179,9 @@ class TestSystemLoadBenchmarks:
                     "success_rate": successful_registrations / len(configs),
                 }
 
-        result = await benchmark.pedantic(simulate_realistic_workload, rounds=1, iterations=1)
+        result = await benchmark.pedantic(
+            simulate_realistic_workload, rounds=1, iterations=1
+        )
 
         print("\\nSystem Throughput Benchmark Results:")
         print(f"Total cameras: {result['total_cameras']}")
@@ -172,9 +192,13 @@ class TestSystemLoadBenchmarks:
         print(f"System success rate: {result['success_rate']*100:.1f}%")
 
         # Validate performance requirements
-        assert result['successful_registrations'] >= 150, "Should handle 150+ cameras"
-        assert result['success_rate'] >= 0.99, f"Success rate {result['success_rate']*100:.1f}% too low"
-        assert result['fps_throughput'] >= 1000, f"Throughput {result['fps_throughput']:.1f} fps too low"
+        assert result["successful_registrations"] >= 150, "Should handle 150+ cameras"
+        assert (
+            result["success_rate"] >= 0.99
+        ), f"Success rate {result['success_rate']*100:.1f}% too low"
+        assert (
+            result["fps_throughput"] >= 1000
+        ), f"Throughput {result['fps_throughput']:.1f} fps too low"
 
         await self.streaming_processor.stop()
 
@@ -205,17 +229,24 @@ class TestSystemLoadBenchmarks:
                 configs.append(config)
 
             with patch.object(
-                self.streaming_processor.connection_manager, "connect_camera", return_value=True
+                self.streaming_processor.connection_manager,
+                "connect_camera",
+                return_value=True,
             ):
                 # Register cameras and process frames
-                tasks = [self.streaming_processor.register_camera(config) for config in configs]
+                tasks = [
+                    self.streaming_processor.register_camera(config)
+                    for config in configs
+                ]
                 await asyncio.gather(*tasks)
 
                 # Process several batches of frames
                 for _batch in range(10):
                     frame_tasks = []
                     for config in configs:
-                        frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
+                        frame = np.random.randint(
+                            0, 255, (720, 1280, 3), dtype=np.uint8
+                        )
                         frame_tasks.append(
                             self.streaming_processor._process_single_frame(
                                 config.camera_id, frame, config
@@ -231,7 +262,9 @@ class TestSystemLoadBenchmarks:
                     "baseline": baseline_memory,
                     "peak": peak_memory,
                     "increase": memory_increase,
-                    "per_camera": memory_increase / camera_count if camera_count > 0 else 0,
+                    "per_camera": (
+                        memory_increase / camera_count if camera_count > 0 else 0
+                    ),
                 }
 
             # Clean up for next iteration
@@ -249,12 +282,16 @@ class TestSystemLoadBenchmarks:
 
         # Validate memory requirements
         for camera_count, metrics in memory_metrics.items():
-            assert metrics['peak'] < 4096, f"Memory {metrics['peak']:.1f}MB exceeds 4GB at {camera_count} cameras"
+            assert (
+                metrics["peak"] < 4096
+            ), f"Memory {metrics['peak']:.1f}MB exceeds 4GB at {camera_count} cameras"
 
         # Memory scaling should be reasonable
         max_cameras = max(camera_counts)
-        max_memory_increase = memory_metrics[max_cameras]['increase']
-        assert max_memory_increase < 3072, f"Memory increase {max_memory_increase:.1f}MB too high"
+        max_memory_increase = memory_metrics[max_cameras]["increase"]
+        assert (
+            max_memory_increase < 3072
+        ), f"Memory increase {max_memory_increase:.1f}MB too high"
 
         await self.streaming_processor.stop()
 
@@ -294,7 +331,9 @@ class TestSystemLoadBenchmarks:
                     except Exception:
                         pass
 
-            avg_normal_latency = sum(normal_load_results) / len(normal_load_results) * 1000  # ms
+            avg_normal_latency = (
+                sum(normal_load_results) / len(normal_load_results) * 1000
+            )  # ms
 
             # Test circuit breaker with failures
             failure_scenarios = [0.1, 0.3, 0.5, 0.8]  # Different failure rates
@@ -326,7 +365,9 @@ class TestSystemLoadBenchmarks:
                             scenario_errors += 1
 
                 if scenario_results:
-                    avg_latency = sum(scenario_results) / len(scenario_results) * 1000  # ms
+                    avg_latency = (
+                        sum(scenario_results) / len(scenario_results) * 1000
+                    )  # ms
                 else:
                     avg_latency = 0
 
@@ -342,7 +383,7 @@ class TestSystemLoadBenchmarks:
             print(f"Normal load average latency: {avg_normal_latency:.2f}ms")
 
             for failure_rate, metrics in circuit_breaker_metrics.items():
-                success_rate = metrics['successful_calls'] / metrics['total_calls']
+                success_rate = metrics["successful_calls"] / metrics["total_calls"]
                 print(
                     f"Failure rate {failure_rate*100:3.0f}%: "
                     f"Success={success_rate*100:.1f}%, "
@@ -352,12 +393,18 @@ class TestSystemLoadBenchmarks:
 
             # Validate circuit breaker effectiveness
             for failure_rate, metrics in circuit_breaker_metrics.items():
-                if failure_rate > 0.5:  # High failure rates should trigger circuit breakers
-                    assert metrics['circuit_opens'] > 0, f"Circuit breaker should open at {failure_rate*100}% failure rate"
+                if (
+                    failure_rate > 0.5
+                ):  # High failure rates should trigger circuit breakers
+                    assert (
+                        metrics["circuit_opens"] > 0
+                    ), f"Circuit breaker should open at {failure_rate*100}% failure rate"
 
                 # Latency should remain reasonable even with failures
-                if metrics['avg_latency'] > 0:
-                    assert metrics['avg_latency'] < 50.0, f"Latency too high during failures: {metrics['avg_latency']:.2f}ms"
+                if metrics["avg_latency"] > 0:
+                    assert (
+                        metrics["avg_latency"] < 50.0
+                    ), f"Latency too high during failures: {metrics['avg_latency']:.2f}ms"
 
         finally:
             await self.teardown_service_mesh()
@@ -415,7 +462,9 @@ class TestSystemLoadBenchmarks:
                 from collections import Counter
 
                 distribution = Counter(selections)
-                avg_decision_time = sum(decision_times) * 1000 / len(decision_times)  # microseconds
+                avg_decision_time = (
+                    sum(decision_times) * 1000 / len(decision_times)
+                )  # microseconds
 
                 performance_results[strategy.value] = {
                     "avg_decision_time_us": avg_decision_time,
@@ -426,21 +475,25 @@ class TestSystemLoadBenchmarks:
             print("\\nLoad Balancer Performance Analysis:")
             for strategy, metrics in performance_results.items():
                 print(f"Strategy {strategy}:")
-                print(f"  Average decision time: {metrics['avg_decision_time_us']:.1f} μs")
+                print(
+                    f"  Average decision time: {metrics['avg_decision_time_us']:.1f} μs"
+                )
                 print(f"  Distribution: {metrics['distribution']}")
 
                 # Validate performance requirements
-                assert metrics['avg_decision_time_us'] < 100, (
-                    f"Load balancing decision too slow: {metrics['avg_decision_time_us']:.1f} μs"
-                )
+                assert (
+                    metrics["avg_decision_time_us"] < 100
+                ), f"Load balancing decision too slow: {metrics['avg_decision_time_us']:.1f} μs"
 
                 # Distribution should be reasonable (no single endpoint getting >60% of traffic)
-                total_requests = metrics['total_decisions']
-                for _port, count in metrics['distribution'].items():
+                total_requests = metrics["total_decisions"]
+                for _port, count in metrics["distribution"].items():
                     percentage = count / total_requests
                     if strategy == "round_robin":
                         # Round robin should be very even
-                        assert percentage < 0.25, f"Uneven distribution in round robin: {percentage*100:.1f}%"
+                        assert (
+                            percentage < 0.25
+                        ), f"Uneven distribution in round robin: {percentage*100:.1f}%"
 
         finally:
             await self.teardown_service_mesh()
@@ -481,13 +534,22 @@ class TestSystemLoadBenchmarks:
                     configs.append(config)
 
                 with patch.object(
-                    self.streaming_processor.connection_manager, "connect_camera", return_value=True
+                    self.streaming_processor.connection_manager,
+                    "connect_camera",
+                    return_value=True,
                 ):
                     # Register cameras
-                    registration_tasks = [self.streaming_processor.register_camera(config) for config in configs]
-                    registrations = await asyncio.gather(*registration_tasks, return_exceptions=True)
+                    registration_tasks = [
+                        self.streaming_processor.register_camera(config)
+                        for config in configs
+                    ]
+                    registrations = await asyncio.gather(
+                        *registration_tasks, return_exceptions=True
+                    )
                     successful_registrations = sum(
-                        1 for reg in registrations if hasattr(reg, "success") and reg.success
+                        1
+                        for reg in registrations
+                        if hasattr(reg, "success") and reg.success
                     )
 
                     # Process frames under failure conditions
@@ -500,10 +562,14 @@ class TestSystemLoadBenchmarks:
                         batch_tasks = []
 
                         for config in configs[:successful_registrations]:
-                            frame = np.random.randint(0, 255, (720, 1280, 3), dtype=np.uint8)
+                            frame = np.random.randint(
+                                0, 255, (720, 1280, 3), dtype=np.uint8
+                            )
 
                             # Apply scenario-specific conditions
-                            async def process_with_scenario(camera_id, frame, config, scenario):
+                            async def process_with_scenario(
+                                camera_id, frame, config, scenario
+                            ):
                                 nonlocal total_frames, successful_frames, errors
 
                                 start_time = time.perf_counter()
@@ -511,11 +577,18 @@ class TestSystemLoadBenchmarks:
                                 try:
                                     # Simulate scenario conditions
                                     if scenario["name"] == "network_delays":
-                                        delay = np.random.uniform(*scenario["delay_range"])
+                                        delay = np.random.uniform(
+                                            *scenario["delay_range"]
+                                        )
                                         await asyncio.sleep(delay)
                                     elif scenario["name"] == "service_intermittent":
-                                        if np.random.random() < scenario["failure_rate"]:
-                                            raise ServiceMeshError("Intermittent service failure")
+                                        if (
+                                            np.random.random()
+                                            < scenario["failure_rate"]
+                                        ):
+                                            raise ServiceMeshError(
+                                                "Intermittent service failure"
+                                            )
 
                                     result = await self.streaming_processor._process_single_frame(
                                         camera_id, frame, config
@@ -534,13 +607,17 @@ class TestSystemLoadBenchmarks:
                                     total_frames += 1
 
                             batch_tasks.append(
-                                process_with_scenario(config.camera_id, frame, config, scenario)
+                                process_with_scenario(
+                                    config.camera_id, frame, config, scenario
+                                )
                             )
 
                         await asyncio.gather(*batch_tasks, return_exceptions=True)
 
                     # Calculate resilience metrics
-                    success_rate = successful_frames / total_frames if total_frames > 0 else 0
+                    success_rate = (
+                        successful_frames / total_frames if total_frames > 0 else 0
+                    )
                     avg_latency = sum(latencies) / len(latencies) if latencies else 0
                     error_rate = errors / total_frames if total_frames > 0 else 0
 
@@ -563,14 +640,16 @@ class TestSystemLoadBenchmarks:
                 )
 
                 # Validate resilience requirements
-                if scenario_name != "concurrent_overload":  # Overload scenario may have lower success rates
-                    assert metrics['success_rate'] >= 0.95, (
-                        f"Success rate too low in {scenario_name}: {metrics['success_rate']*100:.1f}%"
-                    )
+                if (
+                    scenario_name != "concurrent_overload"
+                ):  # Overload scenario may have lower success rates
+                    assert (
+                        metrics["success_rate"] >= 0.95
+                    ), f"Success rate too low in {scenario_name}: {metrics['success_rate']*100:.1f}%"
 
-                assert metrics['avg_latency'] < 50.0, (
-                    f"Latency too high in {scenario_name}: {metrics['avg_latency']:.1f}ms"
-                )
+                assert (
+                    metrics["avg_latency"] < 50.0
+                ), f"Latency too high in {scenario_name}: {metrics['avg_latency']:.1f}ms"
 
         finally:
             await self.teardown_service_mesh()
@@ -595,4 +674,5 @@ def pytest_configure(config):
 if __name__ == "__main__":
     # Run performance tests
     import sys
+
     sys.exit(pytest.main(["-v", "-m", "performance", __file__]))

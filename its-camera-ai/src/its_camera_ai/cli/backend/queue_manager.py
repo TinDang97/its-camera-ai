@@ -12,7 +12,7 @@ from typing import Any
 
 from ...core.config import Settings, get_settings
 from ...core.logging import get_logger
-from ...data.redis_queue_manager import (
+from ...flow.redis_queue_manager import (
     QueueConfig,
     QueueType,
     RedisQueueManager,
@@ -42,7 +42,7 @@ class CLIQueueManager:
             redis_url=self.settings.redis_queue.url,
             pool_size=self.settings.redis_queue.pool_size,
             timeout=self.settings.redis_queue.timeout,
-            retry_on_failure=self.settings.redis_queue.retry_on_failure
+            retry_on_failure=self.settings.redis_queue.retry_on_failure,
         )
 
         # Task handlers
@@ -64,7 +64,7 @@ class CLIQueueManager:
                 consumer_group="cli_workers",
                 consumer_name="cli",
                 batch_size=10,
-                max_length=1000
+                max_length=1000,
             ),
             "background_jobs": QueueConfig(
                 name="background_jobs",
@@ -72,19 +72,17 @@ class CLIQueueManager:
                 consumer_group="job_workers",
                 consumer_name="cli",
                 batch_size=5,
-                max_length=500
+                max_length=500,
             ),
             "events": QueueConfig(
-                name="system_events",
-                queue_type=QueueType.PUBSUB,
-                batch_size=1
+                name="system_events", queue_type=QueueType.PUBSUB, batch_size=1
             ),
             "notifications": QueueConfig(
                 name="cli_notifications",
                 queue_type=QueueType.LIST,
                 batch_size=20,
-                max_length=100
-            )
+                max_length=100,
+            ),
         }
 
     async def initialize(self) -> None:
@@ -133,7 +131,7 @@ class CLIQueueManager:
         task_type: str,
         task_data: dict[str, Any],
         priority: int = 0,
-        queue: str = "cli_tasks"
+        queue: str = "cli_tasks",
     ) -> str:
         """Submit a background task.
 
@@ -153,24 +151,22 @@ class CLIQueueManager:
             "task_type": task_type,
             "task_data": task_data,
             "submitted_at": time.time(),
-            "submitted_by": "cli"
+            "submitted_by": "cli",
         }
 
         task_json = json.dumps(task_payload)
         task_id = await self._redis_manager.enqueue(
             queue_name=queue,
-            data=task_json.encode('utf-8'),
+            data=task_json.encode("utf-8"),
             priority=priority,
-            metadata={"task_type": task_type}
+            metadata={"task_type": task_type},
         )
 
         logger.info(f"Submitted task {task_type} with ID: {task_id}")
         return task_id
 
     async def submit_batch_tasks(
-        self,
-        tasks: list[dict[str, Any]],
-        queue: str = "cli_tasks"
+        self, tasks: list[dict[str, Any]], queue: str = "cli_tasks"
     ) -> list[str]:
         """Submit multiple tasks in batch.
 
@@ -193,10 +189,10 @@ class CLIQueueManager:
                 "task_type": task["task_type"],
                 "task_data": task.get("task_data", {}),
                 "submitted_at": time.time(),
-                "submitted_by": "cli"
+                "submitted_by": "cli",
             }
 
-            task_payloads.append(json.dumps(payload).encode('utf-8'))
+            task_payloads.append(json.dumps(payload).encode("utf-8"))
             priorities.append(task.get("priority", 0))
             metadata_batch.append({"task_type": task["task_type"]})
 
@@ -204,7 +200,7 @@ class CLIQueueManager:
             queue_name=queue,
             data_batch=task_payloads,
             priorities=priorities,
-            metadata_batch=metadata_batch
+            metadata_batch=metadata_batch,
         )
 
         logger.info(f"Submitted {len(tasks)} tasks in batch")
@@ -221,10 +217,7 @@ class CLIQueueManager:
         logger.info(f"Registered handler for task type: {task_type}")
 
     async def process_tasks(
-        self,
-        queue: str = "cli_tasks",
-        max_tasks: int | None = None,
-        timeout: int = 30
+        self, queue: str = "cli_tasks", max_tasks: int | None = None, timeout: int = 30
     ) -> int:
         """Process tasks from queue.
 
@@ -245,8 +238,7 @@ class CLIQueueManager:
             while max_tasks is None or processed_count < max_tasks:
                 # Get task from queue
                 result = await self._redis_manager.dequeue(
-                    queue_name=queue,
-                    timeout_ms=timeout * 1000
+                    queue_name=queue, timeout_ms=timeout * 1000
                 )
 
                 if not result:
@@ -256,7 +248,7 @@ class CLIQueueManager:
 
                 try:
                     # Parse task data
-                    task_payload = json.loads(task_data.decode('utf-8'))
+                    task_payload = json.loads(task_data.decode("utf-8"))
                     task_type = task_payload.get("task_type")
 
                     if task_type in self._task_handlers:
@@ -271,17 +263,19 @@ class CLIQueueManager:
                         await self._redis_manager.acknowledge(
                             queue_name=queue,
                             message_id=task_id,
-                            processing_time_ms=processing_time
+                            processing_time_ms=processing_time,
                         )
 
                         processed_count += 1
-                        logger.debug(f"Processed task {task_type} in {processing_time:.2f}ms")
+                        logger.debug(
+                            f"Processed task {task_type} in {processing_time:.2f}ms"
+                        )
                     else:
                         # No handler for task type
                         await self._redis_manager.reject(
                             queue_name=queue,
                             message_id=task_id,
-                            reason=f"No handler for task type: {task_type}"
+                            reason=f"No handler for task type: {task_type}",
                         )
 
                         logger.warning(f"No handler for task type: {task_type}")
@@ -291,7 +285,7 @@ class CLIQueueManager:
                     await self._redis_manager.reject(
                         queue_name=queue,
                         message_id=task_id,
-                        reason=f"Task processing failed: {str(e)}"
+                        reason=f"Task processing failed: {str(e)}",
                     )
 
                     logger.error(f"Task processing failed: {e}")
@@ -305,10 +299,7 @@ class CLIQueueManager:
     # Event Management
 
     async def publish_event(
-        self,
-        event_type: str,
-        event_data: dict[str, Any],
-        queue: str = "events"
+        self, event_type: str, event_data: dict[str, Any], queue: str = "events"
     ) -> bool:
         """Publish an event.
 
@@ -327,15 +318,15 @@ class CLIQueueManager:
             "event_type": event_type,
             "event_data": event_data,
             "timestamp": time.time(),
-            "source": "cli"
+            "source": "cli",
         }
 
         try:
             event_json = json.dumps(event_payload)
             await self._redis_manager.enqueue(
                 queue_name=queue,
-                data=event_json.encode('utf-8'),
-                metadata={"event_type": event_type}
+                data=event_json.encode("utf-8"),
+                metadata={"event_type": event_type},
             )
 
             logger.debug(f"Published event {event_type}")
@@ -349,7 +340,7 @@ class CLIQueueManager:
         self,
         event_handler: Callable,
         event_types: list[str] | None = None,
-        queue: str = "events"
+        queue: str = "events",
     ) -> None:
         """Subscribe to events and process them.
 
@@ -366,15 +357,14 @@ class CLIQueueManager:
         try:
             while True:
                 result = await self._redis_manager.dequeue(
-                    queue_name=queue,
-                    timeout_ms=5000  # 5 second timeout
+                    queue_name=queue, timeout_ms=5000  # 5 second timeout
                 )
 
                 if result:
                     event_id, event_data = result
 
                     try:
-                        event_payload = json.loads(event_data.decode('utf-8'))
+                        event_payload = json.loads(event_data.decode("utf-8"))
                         event_type = event_payload.get("event_type")
 
                         # Filter by event types if specified
@@ -383,8 +373,7 @@ class CLIQueueManager:
 
                         # Acknowledge event processing
                         await self._redis_manager.acknowledge(
-                            queue_name=queue,
-                            message_id=event_id
+                            queue_name=queue, message_id=event_id
                         )
 
                     except Exception as e:
@@ -392,7 +381,7 @@ class CLIQueueManager:
                         await self._redis_manager.reject(
                             queue_name=queue,
                             message_id=event_id,
-                            reason=f"Event processing failed: {str(e)}"
+                            reason=f"Event processing failed: {str(e)}",
                         )
 
         except asyncio.CancelledError:
@@ -403,10 +392,7 @@ class CLIQueueManager:
     # Notification Management
 
     async def send_notification(
-        self,
-        message: str,
-        level: str = "info",
-        metadata: dict[str, Any] | None = None
+        self, message: str, level: str = "info", metadata: dict[str, Any] | None = None
     ) -> bool:
         """Send a notification message.
 
@@ -423,14 +409,13 @@ class CLIQueueManager:
             "level": level,
             "timestamp": time.time(),
             "source": "cli",
-            "metadata": metadata or {}
+            "metadata": metadata or {},
         }
 
         try:
             notification_json = json.dumps(notification)
             await self._redis_manager.enqueue(
-                queue_name="notifications",
-                data=notification_json.encode('utf-8')
+                queue_name="notifications", data=notification_json.encode("utf-8")
             )
 
             logger.debug(f"Sent notification: {message}")
@@ -440,10 +425,7 @@ class CLIQueueManager:
             logger.error(f"Failed to send notification: {e}")
             return False
 
-    async def get_notifications(
-        self,
-        count: int = 10
-    ) -> list[dict[str, Any]]:
+    async def get_notifications(self, count: int = 10) -> list[dict[str, Any]]:
         """Get recent notifications.
 
         Args:
@@ -460,13 +442,12 @@ class CLIQueueManager:
         try:
             for _ in range(count):
                 result = await self._redis_manager.dequeue(
-                    queue_name="notifications",
-                    timeout_ms=100  # Short timeout
+                    queue_name="notifications", timeout_ms=100  # Short timeout
                 )
 
                 if result:
                     _, notification_data = result
-                    notification = json.loads(notification_data.decode('utf-8'))
+                    notification = json.loads(notification_data.decode("utf-8"))
                     notifications.append(notification)
                 else:
                     break  # No more notifications
@@ -502,7 +483,7 @@ class CLIQueueManager:
                 "avg_processing_time_ms": metrics.avg_processing_time_ms,
                 "throughput_fps": metrics.throughput_fps,
                 "memory_usage_bytes": metrics.memory_usage_bytes,
-                "last_updated": metrics.last_updated
+                "last_updated": metrics.last_updated,
             }
 
         return None
@@ -551,7 +532,7 @@ class CLIQueueManager:
         if not self._initialized:
             return {
                 "status": "not_initialized",
-                "error": "Queue manager not initialized"
+                "error": "Queue manager not initialized",
             }
 
         return await self._redis_manager.health_check()
@@ -567,5 +548,5 @@ class CLIQueueManager:
             "redis_status": self._redis_manager.get_status().value,
             "configured_queues": list(self._queue_configs.keys()),
             "registered_handlers": list(self._task_handlers.keys()),
-            "redis_url": self.settings.redis_queue.url
+            "redis_url": self.settings.redis_queue.url,
         }

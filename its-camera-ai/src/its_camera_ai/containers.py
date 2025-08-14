@@ -196,14 +196,28 @@ class ServiceContainer(containers.DeclarativeContainer):
         metrics_repository=repositories.metrics_repository,
     )
 
-    # Streaming Service - Singleton for shared processing state
+    # Streaming Data Processor - Singleton for shared processing state
+    streaming_data_processor = providers.Singleton(
+        "its_camera_ai.services.streaming_service.StreamingDataProcessor",
+        redis_client=infrastructure.redis_client,
+        max_concurrent_streams=config.streaming.max_concurrent_streams,
+        frame_processing_timeout=config.streaming.frame_processing_timeout,
+    )
+
+    # Main Streaming Service - Independent service with CLI support
     streaming_service = providers.Singleton(
         "its_camera_ai.services.streaming_service.StreamingService",
-        camera_service=camera_service,
-        frame_service=frame_service,
-        detection_service=detection_service,
-        metrics_service=metrics_service,
+        streaming_processor=streaming_data_processor,
+        redis_manager=infrastructure.redis_client,
         config=config.streaming,
+    )
+
+    # SSE Streaming Service for browser-native video viewing
+    sse_streaming_service = providers.Singleton(
+        "its_camera_ai.services.streaming_service.SSEStreamingService",
+        base_streaming_service=streaming_service,
+        redis_manager=infrastructure.redis_client,
+        config=config.sse_streaming,
     )
 
     # Analytics Service - Factory for per-request instances

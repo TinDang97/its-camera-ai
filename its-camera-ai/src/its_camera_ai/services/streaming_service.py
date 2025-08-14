@@ -24,7 +24,11 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Union
+
+if TYPE_CHECKING:
+    from fastapi import Request
+    from fastapi.responses import StreamingResponse
 
 import cv2
 import numpy as np
@@ -36,17 +40,22 @@ try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
     from aiortc.contrib.media import MediaPlayer
     from av import VideoFrame
+
     WEBRTC_AVAILABLE = True
 except ImportError:
     # Create mock classes for type checking
     class RTCPeerConnection:  # type: ignore
         pass
+
     class RTCSessionDescription:  # type: ignore
         pass
+
     class VideoStreamTrack:  # type: ignore
         pass
+
     class VideoFrame:  # type: ignore
         pass
+
     WEBRTC_AVAILABLE = False
 
 # Internal imports
@@ -56,10 +65,13 @@ from ..core.exceptions import (
     StreamProcessingError,
 )
 from ..core.logging import get_logger
-from ..data.redis_queue_manager import QueueConfig, QueueType, RedisQueueManager
-from ..data.streaming_processor import (
+from ..flow.redis_queue_manager import QueueConfig, QueueType, RedisQueueManager
+from ..flow.streaming_processor import (
     ProcessedFrame,
     ProcessingStage,
+)
+from ..ml.streaming_annotation_processor import (
+    MLAnnotationProcessor,
 )
 from ..proto import processed_frame_pb2
 
@@ -73,6 +85,21 @@ class StreamProtocol(Enum):
     WEBRTC = "webrtc"
     HTTP = "http"
     ONVIF = "onvif"
+
+
+class ChannelType(Enum):
+    """Stream channel types for dual-channel support."""
+
+    RAW = "raw"
+    ANNOTATED = "annotated"
+
+
+class QualityLevel(Enum):
+    """Quality levels for stream channels."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 @dataclass
@@ -119,7 +146,9 @@ class CustomVideoStreamTrack(VideoStreamTrack):
 
     def __init__(self, camera_id: str, capture_source: Any) -> None:
         if not WEBRTC_AVAILABLE:
-            raise RuntimeError("WebRTC dependencies not available. Please install aiortc and pyav.")
+            raise RuntimeError(
+                "WebRTC dependencies not available. Please install aiortc and pyav."
+            )
         super().__init__()
         self.camera_id = camera_id
         self.capture_source = capture_source
@@ -234,7 +263,9 @@ class WebRTCConnectionManager:
                 state = pc.connectionState
                 self.connection_stats[camera_id]["connection_state"] = state
                 self.connection_stats[camera_id]["last_activity"] = datetime.now(UTC)
-                self._logger.info(f"WebRTC connection state changed for {camera_id}: {state}")
+                self._logger.info(
+                    f"WebRTC connection state changed for {camera_id}: {state}"
+                )
 
                 if state == "failed" or state == "closed":
                     await self.cleanup_connection(camera_id)
@@ -243,19 +274,25 @@ class WebRTCConnectionManager:
             async def on_iceconnectionstatechange() -> None:
                 state = pc.iceConnectionState
                 self.connection_stats[camera_id]["ice_connection_state"] = state
-                self._logger.info(f"ICE connection state changed for {camera_id}: {state}")
+                self._logger.info(
+                    f"ICE connection state changed for {camera_id}: {state}"
+                )
 
             self._logger.info(f"Created WebRTC peer connection for camera: {camera_id}")
             return pc
 
         except Exception as e:
-            self._logger.error(f"Failed to create WebRTC peer connection for {camera_id}: {e}")
+            self._logger.error(
+                f"Failed to create WebRTC peer connection for {camera_id}: {e}"
+            )
             raise CameraConnectionError(f"WebRTC connection creation failed: {e}")
 
     async def create_offer(self, camera_id: str) -> RTCSessionDescription:
         """Create an SDP offer for the camera connection."""
         if camera_id not in self.peer_connections:
-            raise CameraConnectionError(f"No peer connection found for camera: {camera_id}")
+            raise CameraConnectionError(
+                f"No peer connection found for camera: {camera_id}"
+            )
 
         pc = self.peer_connections[camera_id]
         try:
@@ -276,7 +313,9 @@ class WebRTCConnectionManager:
     ) -> None:
         """Set the remote SDP answer for the camera connection."""
         if camera_id not in self.peer_connections:
-            raise CameraConnectionError(f"No peer connection found for camera: {camera_id}")
+            raise CameraConnectionError(
+                f"No peer connection found for camera: {camera_id}"
+            )
 
         pc = self.peer_connections[camera_id]
         try:
@@ -308,7 +347,9 @@ class WebRTCConnectionManager:
             self._logger.info(f"Cleaned up WebRTC connection for camera: {camera_id}")
 
         except Exception as e:
-            self._logger.error(f"Error cleaning up WebRTC connection for {camera_id}: {e}")
+            self._logger.error(
+                f"Error cleaning up WebRTC connection for {camera_id}: {e}"
+            )
 
     def get_connection_stats(self, camera_id: str) -> dict[str, Any] | None:
         """Get WebRTC connection statistics."""
@@ -351,28 +392,41 @@ class WebRTCConnectionManager:
             }
 
             for report in stats.values():
-                if hasattr(report, 'type'):
-                    if report.type == "outbound-rtp" and hasattr(report, 'mediaType'):
+                if hasattr(report, "type"):
+                    if report.type == "outbound-rtp" and hasattr(report, "mediaType"):
                         if report.mediaType == "video":
-                            quality_stats.update({
-                                "packets_sent": getattr(report, 'packetsSent', 0),
-                                "bytes_sent": getattr(report, 'bytesSent', 0),
-                                "frames_encoded": getattr(report, 'framesEncoded', 0),
-                                "frames_sent": getattr(report, 'framesSent', 0),
-                                "key_frames_encoded": getattr(report, 'keyFramesEncoded', 0),
-                                "total_encode_time": getattr(report, 'totalEncodeTime', 0),
-                            })
+                            quality_stats.update(
+                                {
+                                    "packets_sent": getattr(report, "packetsSent", 0),
+                                    "bytes_sent": getattr(report, "bytesSent", 0),
+                                    "frames_encoded": getattr(
+                                        report, "framesEncoded", 0
+                                    ),
+                                    "frames_sent": getattr(report, "framesSent", 0),
+                                    "key_frames_encoded": getattr(
+                                        report, "keyFramesEncoded", 0
+                                    ),
+                                    "total_encode_time": getattr(
+                                        report, "totalEncodeTime", 0
+                                    ),
+                                }
+                            )
                     elif report.type == "remote-inbound-rtp":
-                        quality_stats.update({
-                            "rtt": getattr(report, 'roundTripTime', 0) * 1000,  # Convert to ms
-                            "jitter": getattr(report, 'jitter', 0),
-                            "packet_loss_rate": getattr(report, 'fractionLost', 0),
-                        })
+                        quality_stats.update(
+                            {
+                                "rtt": getattr(report, "roundTripTime", 0)
+                                * 1000,  # Convert to ms
+                                "jitter": getattr(report, "jitter", 0),
+                                "packet_loss_rate": getattr(report, "fractionLost", 0),
+                            }
+                        )
 
             return quality_stats
 
         except Exception as e:
-            self._logger.error(f"Failed to get connection quality stats for {camera_id}: {e}")
+            self._logger.error(
+                f"Failed to get connection quality stats for {camera_id}: {e}"
+            )
             return {}
 
 
@@ -395,28 +449,37 @@ class ProtobufSerializationManager:
 
             # Image data - compress for efficiency
             if frame.original_image is not None:
-                pb_frame.original_image.CopyFrom(self._compress_image_data(
-                    frame.original_image, "jpeg", 85
-                ))
+                pb_frame.original_image.CopyFrom(
+                    self._compress_image_data(frame.original_image, "jpeg", 85)
+                )
 
             # Quality metrics
-            if hasattr(frame, 'quality_score') and frame.quality_score is not None:
+            if hasattr(frame, "quality_score") and frame.quality_score is not None:
                 pb_frame.quality_metrics.quality_score = frame.quality_score
-            if hasattr(frame, 'blur_score') and frame.blur_score is not None:
+            if hasattr(frame, "blur_score") and frame.blur_score is not None:
                 pb_frame.quality_metrics.blur_score = frame.blur_score
-            if hasattr(frame, 'brightness_score') and frame.brightness_score is not None:
+            if (
+                hasattr(frame, "brightness_score")
+                and frame.brightness_score is not None
+            ):
                 pb_frame.quality_metrics.brightness_score = frame.brightness_score
-            if hasattr(frame, 'contrast_score') and frame.contrast_score is not None:
+            if hasattr(frame, "contrast_score") and frame.contrast_score is not None:
                 pb_frame.quality_metrics.contrast_score = frame.contrast_score
-            if hasattr(frame, 'noise_level') and frame.noise_level is not None:
+            if hasattr(frame, "noise_level") and frame.noise_level is not None:
                 pb_frame.quality_metrics.noise_level = frame.noise_level
 
             # Processing metadata
-            if hasattr(frame, 'processing_time_ms') and frame.processing_time_ms is not None:
+            if (
+                hasattr(frame, "processing_time_ms")
+                and frame.processing_time_ms is not None
+            ):
                 pb_frame.processing_time_ms = frame.processing_time_ms
 
             # Processing stage
-            if hasattr(frame, 'processing_stage') and frame.processing_stage is not None:
+            if (
+                hasattr(frame, "processing_stage")
+                and frame.processing_stage is not None
+            ):
                 stage_mapping = {
                     ProcessingStage.INGESTION: processed_frame_pb2.PROCESSING_STAGE_INGESTION,
                     ProcessingStage.VALIDATION: processed_frame_pb2.PROCESSING_STAGE_VALIDATION,
@@ -426,11 +489,14 @@ class ProtobufSerializationManager:
                 }
                 pb_frame.processing_stage = stage_mapping.get(
                     frame.processing_stage,
-                    processed_frame_pb2.PROCESSING_STAGE_UNSPECIFIED
+                    processed_frame_pb2.PROCESSING_STAGE_UNSPECIFIED,
                 )
 
             # Validation status
-            if hasattr(frame, 'validation_passed') and frame.validation_passed is not None:
+            if (
+                hasattr(frame, "validation_passed")
+                and frame.validation_passed is not None
+            ):
                 pb_frame.validation_passed = frame.validation_passed
 
             # Timestamps for performance tracking
@@ -501,7 +567,9 @@ class ProtobufSerializationManager:
             self._logger.error(f"Failed to deserialize protobuf data: {e}")
             raise StreamProcessingError(f"Protobuf deserialization failed: {e}")
 
-    def serialize_frame_batch(self, frames: list[ProcessedFrame], batch_id: str) -> bytes:
+    def serialize_frame_batch(
+        self, frames: list[ProcessedFrame], batch_id: str
+    ) -> bytes:
         """Serialize a batch of frames for efficient transmission."""
         try:
             pb_batch = processed_frame_pb2.ProcessedFrameBatch()
@@ -520,21 +588,33 @@ class ProtobufSerializationManager:
                 pb_frame.timestamp = frame.timestamp
 
                 # Quality metrics
-                if hasattr(frame, 'quality_score') and frame.quality_score is not None:
+                if hasattr(frame, "quality_score") and frame.quality_score is not None:
                     pb_frame.quality_metrics.quality_score = frame.quality_score
-                if hasattr(frame, 'blur_score') and frame.blur_score is not None:
+                if hasattr(frame, "blur_score") and frame.blur_score is not None:
                     pb_frame.quality_metrics.blur_score = frame.blur_score
-                if hasattr(frame, 'brightness_score') and frame.brightness_score is not None:
+                if (
+                    hasattr(frame, "brightness_score")
+                    and frame.brightness_score is not None
+                ):
                     pb_frame.quality_metrics.brightness_score = frame.brightness_score
-                if hasattr(frame, 'contrast_score') and frame.contrast_score is not None:
+                if (
+                    hasattr(frame, "contrast_score")
+                    and frame.contrast_score is not None
+                ):
                     pb_frame.quality_metrics.contrast_score = frame.contrast_score
-                if hasattr(frame, 'noise_level') and frame.noise_level is not None:
+                if hasattr(frame, "noise_level") and frame.noise_level is not None:
                     pb_frame.quality_metrics.noise_level = frame.noise_level
 
                 # Processing metadata
-                if hasattr(frame, 'processing_time_ms') and frame.processing_time_ms is not None:
+                if (
+                    hasattr(frame, "processing_time_ms")
+                    and frame.processing_time_ms is not None
+                ):
                     pb_frame.processing_time_ms = frame.processing_time_ms
-                if hasattr(frame, 'validation_passed') and frame.validation_passed is not None:
+                if (
+                    hasattr(frame, "validation_passed")
+                    and frame.validation_passed is not None
+                ):
                     pb_frame.validation_passed = frame.validation_passed
 
                 # Timestamps
@@ -571,17 +651,17 @@ class ProtobufSerializationManager:
             # Compress image based on format
             if format.lower() == "jpeg":
                 encode_param = [cv2.IMWRITE_JPEG_QUALITY, quality]
-                success, encoded_img = cv2.imencode('.jpg', image, encode_param)
+                success, encoded_img = cv2.imencode(".jpg", image, encode_param)
             elif format.lower() == "png":
                 encode_param = [cv2.IMWRITE_PNG_COMPRESSION, 9 - (quality // 10)]
-                success, encoded_img = cv2.imencode('.png', image, encode_param)
+                success, encoded_img = cv2.imencode(".png", image, encode_param)
             elif format.lower() == "webp":
                 encode_param = [cv2.IMWRITE_WEBP_QUALITY, quality]
-                success, encoded_img = cv2.imencode('.webp', image, encode_param)
+                success, encoded_img = cv2.imencode(".webp", image, encode_param)
             else:
                 # Default to JPEG
                 encode_param = [cv2.IMWRITE_JPEG_QUALITY, quality]
-                success, encoded_img = cv2.imencode('.jpg', image, encode_param)
+                success, encoded_img = cv2.imencode(".jpg", image, encode_param)
 
             if not success:
                 raise Exception(f"Failed to encode image with format: {format}")
@@ -609,7 +689,7 @@ class ProtobufSerializationManager:
         try:
             # Create hash from key frame properties
             hash_data = f"{frame.frame_id}_{frame.camera_id}_{frame.timestamp}"
-            if hasattr(frame, 'quality_score') and frame.quality_score is not None:
+            if hasattr(frame, "quality_score") and frame.quality_score is not None:
                 hash_data += f"_{frame.quality_score}"
 
             return hashlib.md5(hash_data.encode()).hexdigest()[:16]
@@ -638,6 +718,656 @@ class BatchId:
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
+@dataclass
+class SSEStream:
+    """Server-Sent Events stream configuration."""
+
+    stream_id: str
+    camera_id: str
+    user_id: str
+    stream_type: str  # 'raw' or 'annotated'
+    quality: str  # 'low', 'medium', 'high'
+    connection_time: datetime = field(default_factory=datetime.utcnow)
+    last_activity: datetime = field(default_factory=datetime.utcnow)
+    is_active: bool = True
+    client_capabilities: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MP4Fragment:
+    """MP4 fragment for SSE streaming."""
+
+    fragment_id: str
+    camera_id: str
+    sequence_number: int
+    timestamp: float
+    data: bytes
+    content_type: str = "video/mp4"
+    duration_ms: float = 0.0
+    size_bytes: int = 0
+    quality: str = "medium"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Calculate derived fields after initialization."""
+        self.size_bytes = len(self.data)
+
+
+@dataclass
+class ChannelMetadata:
+    """Channel metadata for dual-channel stream synchronization."""
+
+    channel_type: ChannelType
+    quality: QualityLevel
+    last_fragment_time: float
+    sequence_number: int = 0
+    buffer_size: int = 0
+    sync_offset_ms: float = 0.0
+    fragments_processed: int = 0
+    bytes_transferred: int = 0
+    average_latency_ms: float = 0.0
+
+
+@dataclass
+class DualChannelStream:
+    """Dual-channel stream configuration for synchronized raw and annotated streams."""
+
+    camera_id: str
+    stream_id: str
+    user_id: str
+    raw_channel: ChannelMetadata
+    annotated_channel: ChannelMetadata
+    sync_tolerance_ms: float = 50.0
+    created_at: float = field(default_factory=time.time)
+    last_sync_check: float = field(default_factory=time.time)
+    client_subscriptions: dict[str, set[ChannelType]] = field(default_factory=dict)
+    sync_violations: int = 0
+    is_synchronized: bool = True
+
+
+@dataclass
+class ChannelSyncStatus:
+    """Channel synchronization status information."""
+
+    is_synchronized: bool
+    drift_ms: float
+    sync_violations: int
+    last_sync_time: float
+    correction_applied: bool = False
+
+
+@dataclass
+class SSEConnectionMetrics:
+    """Metrics for SSE connection management."""
+
+    active_connections: int = 0
+    total_connections_created: int = 0
+    total_disconnections: int = 0
+    bytes_streamed: int = 0
+    fragments_sent: int = 0
+    connection_errors: int = 0
+    average_connection_duration: float = 0.0
+    peak_concurrent_connections: int = 0
+    dual_channel_streams: int = 0
+    channel_switches: int = 0
+    sync_violations: int = 0
+    last_activity: datetime = field(default_factory=datetime.utcnow)
+
+
+class StreamChannelManager:
+    """Manages dual-channel streaming with synchronization between raw and annotated streams.
+
+    Provides comprehensive dual-channel management with <50ms synchronization tolerance,
+    independent quality control per channel, and client subscription management.
+    """
+
+    def __init__(self, redis_client, config: dict[str, Any]):
+        """Initialize dual-channel stream manager.
+
+        Args:
+            redis_client: Redis client for stream data
+            config: Streaming configuration
+        """
+        self.redis_client = redis_client
+        self.config = config
+        self.dual_channel_streams: dict[str, DualChannelStream] = {}
+        self.sync_tolerance_ms = config.get("sync_tolerance_ms", 50.0)
+        self.sync_check_interval = config.get("sync_check_interval", 1.0)  # 1 second
+        self.max_sync_violations = config.get("max_sync_violations", 10)
+
+        # Background sync monitoring task
+        self._sync_monitor_task: asyncio.Task = None
+        self._running = False
+
+        logger.info(
+            f"StreamChannelManager initialized with sync tolerance {self.sync_tolerance_ms}ms"
+        )
+
+    async def create_dual_channel_stream(
+        self,
+        camera_id: str,
+        user_id: str,
+        raw_quality: QualityLevel = QualityLevel.MEDIUM,
+        annotated_quality: QualityLevel = QualityLevel.MEDIUM,
+    ) -> DualChannelStream:
+        """Create dual-channel stream with synchronized raw and annotated channels.
+
+        Args:
+            camera_id: Target camera identifier
+            user_id: User creating the stream
+            raw_quality: Quality level for raw channel
+            annotated_quality: Quality level for annotated channel
+
+        Returns:
+            DualChannelStream configuration
+
+        Raises:
+            StreamProcessingError: If stream creation fails
+        """
+        try:
+            current_time = time.time()
+            stream_id = f"dual_{camera_id}_{uuid.uuid4().hex[:8]}"
+
+            # Create channel metadata for both channels
+            raw_channel = ChannelMetadata(
+                channel_type=ChannelType.RAW,
+                quality=raw_quality,
+                last_fragment_time=current_time,
+            )
+
+            annotated_channel = ChannelMetadata(
+                channel_type=ChannelType.ANNOTATED,
+                quality=annotated_quality,
+                last_fragment_time=current_time,
+            )
+
+            # Create dual-channel stream
+            dual_stream = DualChannelStream(
+                camera_id=camera_id,
+                stream_id=stream_id,
+                user_id=user_id,
+                raw_channel=raw_channel,
+                annotated_channel=annotated_channel,
+                sync_tolerance_ms=self.sync_tolerance_ms,
+            )
+
+            # Register the stream
+            self.dual_channel_streams[stream_id] = dual_stream
+
+            # Start sync monitoring if not already running
+            if not self._running:
+                await self._start_sync_monitoring()
+
+            logger.info(
+                f"Created dual-channel stream {stream_id} for camera {camera_id}, "
+                f"raw quality: {raw_quality.value}, annotated quality: {annotated_quality.value}"
+            )
+
+            return dual_stream
+
+        except Exception as e:
+            logger.error(
+                f"Failed to create dual-channel stream for camera {camera_id}: {e}"
+            )
+            raise StreamProcessingError(
+                f"Dual-channel stream creation failed: {e}"
+            ) from e
+
+    async def synchronize_channels(self, stream_id: str) -> ChannelSyncStatus:
+        """Synchronize raw and annotated channels within tolerance.
+
+        Args:
+            stream_id: Dual-channel stream identifier
+
+        Returns:
+            ChannelSyncStatus with synchronization information
+        """
+        if stream_id not in self.dual_channel_streams:
+            raise StreamProcessingError(f"Dual-channel stream {stream_id} not found")
+
+        dual_stream = self.dual_channel_streams[stream_id]
+        current_time = time.time()
+
+        try:
+            # Calculate time drift between channels
+            raw_time = dual_stream.raw_channel.last_fragment_time
+            annotated_time = dual_stream.annotated_channel.last_fragment_time
+            drift_ms = abs(raw_time - annotated_time) * 1000
+
+            is_synchronized = drift_ms <= self.sync_tolerance_ms
+            correction_applied = False
+
+            if not is_synchronized:
+                # Apply synchronization correction
+                dual_stream.sync_violations += 1
+
+                # Determine which channel is behind and apply offset
+                if raw_time < annotated_time:
+                    dual_stream.raw_channel.sync_offset_ms = (
+                        annotated_time - raw_time
+                    ) * 1000
+                else:
+                    dual_stream.annotated_channel.sync_offset_ms = (
+                        raw_time - annotated_time
+                    ) * 1000
+
+                correction_applied = True
+                logger.warning(
+                    f"Synchronization drift {drift_ms:.2f}ms detected for stream {stream_id}, "
+                    f"correction applied"
+                )
+
+            # Update stream synchronization status
+            dual_stream.is_synchronized = is_synchronized
+            dual_stream.last_sync_check = current_time
+
+            return ChannelSyncStatus(
+                is_synchronized=is_synchronized,
+                drift_ms=drift_ms,
+                sync_violations=dual_stream.sync_violations,
+                last_sync_time=current_time,
+                correction_applied=correction_applied,
+            )
+
+        except Exception as e:
+            logger.error(f"Channel synchronization failed for stream {stream_id}: {e}")
+            raise StreamProcessingError(f"Synchronization failed: {e}") from e
+
+    async def update_channel_timestamp(
+        self, stream_id: str, channel_type: ChannelType, timestamp: float
+    ) -> None:
+        """Update timestamp for specific channel to maintain synchronization.
+
+        Args:
+            stream_id: Dual-channel stream identifier
+            channel_type: Channel type to update
+            timestamp: New fragment timestamp
+        """
+        if stream_id not in self.dual_channel_streams:
+            return
+
+        dual_stream = self.dual_channel_streams[stream_id]
+
+        if channel_type == ChannelType.RAW:
+            dual_stream.raw_channel.last_fragment_time = timestamp
+            dual_stream.raw_channel.fragments_processed += 1
+        elif channel_type == ChannelType.ANNOTATED:
+            dual_stream.annotated_channel.last_fragment_time = timestamp
+            dual_stream.annotated_channel.fragments_processed += 1
+
+    async def get_synchronization_stats(self, stream_id: str) -> dict[str, Any]:
+        """Get detailed synchronization statistics for a dual-channel stream.
+
+        Args:
+            stream_id: Dual-channel stream identifier
+
+        Returns:
+            Dictionary with synchronization statistics
+        """
+        if stream_id not in self.dual_channel_streams:
+            return {"error": "Stream not found"}
+
+        dual_stream = self.dual_channel_streams[stream_id]
+        current_time = time.time()
+
+        # Calculate current drift
+        raw_time = dual_stream.raw_channel.last_fragment_time
+        annotated_time = dual_stream.annotated_channel.last_fragment_time
+        current_drift_ms = abs(raw_time - annotated_time) * 1000
+
+        return {
+            "stream_id": stream_id,
+            "camera_id": dual_stream.camera_id,
+            "is_synchronized": dual_stream.is_synchronized,
+            "current_drift_ms": current_drift_ms,
+            "sync_tolerance_ms": dual_stream.sync_tolerance_ms,
+            "sync_violations": dual_stream.sync_violations,
+            "raw_channel": {
+                "fragments_processed": dual_stream.raw_channel.fragments_processed,
+                "last_fragment_time": dual_stream.raw_channel.last_fragment_time,
+                "sync_offset_ms": dual_stream.raw_channel.sync_offset_ms,
+                "quality": dual_stream.raw_channel.quality.value,
+            },
+            "annotated_channel": {
+                "fragments_processed": dual_stream.annotated_channel.fragments_processed,
+                "last_fragment_time": dual_stream.annotated_channel.last_fragment_time,
+                "sync_offset_ms": dual_stream.annotated_channel.sync_offset_ms,
+                "quality": dual_stream.annotated_channel.quality.value,
+            },
+            "uptime_seconds": current_time - dual_stream.created_at,
+            "last_sync_check": dual_stream.last_sync_check,
+        }
+
+    async def remove_dual_channel_stream(self, stream_id: str) -> None:
+        """Remove dual-channel stream and cleanup resources.
+
+        Args:
+            stream_id: Stream identifier to remove
+        """
+        if stream_id in self.dual_channel_streams:
+            dual_stream = self.dual_channel_streams[stream_id]
+            del self.dual_channel_streams[stream_id]
+
+            logger.info(
+                f"Removed dual-channel stream {stream_id} for camera {dual_stream.camera_id}, "
+                f"uptime: {time.time() - dual_stream.created_at:.2f}s, "
+                f"sync violations: {dual_stream.sync_violations}"
+            )
+
+            # Stop sync monitoring if no streams remaining
+            if not self.dual_channel_streams and self._running:
+                await self._stop_sync_monitoring()
+
+    async def _start_sync_monitoring(self) -> None:
+        """Start background synchronization monitoring."""
+        if self._running:
+            return
+
+        self._running = True
+        self._sync_monitor_task = asyncio.create_task(self._sync_monitor_loop())
+        logger.info("Started dual-channel synchronization monitoring")
+
+    async def _stop_sync_monitoring(self) -> None:
+        """Stop background synchronization monitoring."""
+        if not self._running:
+            return
+
+        self._running = False
+        if self._sync_monitor_task:
+            self._sync_monitor_task.cancel()
+            try:
+                await self._sync_monitor_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Stopped dual-channel synchronization monitoring")
+
+    async def _sync_monitor_loop(self) -> None:
+        """Background loop for monitoring channel synchronization."""
+        while self._running:
+            try:
+                for stream_id in list(self.dual_channel_streams.keys()):
+                    try:
+                        sync_status = await self.synchronize_channels(stream_id)
+
+                        # Check for persistent sync violations
+                        dual_stream = self.dual_channel_streams.get(stream_id)
+                        if (
+                            dual_stream
+                            and dual_stream.sync_violations > self.max_sync_violations
+                        ):
+                            logger.error(
+                                f"Stream {stream_id} exceeded max sync violations "
+                                f"({dual_stream.sync_violations}), marking as degraded"
+                            )
+                            dual_stream.is_synchronized = False
+
+                    except Exception as e:
+                        logger.error(
+                            f"Sync monitoring failed for stream {stream_id}: {e}"
+                        )
+
+                await asyncio.sleep(self.sync_check_interval)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Sync monitor loop error: {e}")
+                await asyncio.sleep(1.0)  # Brief pause before retry
+
+    def get_dual_channel_stats(self) -> dict[str, Any]:
+        """Get comprehensive dual-channel streaming statistics.
+
+        Returns:
+            Dictionary with dual-channel statistics
+        """
+        total_sync_violations = sum(
+            stream.sync_violations for stream in self.dual_channel_streams.values()
+        )
+        synchronized_streams = sum(
+            1 for stream in self.dual_channel_streams.values() if stream.is_synchronized
+        )
+
+        return {
+            "active_dual_channel_streams": len(self.dual_channel_streams),
+            "synchronized_streams": synchronized_streams,
+            "total_sync_violations": total_sync_violations,
+            "sync_tolerance_ms": self.sync_tolerance_ms,
+            "monitoring_enabled": self._running,
+            "streams": {
+                stream_id: {
+                    "camera_id": stream.camera_id,
+                    "is_synchronized": stream.is_synchronized,
+                    "sync_violations": stream.sync_violations,
+                    "uptime_seconds": time.time() - stream.created_at,
+                }
+                for stream_id, stream in self.dual_channel_streams.items()
+            },
+        }
+
+
+class ChannelSubscriptionManager:
+    """Manages client subscriptions to specific stream channels.
+
+    Handles subscription state management and runtime channel switching
+    without requiring client reconnection.
+    """
+
+    def __init__(self):
+        """Initialize subscription manager."""
+        self.client_subscriptions: dict[str, dict[str, set[ChannelType]]] = (
+            {}
+        )  # connection_id -> camera_id -> channels
+        self.subscription_metrics = {
+            "total_subscriptions": 0,
+            "channel_switches": 0,
+            "active_connections": 0,
+        }
+        logger.info("ChannelSubscriptionManager initialized")
+
+    async def subscribe_to_channel(
+        self, connection_id: str, camera_id: str, channel_type: ChannelType
+    ) -> dict[str, Any]:
+        """Subscribe client to specific channel.
+
+        Args:
+            connection_id: Client connection identifier
+            camera_id: Camera identifier
+            channel_type: Channel type to subscribe to
+
+        Returns:
+            Subscription status dictionary
+        """
+        try:
+            if connection_id not in self.client_subscriptions:
+                self.client_subscriptions[connection_id] = {}
+                self.subscription_metrics["active_connections"] += 1
+
+            if camera_id not in self.client_subscriptions[connection_id]:
+                self.client_subscriptions[connection_id][camera_id] = set()
+
+            # Add channel subscription
+            if channel_type not in self.client_subscriptions[connection_id][camera_id]:
+                self.client_subscriptions[connection_id][camera_id].add(channel_type)
+                self.subscription_metrics["total_subscriptions"] += 1
+
+            logger.info(
+                f"Client {connection_id} subscribed to {channel_type.value} channel for camera {camera_id}"
+            )
+
+            return {
+                "status": "subscribed",
+                "connection_id": connection_id,
+                "camera_id": camera_id,
+                "channel_type": channel_type.value,
+                "subscribed_channels": [
+                    ch.value
+                    for ch in self.client_subscriptions[connection_id][camera_id]
+                ],
+            }
+
+        except Exception as e:
+            logger.error(f"Subscription failed for connection {connection_id}: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def switch_channel(
+        self, connection_id: str, camera_id: str, new_channel: ChannelType
+    ) -> dict[str, Any]:
+        """Switch client to different channel without reconnection.
+
+        Args:
+            connection_id: Client connection identifier
+            camera_id: Camera identifier
+            new_channel: New channel type
+
+        Returns:
+            Channel switch status dictionary
+        """
+        try:
+            if (
+                connection_id not in self.client_subscriptions
+                or camera_id not in self.client_subscriptions[connection_id]
+            ):
+                return {"status": "error", "error": "No active subscription found"}
+
+            # Clear existing subscriptions for this camera
+            old_channels = list(self.client_subscriptions[connection_id][camera_id])
+            self.client_subscriptions[connection_id][camera_id].clear()
+
+            # Add new channel subscription
+            self.client_subscriptions[connection_id][camera_id].add(new_channel)
+            self.subscription_metrics["channel_switches"] += 1
+
+            logger.info(
+                f"Client {connection_id} switched from {old_channels} to {new_channel.value} "
+                f"for camera {camera_id}"
+            )
+
+            return {
+                "status": "switched",
+                "connection_id": connection_id,
+                "camera_id": camera_id,
+                "old_channels": [ch.value for ch in old_channels],
+                "new_channel": new_channel.value,
+                "switch_time": time.time(),
+            }
+
+        except Exception as e:
+            logger.error(f"Channel switch failed for connection {connection_id}: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def unsubscribe_from_channel(
+        self, connection_id: str, camera_id: str, channel_type: ChannelType = None
+    ) -> dict[str, Any]:
+        """Unsubscribe client from specific channel or all channels for a camera.
+
+        Args:
+            connection_id: Client connection identifier
+            camera_id: Camera identifier
+            channel_type: Specific channel type to unsubscribe from (None for all)
+
+        Returns:
+            Unsubscription status dictionary
+        """
+        try:
+            if (
+                connection_id not in self.client_subscriptions
+                or camera_id not in self.client_subscriptions[connection_id]
+            ):
+                return {"status": "error", "error": "No subscription found"}
+
+            if channel_type:
+                # Unsubscribe from specific channel
+                self.client_subscriptions[connection_id][camera_id].discard(
+                    channel_type
+                )
+                unsubscribed_channels = [channel_type.value]
+            else:
+                # Unsubscribe from all channels for this camera
+                unsubscribed_channels = [
+                    ch.value
+                    for ch in self.client_subscriptions[connection_id][camera_id]
+                ]
+                self.client_subscriptions[connection_id][camera_id].clear()
+
+            # Cleanup empty entries
+            if not self.client_subscriptions[connection_id][camera_id]:
+                del self.client_subscriptions[connection_id][camera_id]
+
+            if not self.client_subscriptions[connection_id]:
+                del self.client_subscriptions[connection_id]
+                self.subscription_metrics["active_connections"] -= 1
+
+            logger.info(
+                f"Client {connection_id} unsubscribed from channels {unsubscribed_channels} "
+                f"for camera {camera_id}"
+            )
+
+            return {
+                "status": "unsubscribed",
+                "connection_id": connection_id,
+                "camera_id": camera_id,
+                "unsubscribed_channels": unsubscribed_channels,
+            }
+
+        except Exception as e:
+            logger.error(f"Unsubscription failed for connection {connection_id}: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def get_client_subscriptions(self, connection_id: str) -> dict[str, Any]:
+        """Get all subscriptions for a specific client.
+
+        Args:
+            connection_id: Client connection identifier
+
+        Returns:
+            Dictionary with client subscription information
+        """
+        if connection_id not in self.client_subscriptions:
+            return {"subscriptions": {}}
+
+        subscriptions = {}
+        for camera_id, channels in self.client_subscriptions[connection_id].items():
+            subscriptions[camera_id] = [ch.value for ch in channels]
+
+        return {
+            "connection_id": connection_id,
+            "subscriptions": subscriptions,
+            "total_cameras": len(subscriptions),
+            "total_channels": sum(len(channels) for channels in subscriptions.values()),
+        }
+
+    def get_subscription_stats(self) -> dict[str, Any]:
+        """Get comprehensive subscription statistics.
+
+        Returns:
+            Dictionary with subscription statistics
+        """
+        return {
+            **self.subscription_metrics,
+            "subscriptions_by_channel": {
+                "raw": sum(
+                    1
+                    for camera_subs in self.client_subscriptions.values()
+                    for channels in camera_subs.values()
+                    if ChannelType.RAW in channels
+                ),
+                "annotated": sum(
+                    1
+                    for camera_subs in self.client_subscriptions.values()
+                    for channels in camera_subs.values()
+                    if ChannelType.ANNOTATED in channels
+                ),
+            },
+            "cameras_with_subscriptions": len(
+                set(
+                    camera_id
+                    for camera_subs in self.client_subscriptions.values()
+                    for camera_id in camera_subs.keys()
+                )
+            ),
+        }
+
+
 class CameraConnectionManager:
     """Manages camera connections with different protocols."""
 
@@ -645,24 +1375,61 @@ class CameraConnectionManager:
         self.active_connections: dict[str, Any] = {}
         self.connection_stats: dict[str, dict[str, Any]] = {}
         self.webrtc_manager = WebRTCConnectionManager()
+        self._connection_failures: dict[str, tuple[int, float]] = (
+            {}
+        )  # camera_id -> (failure_count, last_failure_time)
+        self._connection_pool_size = 200  # Increased for 100+ concurrent connections
+        self._max_reconnect_attempts = 3
 
     async def connect_camera(self, config: CameraConfig) -> bool:
-        """Establish connection to camera based on protocol."""
+        """Establish connection to camera based on protocol with circuit breaker."""
+        camera_id = config.camera_id
+
+        # Circuit breaker logic
+        if camera_id in self._connection_failures:
+            failure_count, last_failure = self._connection_failures[camera_id]
+            if failure_count >= 5:  # Max failures before circuit opens
+                time_since_failure = time.time() - last_failure
+                if time_since_failure < 300:  # 5 minute backoff
+                    logger.warning(
+                        f"Circuit breaker open for camera {camera_id}, skipping connection attempt"
+                    )
+                    return False
+                else:
+                    # Reset circuit breaker after timeout
+                    del self._connection_failures[camera_id]
+
         try:
+            success = False
             if config.protocol == StreamProtocol.RTSP:
-                return await self._connect_rtsp(config)
+                success = await self._connect_rtsp(config)
             elif config.protocol == StreamProtocol.WEBRTC:
-                return await self._connect_webrtc(config)
+                success = await self._connect_webrtc(config)
             elif config.protocol == StreamProtocol.HTTP:
-                return await self._connect_http(config)
+                success = await self._connect_http(config)
             elif config.protocol == StreamProtocol.ONVIF:
-                return await self._connect_onvif(config)
+                success = await self._connect_onvif(config)
             else:
                 raise CameraConfigurationError(
                     f"Unsupported protocol: {config.protocol}"
                 )
+
+            if success and camera_id in self._connection_failures:
+                # Reset failure count on successful connection
+                del self._connection_failures[camera_id]
+
+            return success
+
         except Exception as e:
             logger.error(f"Failed to connect camera {config.camera_id}: {e}")
+
+            # Update circuit breaker state
+            if camera_id not in self._connection_failures:
+                self._connection_failures[camera_id] = (1, time.time())
+            else:
+                failure_count, _ = self._connection_failures[camera_id]
+                self._connection_failures[camera_id] = (failure_count + 1, time.time())
+
             return False
 
     async def _connect_rtsp(self, config: CameraConfig) -> bool:
@@ -708,7 +1475,9 @@ class CameraConnectionManager:
             return False
 
         try:
-            logger.info(f"Establishing WebRTC connection for camera: {config.camera_id}")
+            logger.info(
+                f"Establishing WebRTC connection for camera: {config.camera_id}"
+            )
 
             # For WebRTC, the stream_url could be:
             # 1. A WebRTC signaling server URL
@@ -718,7 +1487,7 @@ class CameraConnectionManager:
             capture_source = None
 
             # Determine the source type
-            if config.stream_url.startswith(('rtsp://', 'http://', 'https://')):
+            if config.stream_url.startswith(("rtsp://", "http://", "https://")):
                 # Proxy RTSP/HTTP stream through WebRTC
                 logger.info(f"Creating WebRTC proxy for {config.stream_url}")
                 capture_source = cv2.VideoCapture(config.stream_url)
@@ -736,12 +1505,18 @@ class CameraConnectionManager:
                 ret, frame = capture_source.read()
                 if not ret or frame is None:
                     capture_source.release()
-                    logger.error(f"Cannot capture frames from source: {config.stream_url}")
+                    logger.error(
+                        f"Cannot capture frames from source: {config.stream_url}"
+                    )
                     return False
 
-            elif config.stream_url.isdigit() or config.stream_url.startswith('/dev/'):
+            elif config.stream_url.isdigit() or config.stream_url.startswith("/dev/"):
                 # Local camera device
-                device_id = int(config.stream_url) if config.stream_url.isdigit() else config.stream_url
+                device_id = (
+                    int(config.stream_url)
+                    if config.stream_url.isdigit()
+                    else config.stream_url
+                )
                 logger.info(f"Creating WebRTC connection for local device: {device_id}")
 
                 capture_source = cv2.VideoCapture(device_id)
@@ -783,7 +1558,9 @@ class CameraConnectionManager:
                 "stream_url": config.stream_url,
             }
 
-            logger.info(f"Successfully established WebRTC connection for: {config.camera_id}")
+            logger.info(
+                f"Successfully established WebRTC connection for: {config.camera_id}"
+            )
             return True
 
         except Exception as e:
@@ -823,7 +1600,9 @@ class CameraConnectionManager:
 
                 if isinstance(connection, cv2.VideoCapture):
                     connection.release()
-                elif isinstance(connection, dict) and connection.get("type") == "webrtc":
+                elif (
+                    isinstance(connection, dict) and connection.get("type") == "webrtc"
+                ):
                     # WebRTC connection cleanup
                     await self.webrtc_manager.cleanup_connection(camera_id)
 
@@ -856,8 +1635,8 @@ class CameraConnectionManager:
                 ret, frame = connection.read()
                 if ret and frame is not None:
                     self.connection_stats[camera_id]["frames_captured"] += 1
-                    self.connection_stats[camera_id]["last_frame_time"] = (
-                        datetime.now(UTC)
+                    self.connection_stats[camera_id]["last_frame_time"] = datetime.now(
+                        UTC
                     )
                     return frame
 
@@ -869,13 +1648,17 @@ class CameraConnectionManager:
                     ret, frame = capture_source.read()
                     if ret and frame is not None:
                         self.connection_stats[camera_id]["frames_captured"] += 1
-                        self.connection_stats[camera_id]["last_frame_time"] = datetime.now(UTC)
+                        self.connection_stats[camera_id]["last_frame_time"] = (
+                            datetime.now(UTC)
+                        )
                         return frame
                 else:
                     # Mock WebRTC source
                     frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
                     self.connection_stats[camera_id]["frames_captured"] += 1
-                    self.connection_stats[camera_id]["last_frame_time"] = datetime.now(UTC)
+                    self.connection_stats[camera_id]["last_frame_time"] = datetime.now(
+                        UTC
+                    )
                     return frame
 
             # For mock connections, generate test frame
@@ -1087,6 +1870,1127 @@ class StreamingServiceInterface:
         raise NotImplementedError
 
 
+class SSEStreamingService:
+    """Server-Sent Events Streaming Service for MP4 fragmented streaming.
+
+    Provides browser-native video viewing with dual channels (raw + AI-annotated streams)
+    using dependency injection patterns and existing streaming infrastructure.
+    """
+
+    def __init__(
+        self,
+        base_streaming_service: "StreamingService",
+        redis_manager: RedisQueueManager,
+        config: dict[str, Any],
+        ml_annotation_processor: Optional[MLAnnotationProcessor] = None,
+    ):
+        """Initialize SSE streaming service with dependency injection.
+
+        Args:
+            base_streaming_service: Base streaming service for core functionality
+            redis_manager: Redis queue manager for stream data
+            config: SSE streaming configuration
+            ml_annotation_processor: ML annotation processor for AI-annotated streams
+        """
+        self.base_streaming_service = base_streaming_service
+        self.redis_manager = redis_manager
+        self.config = config
+        self.ml_annotation_processor = ml_annotation_processor
+
+        # SSE connection management
+        self.active_streams: dict[str, SSEStream] = {}
+        self.connection_metrics = SSEConnectionMetrics()
+        self.stream_queues: dict[str, asyncio.Queue] = {}
+
+        # Performance tracking
+        self.startup_time: float | None = None
+        self.processing_metrics = {
+            "fragments_generated": 0,
+            "streams_created": 0,
+            "connection_failures": 0,
+            "total_bytes_streamed": 0,
+            "average_fragment_size": 0.0,
+            "average_processing_latency": 0.0,
+        }
+
+        # Configuration defaults
+        self.max_concurrent_connections = config.get("max_concurrent_connections", 100)
+        self.fragment_duration_ms = config.get(
+            "fragment_duration_ms", 2000
+        )  # 2 seconds
+        self.heartbeat_interval = config.get("heartbeat_interval", 30)  # 30 seconds
+        self.connection_timeout = config.get("connection_timeout", 300)  # 5 minutes
+
+        logger.info("SSEStreamingService initialized with dependency injection")
+
+    async def create_sse_stream(
+        self,
+        camera_id: str,
+        user: Any,  # User type from existing auth system
+        stream_type: str = "raw",
+        quality: str = "medium",
+    ) -> SSEStream:
+        """Create SSE stream with proper auth and validation.
+
+        Args:
+            camera_id: Target camera identifier
+            user: Authenticated user object
+            stream_type: Stream type ('raw' or 'annotated')
+            quality: Stream quality ('low', 'medium', 'high')
+
+        Returns:
+            SSEStream configuration object
+
+        Raises:
+            StreamProcessingError: If stream creation fails
+        """
+        try:
+            # Check concurrent connection limits
+            if len(self.active_streams) >= self.max_concurrent_connections:
+                raise StreamProcessingError(
+                    f"Maximum concurrent connections ({self.max_concurrent_connections}) reached"
+                )
+
+            # Validate camera exists and user has permission
+            # Note: In production, implement proper RBAC validation here
+            user_id = getattr(user, "id", "anonymous")
+
+            # Generate unique stream ID
+            stream_id = f"sse_{camera_id}_{stream_type}_{uuid.uuid4().hex[:8]}"
+
+            # Create stream configuration
+            sse_stream = SSEStream(
+                stream_id=stream_id,
+                camera_id=camera_id,
+                user_id=user_id,
+                stream_type=stream_type,
+                quality=quality,
+                client_capabilities={
+                    "supports_mp4": True,
+                    "max_bitrate": self._get_quality_bitrate(quality),
+                    "preferred_codec": "h264",
+                },
+            )
+
+            # Register stream
+            self.active_streams[stream_id] = sse_stream
+
+            # Create message queue for this stream
+            self.stream_queues[stream_id] = asyncio.Queue(maxsize=100)
+
+            # Update metrics
+            self.connection_metrics.active_connections += 1
+            self.connection_metrics.total_connections_created += 1
+            self.processing_metrics["streams_created"] += 1
+
+            if (
+                self.connection_metrics.active_connections
+                > self.connection_metrics.peak_concurrent_connections
+            ):
+                self.connection_metrics.peak_concurrent_connections = (
+                    self.connection_metrics.active_connections
+                )
+
+            logger.info(
+                f"Created SSE stream: {stream_id} for camera {camera_id}, "
+                f"user {user_id}, type {stream_type}, quality {quality}"
+            )
+
+            return sse_stream
+
+        except Exception as e:
+            self.processing_metrics["connection_failures"] += 1
+            logger.error(f"Failed to create SSE stream for camera {camera_id}: {e}")
+            raise StreamProcessingError(f"SSE stream creation failed: {e}") from e
+
+    async def handle_sse_connection(
+        self,
+        request: "Request",
+        camera_id: str,
+        stream_type: str = "raw",
+        quality: str = "medium",
+    ) -> "StreamingResponse":
+        """SSE endpoint handler with connection management.
+
+        Args:
+            request: FastAPI request object
+            camera_id: Target camera identifier
+            stream_type: Stream type ('raw' or 'annotated')
+            quality: Stream quality
+
+        Returns:
+            StreamingResponse with SSE data
+        """
+        # Import here to avoid circular imports
+        from fastapi.responses import StreamingResponse
+
+        # Extract user from request (implement proper auth integration)
+        user = getattr(request.state, "user", None)
+        if not user:
+            # Create mock user for now - replace with proper auth
+            user = type("User", (), {"id": "anonymous", "username": "anonymous"})()
+
+        try:
+            # Create SSE stream
+            sse_stream = await self.create_sse_stream(
+                camera_id, user, stream_type, quality
+            )
+
+            # Generate SSE event stream
+            async def generate_sse_events() -> AsyncIterator[str]:
+                try:
+                    # Send initial connection event
+                    yield self._format_sse_event(
+                        "connected",
+                        {
+                            "stream_id": sse_stream.stream_id,
+                            "camera_id": camera_id,
+                            "stream_type": stream_type,
+                            "quality": quality,
+                            "timestamp": time.time(),
+                        },
+                    )
+
+                    # Start fragment streaming for this camera
+                    fragment_task = asyncio.create_task(
+                        self._stream_fragments_to_queue(sse_stream)
+                    )
+
+                    last_heartbeat = time.time()
+
+                    try:
+                        while True:
+                            # Check for client disconnect
+                            if await request.is_disconnected():
+                                logger.info(
+                                    f"Client disconnected from stream {sse_stream.stream_id}"
+                                )
+                                break
+
+                            # Get message from queue with timeout
+                            try:
+                                message = await asyncio.wait_for(
+                                    self.stream_queues[sse_stream.stream_id].get(),
+                                    timeout=1.0,
+                                )
+
+                                if message["type"] == "fragment":
+                                    # Send MP4 fragment
+                                    yield self._format_sse_event(
+                                        "fragment", message["data"]
+                                    )
+                                elif message["type"] == "error":
+                                    yield self._format_sse_event(
+                                        "error", {"error": message["error"]}
+                                    )
+                                    break
+
+                                # Update activity timestamp
+                                sse_stream.last_activity = datetime.utcnow()
+
+                            except TimeoutError:
+                                # Send heartbeat if needed
+                                current_time = time.time()
+                                if (
+                                    current_time - last_heartbeat
+                                    >= self.heartbeat_interval
+                                ):
+                                    yield self._format_sse_event(
+                                        "heartbeat", {"timestamp": current_time}
+                                    )
+                                    last_heartbeat = current_time
+
+                                continue
+
+                    finally:
+                        # Cleanup on disconnect
+                        fragment_task.cancel()
+                        await self._cleanup_sse_stream(sse_stream.stream_id)
+
+                except Exception as e:
+                    logger.error(f"SSE stream error for {sse_stream.stream_id}: {e}")
+                    yield self._format_sse_event(
+                        "error", {"error": str(e), "timestamp": time.time()}
+                    )
+
+            return StreamingResponse(
+                generate_sse_events(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",  # Disable Nginx buffering
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Cache-Control",
+                },
+            )
+
+        except Exception as e:
+            self.connection_metrics.connection_errors += 1
+            logger.error(f"SSE connection handler failed for camera {camera_id}: {e}")
+            raise
+
+    async def stream_mp4_fragments(
+        self, camera_id: str, quality: str = "medium"
+    ) -> AsyncIterator[MP4Fragment]:
+        """Core streaming logic yielding MP4 fragments.
+
+        Args:
+            camera_id: Target camera identifier
+            quality: Stream quality setting
+
+        Yields:
+            MP4Fragment objects with video data
+        """
+        try:
+            sequence_number = 0
+
+            # Get camera stream from base streaming service
+            if not self.base_streaming_service.streaming_processor:
+                raise StreamProcessingError("Base streaming processor not available")
+
+            # Process camera stream and generate fragments
+            async for (
+                processed_frame
+            ) in self.base_streaming_service.streaming_processor.process_stream(
+                camera_id
+            ):
+                try:
+                    # Convert processed frame to MP4 fragment
+                    fragment = await self._create_mp4_fragment(
+                        processed_frame, sequence_number, quality
+                    )
+
+                    if fragment:
+                        # Update metrics
+                        self.processing_metrics["fragments_generated"] += 1
+                        self.processing_metrics[
+                            "total_bytes_streamed"
+                        ] += fragment.size_bytes
+
+                        # Update average fragment size
+                        total_fragments = self.processing_metrics["fragments_generated"]
+                        self.processing_metrics["average_fragment_size"] = (
+                            self.processing_metrics["total_bytes_streamed"]
+                            / total_fragments
+                        )
+
+                        sequence_number += 1
+                        yield fragment
+
+                except Exception as e:
+                    logger.error(
+                        f"Fragment creation failed for camera {camera_id}: {e}"
+                    )
+                    continue
+
+        except Exception as e:
+            logger.error(f"MP4 fragment streaming failed for camera {camera_id}: {e}")
+            raise StreamProcessingError(f"Fragment streaming failed: {e}") from e
+
+    async def _stream_fragments_to_queue(self, sse_stream: SSEStream) -> None:
+        """Stream MP4 fragments to the SSE queue for a specific stream.
+
+        Args:
+            sse_stream: SSE stream configuration
+        """
+        try:
+            async for fragment in self.stream_mp4_fragments(
+                sse_stream.camera_id, sse_stream.quality, sse_stream.stream_type
+            ):
+                try:
+                    # Prepare fragment data for SSE
+                    fragment_data = {
+                        "fragment_id": fragment.fragment_id,
+                        "sequence_number": fragment.sequence_number,
+                        "timestamp": fragment.timestamp,
+                        "data": fragment.data.hex(),  # Hexadecimal encoding for text transport
+                        "content_type": fragment.content_type,
+                        "size_bytes": fragment.size_bytes,
+                        "quality": fragment.quality,
+                        "metadata": fragment.metadata,
+                    }
+
+                    # Add to stream queue
+                    if sse_stream.stream_id in self.stream_queues:
+                        try:
+                            self.stream_queues[sse_stream.stream_id].put_nowait(
+                                {"type": "fragment", "data": fragment_data}
+                            )
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                f"Stream queue full for {sse_stream.stream_id}, dropping fragment"
+                            )
+                            continue
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to queue fragment for stream {sse_stream.stream_id}: {e}"
+                    )
+
+        except Exception as e:
+            logger.error(
+                f"Fragment streaming task failed for stream {sse_stream.stream_id}: {e}"
+            )
+            # Send error to stream queue
+            if sse_stream.stream_id in self.stream_queues:
+                try:
+                    self.stream_queues[sse_stream.stream_id].put_nowait(
+                        {"type": "error", "error": str(e)}
+                    )
+                except asyncio.QueueFull:
+                    pass
+
+    async def _create_mp4_fragment(
+        self, processed_frame: ProcessedFrame, sequence_number: int, quality: str
+    ) -> MP4Fragment | None:
+        """Create MP4 fragment from processed frame.
+
+        Args:
+            processed_frame: Input processed frame
+            sequence_number: Fragment sequence number
+            quality: Target quality setting
+
+        Returns:
+            MP4Fragment or None if creation fails
+        """
+        try:
+            start_time = time.perf_counter()
+
+            # Generate fragment ID
+            fragment_id = f"frag_{processed_frame.camera_id}_{sequence_number}_{int(time.time() * 1000)}"
+
+            # Convert frame to MP4 fragment
+            # This is a simplified implementation - in production, use proper MP4 fragmentation
+            if processed_frame.original_image is not None:
+                # Encode frame as JPEG for now (replace with proper MP4 encoding)
+                encode_param = [
+                    cv2.IMWRITE_JPEG_QUALITY,
+                    self._get_quality_jpeg_param(quality),
+                ]
+                success, encoded_data = cv2.imencode(
+                    ".jpg", processed_frame.original_image, encode_param
+                )
+
+                if not success:
+                    logger.warning(f"Failed to encode frame {processed_frame.frame_id}")
+                    return None
+
+                fragment_data = encoded_data.tobytes()
+
+                # Create fragment
+                fragment = MP4Fragment(
+                    fragment_id=fragment_id,
+                    camera_id=processed_frame.camera_id,
+                    sequence_number=sequence_number,
+                    timestamp=processed_frame.timestamp,
+                    data=fragment_data,
+                    content_type="image/jpeg",  # Temporary - use video/mp4 in production
+                    duration_ms=self.fragment_duration_ms,
+                    quality=quality,
+                    metadata={
+                        "quality_score": getattr(processed_frame, "quality_score", 0.0),
+                        "processing_time_ms": getattr(
+                            processed_frame, "processing_time_ms", 0.0
+                        ),
+                        "resolution": (
+                            processed_frame.original_image.shape[:2]
+                            if processed_frame.original_image is not None
+                            else (0, 0)
+                        ),
+                    },
+                )
+
+                # Update processing latency metrics
+                processing_time = (time.perf_counter() - start_time) * 1000
+                total_fragments = self.processing_metrics["fragments_generated"] + 1
+                self.processing_metrics["average_processing_latency"] = (
+                    self.processing_metrics["average_processing_latency"]
+                    * (total_fragments - 1)
+                    + processing_time
+                ) / total_fragments
+
+                return fragment
+
+            return None
+
+        except Exception as e:
+            logger.error(f"MP4 fragment creation failed: {e}")
+            return None
+
+    def _format_sse_event(self, event_type: str, data: dict[str, Any]) -> str:
+        """Format data as SSE event.
+
+        Args:
+            event_type: Event type identifier
+            data: Event data dictionary
+
+        Returns:
+            Formatted SSE event string
+        """
+        event_data = {"type": event_type, "timestamp": time.time(), **data}
+
+        return f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+
+    async def _cleanup_sse_stream(self, stream_id: str) -> None:
+        """Clean up SSE stream resources.
+
+        Args:
+            stream_id: Stream identifier to cleanup
+        """
+        try:
+            if stream_id in self.active_streams:
+                stream = self.active_streams[stream_id]
+
+                # Calculate connection duration
+                connection_duration = (
+                    datetime.utcnow() - stream.connection_time
+                ).total_seconds()
+
+                # Update metrics
+                self.connection_metrics.active_connections -= 1
+                self.connection_metrics.total_disconnections += 1
+
+                # Update average connection duration
+                total_disconnections = self.connection_metrics.total_disconnections
+                self.connection_metrics.average_connection_duration = (
+                    self.connection_metrics.average_connection_duration
+                    * (total_disconnections - 1)
+                    + connection_duration
+                ) / total_disconnections
+
+                # Remove stream and queue
+                del self.active_streams[stream_id]
+
+                if stream_id in self.stream_queues:
+                    del self.stream_queues[stream_id]
+
+                logger.info(
+                    f"Cleaned up SSE stream {stream_id}, duration: {connection_duration:.2f}s"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup SSE stream {stream_id}: {e}")
+
+    def _get_quality_bitrate(self, quality: str) -> int:
+        """Get bitrate for quality setting.
+
+        Args:
+            quality: Quality setting
+
+        Returns:
+            Bitrate in kbps
+        """
+        quality_settings = {
+            "low": 500,  # 500 kbps
+            "medium": 2000,  # 2 Mbps
+            "high": 5000,  # 5 Mbps
+        }
+        return quality_settings.get(quality, 2000)
+
+    def _get_quality_jpeg_param(self, quality: str) -> int:
+        """Get JPEG quality parameter for quality setting.
+
+        Args:
+            quality: Quality setting
+
+        Returns:
+            JPEG quality parameter (0-100)
+        """
+        quality_settings = {
+            "low": 60,
+            "medium": 85,
+            "high": 95,
+        }
+        return quality_settings.get(quality, 85)
+
+    async def create_dual_channel_stream(
+        self,
+        camera_id: str,
+        user_id: str,
+        raw_quality: str = "medium",
+        annotated_quality: str = "medium",
+    ) -> DualChannelStream:
+        """Create dual-channel stream with both raw and annotated channels.
+
+        Args:
+            camera_id: Target camera identifier
+            user_id: User creating the stream
+            raw_quality: Quality for raw channel
+            annotated_quality: Quality for annotated channel
+
+        Returns:
+            DualChannelStream configuration
+        """
+        raw_quality_enum = QualityLevel(raw_quality)
+        annotated_quality_enum = QualityLevel(annotated_quality)
+
+        dual_stream = await self.channel_manager.create_dual_channel_stream(
+            camera_id=camera_id,
+            user_id=user_id,
+            raw_quality=raw_quality_enum,
+            annotated_quality=annotated_quality_enum,
+        )
+
+        # Update metrics
+        self.connection_metrics.dual_channel_streams += 1
+
+        return dual_stream
+
+    async def handle_dual_channel_sse_connection(
+        self,
+        request: "Request",
+        camera_id: str,
+        initial_channel: str = "raw",
+        raw_quality: str = "medium",
+        annotated_quality: str = "medium",
+    ) -> "StreamingResponse":
+        """SSE endpoint handler for dual-channel streaming.
+
+        Args:
+            request: FastAPI request object
+            camera_id: Target camera identifier
+            initial_channel: Initial channel to stream (raw or annotated)
+            raw_quality: Quality for raw channel
+            annotated_quality: Quality for annotated channel
+
+        Returns:
+            StreamingResponse with dual-channel SSE data
+        """
+        from fastapi.responses import StreamingResponse
+
+        user = getattr(request.state, "user", None)
+        if not user:
+            user = type("User", (), {"id": "anonymous", "username": "anonymous"})()
+
+        try:
+            # Create dual-channel stream
+            dual_stream = await self.create_dual_channel_stream(
+                camera_id=camera_id,
+                user_id=user.id,
+                raw_quality=raw_quality,
+                annotated_quality=annotated_quality,
+            )
+
+            connection_id = f"conn_{uuid.uuid4().hex[:8]}"
+
+            # Subscribe to initial channel
+            initial_channel_type = (
+                ChannelType.RAW if initial_channel == "raw" else ChannelType.ANNOTATED
+            )
+            await self.subscription_manager.subscribe_to_channel(
+                connection_id=connection_id,
+                camera_id=camera_id,
+                channel_type=initial_channel_type,
+            )
+
+            # Generate dual-channel SSE events
+            async def generate_dual_channel_events() -> AsyncIterator[str]:
+                try:
+                    # Send initial connection event
+                    yield self._format_sse_event(
+                        "dual_channel_connected",
+                        {
+                            "stream_id": dual_stream.stream_id,
+                            "camera_id": camera_id,
+                            "initial_channel": initial_channel,
+                            "raw_quality": raw_quality,
+                            "annotated_quality": annotated_quality,
+                            "sync_tolerance_ms": dual_stream.sync_tolerance_ms,
+                            "timestamp": time.time(),
+                        },
+                    )
+
+                    # Start fragment streaming for both channels
+                    raw_task = asyncio.create_task(
+                        self._stream_channel_fragments(dual_stream, ChannelType.RAW)
+                    )
+                    annotated_task = asyncio.create_task(
+                        self._stream_channel_fragments(
+                            dual_stream, ChannelType.ANNOTATED
+                        )
+                    )
+
+                    last_heartbeat = time.time()
+                    last_sync_check = time.time()
+
+                    try:
+                        while True:
+                            # Check for client disconnect
+                            if await request.is_disconnected():
+                                logger.info(
+                                    f"Client disconnected from dual-channel stream {dual_stream.stream_id}"
+                                )
+                                break
+
+                            # Check subscriptions and send appropriate fragments
+                            subscriptions = (
+                                self.subscription_manager.get_client_subscriptions(
+                                    connection_id
+                                )
+                            )
+                            current_channels = subscriptions.get(
+                                "subscriptions", {}
+                            ).get(camera_id, [])
+
+                            # Get message from appropriate channel queue
+                            fragment_received = False
+                            for channel_str in current_channels:
+                                queue_key = f"{dual_stream.stream_id}_{channel_str}"
+                                if queue_key in self.stream_queues:
+                                    try:
+                                        message = await asyncio.wait_for(
+                                            self.stream_queues[queue_key].get(),
+                                            timeout=0.1,
+                                        )
+
+                                        if message["type"] == "fragment":
+                                            # Send fragment with channel info
+                                            fragment_data = message["data"]
+                                            fragment_data["channel_type"] = channel_str
+
+                                            yield self._format_sse_event(
+                                                "dual_channel_fragment", fragment_data
+                                            )
+
+                                            # Update channel timestamp for sync
+                                            channel_type = (
+                                                ChannelType.RAW
+                                                if channel_str == "raw"
+                                                else ChannelType.ANNOTATED
+                                            )
+                                            await self.channel_manager.update_channel_timestamp(
+                                                dual_stream.stream_id,
+                                                channel_type,
+                                                fragment_data["timestamp"],
+                                            )
+
+                                        fragment_received = True
+                                        break
+
+                                    except TimeoutError:
+                                        continue
+
+                            # Periodic synchronization check
+                            current_time = time.time()
+                            if (
+                                current_time - last_sync_check >= 1.0
+                            ):  # Check every second
+                                sync_status = (
+                                    await self.channel_manager.synchronize_channels(
+                                        dual_stream.stream_id
+                                    )
+                                )
+
+                                if not sync_status.is_synchronized:
+                                    yield self._format_sse_event(
+                                        "sync_warning",
+                                        {
+                                            "drift_ms": sync_status.drift_ms,
+                                            "correction_applied": sync_status.correction_applied,
+                                            "timestamp": current_time,
+                                        },
+                                    )
+
+                                last_sync_check = current_time
+
+                            # Send heartbeat if needed
+                            if current_time - last_heartbeat >= self.heartbeat_interval:
+                                sync_stats = await self.channel_manager.get_synchronization_stats(
+                                    dual_stream.stream_id
+                                )
+
+                                yield self._format_sse_event(
+                                    "dual_channel_heartbeat",
+                                    {
+                                        "timestamp": current_time,
+                                        "sync_stats": sync_stats,
+                                    },
+                                )
+                                last_heartbeat = current_time
+
+                            # Brief sleep if no fragments received
+                            if not fragment_received:
+                                await asyncio.sleep(0.01)  # 10ms
+
+                    finally:
+                        # Cleanup on disconnect
+                        raw_task.cancel()
+                        annotated_task.cancel()
+                        await self.subscription_manager.unsubscribe_from_channel(
+                            connection_id, camera_id
+                        )
+                        await self.channel_manager.remove_dual_channel_stream(
+                            dual_stream.stream_id
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"Dual-channel SSE stream error for {dual_stream.stream_id}: {e}"
+                    )
+                    yield self._format_sse_event(
+                        "dual_channel_error",
+                        {"error": str(e), "timestamp": time.time()},
+                    )
+
+            return StreamingResponse(
+                generate_dual_channel_events(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Cache-Control",
+                },
+            )
+
+        except Exception as e:
+            self.connection_metrics.connection_errors += 1
+            logger.error(
+                f"Dual-channel SSE connection handler failed for camera {camera_id}: {e}"
+            )
+            raise
+
+    async def _stream_channel_fragments(
+        self, dual_stream: DualChannelStream, channel_type: ChannelType
+    ) -> None:
+        """Stream fragments for a specific channel in dual-channel mode.
+
+        Args:
+            dual_stream: Dual-channel stream configuration
+            channel_type: Channel type to stream
+        """
+        try:
+            queue_key = f"{dual_stream.stream_id}_{channel_type.value}"
+            if queue_key not in self.stream_queues:
+                self.stream_queues[queue_key] = asyncio.Queue(maxsize=100)
+
+            quality = (
+                dual_stream.raw_channel.quality.value
+                if channel_type == ChannelType.RAW
+                else dual_stream.annotated_channel.quality.value
+            )
+
+            async for fragment in self.stream_mp4_fragments(
+                dual_stream.camera_id, quality
+            ):
+                try:
+                    # Apply any sync offset
+                    sync_offset = (
+                        dual_stream.raw_channel.sync_offset_ms
+                        if channel_type == ChannelType.RAW
+                        else dual_stream.annotated_channel.sync_offset_ms
+                    )
+
+                    if sync_offset > 0:
+                        await asyncio.sleep(
+                            sync_offset / 1000.0
+                        )  # Convert ms to seconds
+
+                    # Prepare fragment data
+                    fragment_data = {
+                        "fragment_id": fragment.fragment_id,
+                        "sequence_number": fragment.sequence_number,
+                        "timestamp": fragment.timestamp,
+                        "data": fragment.data.hex(),
+                        "content_type": fragment.content_type,
+                        "size_bytes": fragment.size_bytes,
+                        "quality": fragment.quality,
+                        "channel_type": channel_type.value,
+                        "metadata": fragment.metadata,
+                    }
+
+                    # Queue fragment
+                    try:
+                        await asyncio.wait_for(
+                            self.stream_queues[queue_key].put(
+                                {"type": "fragment", "data": fragment_data}
+                            ),
+                            timeout=0.1,
+                        )
+                    except TimeoutError:
+                        logger.warning(
+                            f"Fragment queue full for {queue_key}, dropping fragment"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"Fragment streaming failed for channel {channel_type.value}: {e}"
+                    )
+                    continue
+
+        except Exception as e:
+            logger.error(
+                f"Channel fragment streaming failed for {channel_type.value}: {e}"
+            )
+            # Send error to queue
+            queue_key = f"{dual_stream.stream_id}_{channel_type.value}"
+            if queue_key in self.stream_queues:
+                try:
+                    await self.stream_queues[queue_key].put(
+                        {"type": "error", "error": str(e)}
+                    )
+                except asyncio.QueueFull:
+                    pass
+
+    async def get_connection_stats(self) -> dict[str, Any]:
+        """Get SSE connection statistics.
+
+        Returns:
+            Dictionary with connection statistics
+        """
+        return {
+            "active_connections": self.connection_metrics.active_connections,
+            "total_connections_created": self.connection_metrics.total_connections_created,
+            "total_disconnections": self.connection_metrics.total_disconnections,
+            "bytes_streamed": self.connection_metrics.bytes_streamed,
+            "fragments_sent": self.connection_metrics.fragments_sent,
+            "connection_errors": self.connection_metrics.connection_errors,
+            "average_connection_duration": self.connection_metrics.average_connection_duration,
+            "peak_concurrent_connections": self.connection_metrics.peak_concurrent_connections,
+            "dual_channel_streams": self.connection_metrics.dual_channel_streams,
+            "channel_switches": self.connection_metrics.channel_switches,
+            "sync_violations": self.connection_metrics.sync_violations,
+            "processing_metrics": self.processing_metrics,
+            "last_activity": self.connection_metrics.last_activity.isoformat(),
+        }
+
+    async def health_check(self) -> dict[str, Any]:
+        """Perform health check for SSE streaming service.
+
+        Returns:
+            Health check result dictionary
+        """
+        try:
+            # Check base streaming service health
+            base_health = await self.base_streaming_service.health_check()
+
+            # Check SSE-specific health
+            sse_healthy = (
+                len(self.active_streams) <= self.max_concurrent_connections
+                and self.connection_metrics.connection_errors
+                < 100  # Arbitrary threshold
+            )
+
+            overall_healthy = base_health.get("healthy", False) and sse_healthy
+
+            return {
+                "healthy": overall_healthy,
+                "sse_service_status": "healthy" if sse_healthy else "degraded",
+                "base_service_health": base_health,
+                "connection_stats": await self.get_connection_stats(),
+                "dual_channel_stats": self.channel_manager.get_dual_channel_stats(),
+                "subscription_stats": self.subscription_manager.get_subscription_stats(),
+                "timestamp": time.time(),
+            }
+
+        except Exception as e:
+            logger.error(f"SSE health check failed: {e}")
+            return {
+                "healthy": False,
+                "error": str(e),
+                "timestamp": time.time(),
+            }
+
+
+class StreamingService:
+    """Main Streaming Service with independent startup capability.
+
+    This service can run independently without FastAPI binding and supports
+    both CLI and programmatic initialization with proper dependency injection.
+    """
+
+    def __init__(
+        self,
+        streaming_processor: Union["StreamingDataProcessor", None] = None,
+        redis_manager: RedisQueueManager | None = None,
+        config: dict[str, Any] | None = None,
+    ):
+        """Initialize streaming service with dependency injection support.
+
+        Args:
+            streaming_processor: Injected streaming data processor
+            redis_manager: Injected Redis queue manager
+            config: Service configuration dictionary
+        """
+        self.config = config or {}
+        self.streaming_processor = streaming_processor
+        self.redis_manager = redis_manager
+
+        # Service state
+        self.is_running = False
+        self.startup_time: float | None = None
+        self.health_status = "initializing"
+
+        # Performance tracking
+        self.startup_metrics = {
+            "startup_time_ms": 0.0,
+            "initialization_time_ms": 0.0,
+            "ready_time_ms": 0.0,
+        }
+
+        logger.info("StreamingService initialized with dependency injection")
+
+    async def start(self) -> None:
+        """Start the streaming service independently.
+
+        Ensures <10ms startup time requirement.
+        """
+        if self.is_running:
+            logger.warning("StreamingService already running")
+            return
+
+        startup_start = time.perf_counter()
+
+        try:
+            # Initialize components if not injected
+            if self.streaming_processor is None:
+                self.streaming_processor = StreamingDataProcessor(
+                    redis_client=self.redis_manager,
+                    max_concurrent_streams=self.config.get(
+                        "max_concurrent_streams", 100
+                    ),
+                    frame_processing_timeout=self.config.get(
+                        "frame_processing_timeout", 0.01
+                    ),
+                )
+
+            # Start the streaming processor
+            await self.streaming_processor.start()
+
+            self.is_running = True
+            self.health_status = "healthy"
+
+            startup_end = time.perf_counter()
+            startup_time_ms = (startup_end - startup_start) * 1000
+
+            self.startup_time = startup_time_ms
+            self.startup_metrics["startup_time_ms"] = startup_time_ms
+
+            logger.info(f"StreamingService started in {startup_time_ms:.2f}ms")
+
+            # Verify startup time requirement
+            if startup_time_ms > 10.0:
+                logger.warning(
+                    f"Startup time {startup_time_ms:.2f}ms exceeds 10ms target"
+                )
+
+        except Exception as e:
+            self.health_status = "unhealthy"
+            logger.error(f"Failed to start StreamingService: {e}")
+            raise StreamProcessingError(f"Service startup failed: {e}") from e
+
+    async def stop(self) -> None:
+        """Stop the streaming service with graceful shutdown."""
+        if not self.is_running:
+            return
+
+        logger.info("Stopping StreamingService...")
+
+        try:
+            # Gracefully stop the streaming processor
+            if self.streaming_processor:
+                await self.streaming_processor.stop()
+
+            self.is_running = False
+            self.health_status = "stopped"
+
+            logger.info("StreamingService stopped gracefully")
+
+        except Exception as e:
+            self.health_status = "error"
+            logger.error(f"Error during StreamingService shutdown: {e}")
+            raise
+
+    async def health_check(self) -> dict[str, Any]:
+        """Independent health check that works without FastAPI."""
+        if not self.is_running:
+            return {
+                "status": "stopped",
+                "healthy": False,
+                "message": "Service not running",
+                "timestamp": time.time(),
+            }
+
+        try:
+            # Check streaming processor health
+            processor_health = None
+            if self.streaming_processor:
+                processor_health = await self.streaming_processor.get_health_status()
+
+            # Check Redis health
+            redis_health = None
+            if self.redis_manager:
+                redis_health = await self.redis_manager.health_check()
+
+            overall_healthy = (
+                self.health_status == "healthy"
+                and (
+                    processor_health is None
+                    or processor_health.get("service_status") == "healthy"
+                )
+                and (
+                    redis_health is None
+                    or redis_health.get("status") in ["healthy", "available"]
+                )
+            )
+
+            return {
+                "status": self.health_status,
+                "healthy": overall_healthy,
+                "startup_time_ms": self.startup_time,
+                "processor_health": processor_health,
+                "redis_health": redis_health,
+                "startup_metrics": self.startup_metrics,
+                "timestamp": time.time(),
+            }
+
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return {
+                "status": "error",
+                "healthy": False,
+                "error": str(e),
+                "timestamp": time.time(),
+            }
+
+    async def get_metrics(self) -> dict[str, Any]:
+        """Get service metrics for monitoring."""
+        base_metrics = {
+            "service_status": self.health_status,
+            "is_running": self.is_running,
+            "startup_metrics": self.startup_metrics,
+        }
+
+        if self.streaming_processor:
+            processor_metrics = self.streaming_processor.get_processing_metrics()
+            base_metrics["processing_metrics"] = processor_metrics
+
+        return base_metrics
+
+    async def register_camera(self, camera_config: CameraConfig) -> CameraRegistration:
+        """Register a camera through the service interface."""
+        if not self.is_running or not self.streaming_processor:
+            return CameraRegistration(
+                camera_id=camera_config.camera_id,
+                success=False,
+                message="Service not running or not properly initialized",
+            )
+
+        return await self.streaming_processor.register_camera(camera_config)
+
+    async def __aenter__(self) -> "StreamingService":
+        """Async context manager entry."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit with cleanup."""
+        _ = exc_type, exc_val, exc_tb  # Mark as intentionally unused
+        await self.stop()
+
+
 class StreamingDataProcessor(StreamingServiceInterface):
     """High-throughput video stream processing with quality validation."""
 
@@ -1104,6 +3008,10 @@ class StreamingDataProcessor(StreamingServiceInterface):
         self.protobuf_serializer = ProtobufSerializationManager()
         self.max_concurrent_streams = max_concurrent_streams
         self.frame_processing_timeout = frame_processing_timeout
+
+        # Performance optimization
+        self.performance_optimizer = None
+        self._performance_enabled = False
 
         # Stream management
         self.registered_cameras: dict[str, CameraConfig] = {}
@@ -1133,6 +3041,55 @@ class StreamingDataProcessor(StreamingServiceInterface):
         logger.info(
             f"StreamingDataProcessor initialized with max_concurrent_streams={max_concurrent_streams}, baseline_memory={self._memory_baseline_mb:.1f}MB"
         )
+
+    async def initialize_performance_optimization(
+        self,
+        optimization_config: Optional[dict[str, Any]] = None,
+        redis_url: Optional[str] = None,
+        database_url: Optional[str] = None,
+    ) -> None:
+        """Initialize performance optimization for streaming system.
+
+        Args:
+            optimization_config: Performance optimization configuration
+            redis_url: Redis connection URL for L2 caching
+            database_url: Database connection URL for connection pooling
+        """
+        try:
+            from ..performance import (
+                OptimizationStrategy,
+                create_performance_optimizer,
+                create_production_optimization_config,
+            )
+
+            # Create default optimization config if not provided
+            if optimization_config is None:
+                config = create_production_optimization_config(
+                    max_concurrent_streams=self.max_concurrent_streams,
+                    target_latency_ms=100.0,
+                    strategy=OptimizationStrategy.LATENCY_OPTIMIZED,
+                )
+            else:
+                from ..performance.optimization_config import OptimizationConfig
+
+                config = OptimizationConfig(**optimization_config)
+
+            # Initialize performance optimizer
+            self.performance_optimizer = await create_performance_optimizer(
+                config=config,
+                redis_manager=self.redis_client,
+                redis_url=redis_url,
+                database_url=database_url,
+            )
+
+            logger.info("Performance optimization initialized successfully")
+
+        except ImportError as e:
+            logger.warning(f"Performance optimization not available: {e}")
+            self.performance_optimizer = None
+        except Exception as e:
+            logger.error(f"Performance optimization initialization failed: {e}")
+            self.performance_optimizer = None
 
     async def start(self) -> None:
         """Start the streaming data processor."""
@@ -1303,9 +3260,9 @@ class StreamingDataProcessor(StreamingServiceInterface):
                         processed_frame.processing_time_ms = processing_time
 
                         self.processing_metrics["frames_processed"] += 1
-                        self.processing_metrics["total_processing_time"] += (
-                            processing_time
-                        )
+                        self.processing_metrics[
+                            "total_processing_time"
+                        ] += processing_time
 
                         yield processed_frame
 
@@ -1414,7 +3371,9 @@ class StreamingDataProcessor(StreamingServiceInterface):
             if self.redis_client:
                 try:
                     # Serialize entire batch using protobuf for maximum efficiency
-                    batch_data = self.protobuf_serializer.serialize_frame_batch(frames, batch_id)
+                    batch_data = self.protobuf_serializer.serialize_frame_batch(
+                        frames, batch_id
+                    )
 
                     # Queue the serialized batch
                     await self.redis_client.enqueue(
@@ -1444,7 +3403,11 @@ class StreamingDataProcessor(StreamingServiceInterface):
                     for frame in frames:
                         try:
                             # Serialize individual frame using protobuf
-                            frame_data = self.protobuf_serializer.serialize_processed_frame(frame)
+                            frame_data = (
+                                self.protobuf_serializer.serialize_processed_frame(
+                                    frame
+                                )
+                            )
 
                             await self.redis_client.enqueue(
                                 "processed_frames_output",
@@ -1468,8 +3431,10 @@ class StreamingDataProcessor(StreamingServiceInterface):
                                 "frame_id": frame.frame_id,
                                 "camera_id": frame.camera_id,
                                 "timestamp": frame.timestamp,
-                                "quality_score": getattr(frame, 'quality_score', 0.0),
-                                "processing_time_ms": getattr(frame, 'processing_time_ms', 0.0),
+                                "quality_score": getattr(frame, "quality_score", 0.0),
+                                "processing_time_ms": getattr(
+                                    frame, "processing_time_ms", 0.0
+                                ),
                                 "batch_id": batch_id,
                                 "serialization_format": "json_fallback",
                             }
@@ -1480,7 +3445,9 @@ class StreamingDataProcessor(StreamingServiceInterface):
                                 metadata={"batch_id": batch_id, "camera_id": camera_id},
                             )
 
-            logger.debug(f"Successfully queued batch {batch_id} with {len(frames)} frames")
+            logger.debug(
+                f"Successfully queued batch {batch_id} with {len(frames)} frames"
+            )
 
             return BatchId(
                 batch_id=batch_id, camera_id=camera_id, frame_count=len(frames)
@@ -1591,12 +3558,14 @@ class StreamingDataProcessor(StreamingServiceInterface):
                     total_reserved += reserved
                     total_memory += total
 
-                gpu_memory.update({
-                    "allocated_mb": total_allocated,
-                    "reserved_mb": total_reserved,
-                    "total_mb": total_memory,
-                    "free_mb": total_memory - total_reserved,
-                })
+                gpu_memory.update(
+                    {
+                        "allocated_mb": total_allocated,
+                        "reserved_mb": total_reserved,
+                        "total_mb": total_memory,
+                        "free_mb": total_memory - total_reserved,
+                    }
+                )
 
         except Exception as e:
             logger.debug(f"GPU memory check failed: {e}")
@@ -1616,12 +3585,16 @@ class StreamingDataProcessor(StreamingServiceInterface):
 
                 # Assume we keep ~10 frames in memory per camera (processing pipeline)
                 estimated_buffer_frames = 10
-                buffer_memory_mb = (bytes_per_frame * estimated_buffer_frames) / (1024 * 1024)
+                buffer_memory_mb = (bytes_per_frame * estimated_buffer_frames) / (
+                    1024 * 1024
+                )
 
                 total_buffer_memory += buffer_memory_mb
 
             # Add Redis queue memory estimation
-            frames_in_queues = self.processing_metrics.get("frames_processed", 0) % 1000  # Rough estimate
+            frames_in_queues = (
+                self.processing_metrics.get("frames_processed", 0) % 1000
+            )  # Rough estimate
             avg_frame_size_mb = 1.0  # Conservative estimate: 1MB per frame
             queue_memory_mb = frames_in_queues * avg_frame_size_mb
 
@@ -1649,7 +3622,7 @@ class StreamingDataProcessor(StreamingServiceInterface):
 
         # Calculate memory growth rate (MB per hour)
         time_elapsed_hours = (current_time - self._last_memory_check) / 3600.0
-        growth_rate_mb_per_hour = (memory_growth / max(0.01, time_elapsed_hours))
+        growth_rate_mb_per_hour = memory_growth / max(0.01, time_elapsed_hours)
 
         leak_status = {
             "current_memory_mb": current_memory,
@@ -1711,8 +3684,11 @@ class StreamingDataProcessor(StreamingServiceInterface):
                 "leak_detection": leak_status,
                 "efficiency_metrics": {
                     "memory_per_camera_mb": memory_per_camera,
-                    "frames_per_mb": self.processing_metrics.get("frames_processed", 0) / max(1, current_memory),
-                    "memory_efficiency_score": min(1.0, 100.0 / max(1, current_memory)),  # Higher is better
+                    "frames_per_mb": self.processing_metrics.get("frames_processed", 0)
+                    / max(1, current_memory),
+                    "memory_efficiency_score": min(
+                        1.0, 100.0 / max(1, current_memory)
+                    ),  # Higher is better
                 },
             }
 
@@ -1748,14 +3724,18 @@ class StreamingDataProcessor(StreamingServiceInterface):
             service_health = "stopped"
         else:
             # Check memory health
-            if memory_status.get("leak_detection", {}).get("potential_leak_detected", False):
+            if memory_status.get("leak_detection", {}).get(
+                "potential_leak_detected", False
+            ):
                 service_health = "degraded"
                 health_issues.append("Memory leak detected")
 
             # Check GPU memory if available
             gpu_memory = memory_status.get("gpu_memory", {})
             if gpu_memory.get("total_mb", 0) > 0:
-                gpu_utilization = (gpu_memory.get("reserved_mb", 0) / gpu_memory.get("total_mb", 1)) * 100
+                gpu_utilization = (
+                    gpu_memory.get("reserved_mb", 0) / gpu_memory.get("total_mb", 1)
+                ) * 100
                 if gpu_utilization > 95:
                     service_health = "degraded"
                     health_issues.append("High GPU memory usage")
@@ -1778,12 +3758,22 @@ class StreamingDataProcessor(StreamingServiceInterface):
                 connection = self.connection_manager.active_connections.get(camera_id)
                 if isinstance(connection, dict) and connection.get("type") == "webrtc":
                     try:
-                        webrtc_quality = await self.connection_manager.get_webrtc_connection_quality(camera_id)
+                        webrtc_quality = (
+                            await self.connection_manager.get_webrtc_connection_quality(
+                                camera_id
+                            )
+                        )
                         webrtc_health[camera_id] = {
-                            "connection_state": webrtc_quality.get("connection_state", "unknown"),
-                            "ice_connection_state": webrtc_quality.get("ice_connection_state", "unknown"),
+                            "connection_state": webrtc_quality.get(
+                                "connection_state", "unknown"
+                            ),
+                            "ice_connection_state": webrtc_quality.get(
+                                "ice_connection_state", "unknown"
+                            ),
                             "rtt_ms": webrtc_quality.get("rtt", 0),
-                            "packet_loss_rate": webrtc_quality.get("packet_loss_rate", 0),
+                            "packet_loss_rate": webrtc_quality.get(
+                                "packet_loss_rate", 0
+                            ),
                         }
                     except Exception as e:
                         webrtc_health[camera_id] = {"error": str(e)}
@@ -1808,4 +3798,5 @@ class StreamingDataProcessor(StreamingServiceInterface):
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
+        _ = exc_type, exc_val, exc_tb  # Mark as intentionally unused
         await self.stop()

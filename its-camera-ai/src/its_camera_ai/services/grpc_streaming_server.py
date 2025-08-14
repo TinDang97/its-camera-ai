@@ -23,7 +23,7 @@ import numpy as np
 
 # Internal imports
 from ..core.logging import get_logger
-from ..data.redis_queue_manager import RedisQueueManager
+from ..flow.redis_queue_manager import RedisQueueManager
 from ..proto import processed_frame_pb2 as frame_pb
 from ..proto import streaming_service_pb2 as pb
 from ..proto import streaming_service_pb2_grpc as pb_grpc
@@ -149,9 +149,11 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                         # Create response
                         response = pb.StreamResponse(
                             success=quality_metrics.passed_validation,
-                            message="Frame processed successfully"
-                            if quality_metrics.passed_validation
-                            else "Quality validation failed",
+                            message=(
+                                "Frame processed successfully"
+                                if quality_metrics.passed_validation
+                                else "Quality validation failed"
+                            ),
                             frame_id=request.frame_id,
                             processing_time_ms=processing_time,
                         )
@@ -244,12 +246,14 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                     failed_count += 1
                     error = pb.ProcessingError(
                         error_id=str(uuid.uuid4()),
-                        frame_id=frame.frame_id
-                        if hasattr(frame, "frame_id")
-                        else "unknown",
-                        camera_id=frame.camera_id
-                        if hasattr(frame, "camera_id")
-                        else "unknown",
+                        frame_id=(
+                            frame.frame_id if hasattr(frame, "frame_id") else "unknown"
+                        ),
+                        camera_id=(
+                            frame.camera_id
+                            if hasattr(frame, "camera_id")
+                            else "unknown"
+                        ),
                         error_type="PROCESSING_EXCEPTION",
                         error_message=str(e),
                         timestamp=time.time(),
@@ -289,9 +293,11 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                 fps=request.fps,
                 protocol=StreamProtocol.HTTP,  # Default
                 location=request.location,
-                coordinates=(request.latitude, request.longitude)
-                if request.latitude and request.longitude
-                else None,
+                coordinates=(
+                    (request.latitude, request.longitude)
+                    if request.latitude and request.longitude
+                    else None
+                ),
                 quality_threshold=request.quality_threshold,
                 roi_boxes=[
                     (roi.x, roi.y, roi.width, roi.height) for roi in request.roi_boxes
@@ -333,9 +339,11 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                 fps=request.fps,
                 protocol=StreamProtocol.HTTP,
                 location=request.location,
-                coordinates=(request.latitude, request.longitude)
-                if request.latitude and request.longitude
-                else None,
+                coordinates=(
+                    (request.latitude, request.longitude)
+                    if request.latitude and request.longitude
+                    else None
+                ),
                 quality_threshold=request.quality_threshold,
                 roi_boxes=[
                     (roi.x, roi.y, roi.width, roi.height) for roi in request.roi_boxes
@@ -349,9 +357,11 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
             return pb.StreamUpdateResponse(
                 success=registration.success,
                 camera_id=registration.camera_id,
-                message="Configuration updated successfully"
-                if registration.success
-                else registration.message,
+                message=(
+                    "Configuration updated successfully"
+                    if registration.success
+                    else registration.message
+                ),
             )
 
         except Exception as e:
@@ -385,9 +395,11 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                     encoding="h264",  # Default
                     quality_threshold=config.quality_threshold,
                     processing_enabled=config.enabled,
-                    status=frame_pb.STREAM_STATUS_ACTIVE
-                    if config.enabled
-                    else frame_pb.STREAM_STATUS_INACTIVE,
+                    status=(
+                        frame_pb.STREAM_STATUS_ACTIVE
+                        if config.enabled
+                        else frame_pb.STREAM_STATUS_INACTIVE
+                    ),
                     last_frame_time=time.time(),  # Placeholder
                     total_frames_processed=0,  # Placeholder
                 )
@@ -460,9 +472,11 @@ class StreamingServiceImpl(pb_grpc.StreamingServiceServicer):
                 return pb.PurgeQueueResponse(
                     success=purged_count > 0,
                     purged_count=purged_count,
-                    message=f"Purged {purged_count} messages"
-                    if purged_count > 0
-                    else "No messages to purge",
+                    message=(
+                        f"Purged {purged_count} messages"
+                        if purged_count > 0
+                        else "No messages to purge"
+                    ),
                 )
             else:
                 return pb.PurgeQueueResponse(

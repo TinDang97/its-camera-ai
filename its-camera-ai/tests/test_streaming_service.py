@@ -18,7 +18,7 @@ import numpy as np
 import psutil
 import pytest
 
-from src.its_camera_ai.data.redis_queue_manager import (
+from src.its_camera_ai.flow.redis_queue_manager import (
     RedisQueueManager,
 )
 from src.its_camera_ai.data.streaming_processor import ProcessedFrame, ProcessingStage
@@ -564,9 +564,9 @@ class TestStreamingServicePerformance:
         print(f"P99: {p99_latency:.2f}ms")
 
         # Verify performance requirements
-        assert avg_latency < 10.0, (
-            f"Average latency {avg_latency:.2f}ms exceeds 10ms requirement"
-        )
+        assert (
+            avg_latency < 10.0
+        ), f"Average latency {avg_latency:.2f}ms exceeds 10ms requirement"
         assert p95_latency < 15.0, f"P95 latency {p95_latency:.2f}ms too high"
 
         await self.processor.stop()
@@ -611,9 +611,9 @@ class TestStreamingServicePerformance:
         print(f"Total time: {total_time:.2f}s")
         print(f"Average time per camera: {total_time / len(configs) * 1000:.2f}ms")
 
-        assert successful_registrations == len(configs), (
-            "Not all camera registrations succeeded"
-        )
+        assert successful_registrations == len(
+            configs
+        ), "Not all camera registrations succeeded"
         assert len(self.processor.registered_cameras) == len(configs)
 
         await self.processor.stop()
@@ -679,12 +679,12 @@ class TestStreamingServicePerformance:
         print(f"Throughput: {throughput:.1f} fps")
 
         # Verify performance requirements
-        assert success_rate >= 0.999, (
-            f"Success rate {success_rate * 100:.1f}% below 99.9% requirement"
-        )
-        assert throughput >= 100, (
-            f"Throughput {throughput:.1f} fps too low"
-        )  # Should handle at least 100 fps
+        assert (
+            success_rate >= 0.999
+        ), f"Success rate {success_rate * 100:.1f}% below 99.9% requirement"
+        assert (
+            throughput >= 100
+        ), f"Throughput {throughput:.1f} fps too low"  # Should handle at least 100 fps
 
         await self.processor.stop()
 
@@ -744,10 +744,14 @@ class TestStreamingServicePerformance:
             print(f"Memory increase: {memory_increase:.1f} MB")
 
             # Memory should stay under 4GB (4096 MB)
-            assert peak_memory < 4096, f"Memory usage {peak_memory:.1f} MB exceeds 4GB limit"
+            assert (
+                peak_memory < 4096
+            ), f"Memory usage {peak_memory:.1f} MB exceeds 4GB limit"
 
             # Memory increase should be reasonable for 100 streams
-            assert memory_increase < 2048, f"Memory increase {memory_increase:.1f} MB too high"
+            assert (
+                memory_increase < 2048
+            ), f"Memory increase {memory_increase:.1f} MB too high"
 
         await self.processor.stop()
 
@@ -791,14 +795,22 @@ class TestStreamingServicePerformance:
 
                 frame_start_time = time.perf_counter()
                 frame_tasks = [
-                    self.processor._process_single_frame(config.camera_id, frames[i], config)
+                    self.processor._process_single_frame(
+                        config.camera_id, frames[i], config
+                    )
                     for i, config in enumerate(configs)
                 ]
-                frame_results = await asyncio.gather(*frame_tasks, return_exceptions=True)
+                frame_results = await asyncio.gather(
+                    *frame_tasks, return_exceptions=True
+                )
                 frame_processing_time = time.perf_counter() - frame_start_time
 
                 # Calculate metrics
-                successful_frames = sum(1 for r in frame_results if r is not None and not isinstance(r, Exception))
+                successful_frames = sum(
+                    1
+                    for r in frame_results
+                    if r is not None and not isinstance(r, Exception)
+                )
                 success_rate = successful_frames / len(frame_results)
 
                 return {
@@ -807,7 +819,7 @@ class TestStreamingServicePerformance:
                     "successful_registrations": successful,
                     "successful_frames": successful_frames,
                     "success_rate": success_rate,
-                    "total_streams": 120
+                    "total_streams": 120,
                 }
 
         result = await benchmark.pedantic(process_concurrent_streams, rounds=1)
@@ -820,9 +832,15 @@ class TestStreamingServicePerformance:
         print(f"Success rate: {result['success_rate']*100:.1f}%")
 
         # Performance requirements validation
-        assert result['successful_registrations'] >= 120, "Failed to register all streams"
-        assert result['success_rate'] >= 0.999, f"Success rate {result['success_rate']*100:.1f}% below 99.9%"
-        assert result['frame_processing_time'] < 2.0, f"Frame processing too slow: {result['frame_processing_time']:.3f}s"
+        assert (
+            result["successful_registrations"] >= 120
+        ), "Failed to register all streams"
+        assert (
+            result["success_rate"] >= 0.999
+        ), f"Success rate {result['success_rate']*100:.1f}% below 99.9%"
+        assert (
+            result["frame_processing_time"] < 2.0
+        ), f"Frame processing too slow: {result['frame_processing_time']:.3f}s"
 
         await self.processor.stop()
 
@@ -881,31 +899,33 @@ class TestStreamingServicePerformance:
                     "avg": avg_latency,
                     "p95": p95_latency,
                     "max": max(latencies),
-                    "min": min(latencies)
+                    "min": min(latencies),
                 }
 
             print("\nLatency Consistency Results:")
             for load_level, metrics in latency_results.items():
-                print(f"Load {load_level:3d}: Avg={metrics['avg']:.2f}ms, "
-                      f"P95={metrics['p95']:.2f}ms, Max={metrics['max']:.2f}ms")
+                print(
+                    f"Load {load_level:3d}: Avg={metrics['avg']:.2f}ms, "
+                    f"P95={metrics['p95']:.2f}ms, Max={metrics['max']:.2f}ms"
+                )
 
             # Validate latency requirements
             for load_level, metrics in latency_results.items():
-                assert metrics['avg'] < 10.0, (
-                    f"Average latency {metrics['avg']:.2f}ms exceeds 10ms at load {load_level}"
-                )
-                assert metrics['p95'] < 15.0, (
-                    f"P95 latency {metrics['p95']:.2f}ms exceeds 15ms at load {load_level}"
-                )
+                assert (
+                    metrics["avg"] < 10.0
+                ), f"Average latency {metrics['avg']:.2f}ms exceeds 10ms at load {load_level}"
+                assert (
+                    metrics["p95"] < 15.0
+                ), f"P95 latency {metrics['p95']:.2f}ms exceeds 15ms at load {load_level}"
 
             # Latency should not degrade significantly with load
             latency_degradation = (
-                latency_results[100]['avg'] - latency_results[1]['avg']
-            ) / latency_results[1]['avg']
+                latency_results[100]["avg"] - latency_results[1]["avg"]
+            ) / latency_results[1]["avg"]
 
-            assert latency_degradation < 2.0, (
-                f"Latency degradation {latency_degradation*100:.1f}% too high under load"
-            )
+            assert (
+                latency_degradation < 2.0
+            ), f"Latency degradation {latency_degradation*100:.1f}% too high under load"
 
         await self.processor.stop()
 
@@ -962,23 +982,25 @@ class TestStreamingServicePerformance:
                 performance_metrics[error_rate] = {
                     "success_rate": success_rate,
                     "avg_latency": avg_latency,
-                    "successful_frames": successful_frames
+                    "successful_frames": successful_frames,
                 }
 
             print("\nError Recovery Performance:")
             for error_rate, metrics in performance_metrics.items():
-                print(f"Error rate {error_rate*100:3.0f}%: Success={metrics['success_rate']*100:.1f}%, "
-                      f"Latency={metrics['avg_latency']:.2f}ms")
+                print(
+                    f"Error rate {error_rate*100:3.0f}%: Success={metrics['success_rate']*100:.1f}%, "
+                    f"Latency={metrics['avg_latency']:.2f}ms"
+                )
 
             # System should maintain performance even with errors
             for error_rate, metrics in performance_metrics.items():
                 expected_success_rate = 1.0 - error_rate
-                assert metrics['success_rate'] >= expected_success_rate * 0.95, (
-                    f"Success rate too low at {error_rate*100}% error rate"
-                )
-                assert metrics['avg_latency'] < 20.0, (
-                    f"Latency too high during error conditions: {metrics['avg_latency']:.2f}ms"
-                )
+                assert (
+                    metrics["success_rate"] >= expected_success_rate * 0.95
+                ), f"Success rate too low at {error_rate*100}% error rate"
+                assert (
+                    metrics["avg_latency"] < 20.0
+                ), f"Latency too high during error conditions: {metrics['avg_latency']:.2f}ms"
 
         await self.processor.stop()
 

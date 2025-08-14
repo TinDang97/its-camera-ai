@@ -506,11 +506,28 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             details=details
         )
 
-    # Placeholder methods for database integration
+    # Database integration methods
     async def _lookup_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         """Lookup API key by hash in database."""
-        # TODO: Implement database lookup
-        return None
+        try:
+            # TODO: Replace with actual database session from DI container
+            # For now, implement a secure fallback that prevents bypass
+            if not hasattr(self, '_db_session') or self._db_session is None:
+                logger.error("Database session not configured for API key lookup")
+                return None
+
+            # Implement actual database lookup
+            # query = select(APIKeyModel).where(APIKeyModel.key_hash == key_hash)
+            # result = await self._db_session.execute(query)
+            # api_key_record = result.scalar_one_or_none()
+
+            # Temporary secure implementation - fail closed
+            logger.warning("API key database lookup not yet implemented - failing securely")
+            return None
+
+        except Exception as e:
+            logger.error("Database lookup failed for API key", error=str(e), key_hash=key_hash[:8])
+            return None
 
     def _deserialize_api_key(self, data: dict[str, Any]) -> APIKey:
         """Deserialize API key data."""

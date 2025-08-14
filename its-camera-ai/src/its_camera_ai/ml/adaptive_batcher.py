@@ -387,49 +387,70 @@ class AdaptiveBatchProcessor:
     """
 
     def __init__(
-        self,
-        inference_func: Callable[[list[np.ndarray], list[str], list[str]], list[Any]],
-        max_batch_size: int = 32,
-        base_timeout_ms: int = 10,
-        enable_workload_analysis: bool = True,
-        circuit_breaker_threshold: int = 100
-    ):
-        self.inference_func = inference_func
-        self.max_batch_size = max_batch_size
-        self.circuit_breaker_threshold = circuit_breaker_threshold
+    self,
+    inference_func: Callable[[list[np.ndarray], list[str], list[str]], list[Any]],
+    max_batch_size: int = 32,
+    base_timeout_ms: int = 3,  # Reduced from 10ms to 3ms for ultra-low latency
+    enable_workload_analysis: bool = True,
+    circuit_breaker_threshold: int = 100,
+    enable_micro_batching: bool = True,  # New: micro-batching for priority streams
+    target_latency_ms: float = 50.0,  # Target end-to-end latency
+    priority_lane_timeout_ms: int = 1,  # Ultra-fast lane for emergency vehicles
+):
+    self.inference_func = inference_func
+    self.max_batch_size = max_batch_size
+    self.circuit_breaker_threshold = circuit_breaker_threshold
+    self.enable_micro_batching = enable_micro_batching
+    self.target_latency_ms = target_latency_ms
+    self.priority_lane_timeout_ms = priority_lane_timeout_ms
 
-        # Priority queues
-        self.queues = {
-            priority: asyncio.Queue(maxsize=max_batch_size * 4)
-            for priority in BatchPriority
-        }
+    # Enhanced priority queues with separate micro-batch lane
+    self.queues = {
+        priority: asyncio.Queue(maxsize=max_batch_size * 4)
+        for priority in BatchPriority
+    }
+    
+    # Separate queue for emergency/priority vehicles (ultra-fast processing)
+    self.priority_lane_queue = asyncio.Queue(maxsize=10) if enable_micro_batching else None
 
-        # Management components
-        self.timeout_manager = AdaptiveTimeoutManager(base_timeout_ms)
-        self.workload_analyzer = WorkloadAnalyzer() if enable_workload_analysis else None
-        self.metrics = BatchMetrics()
+    # Management components
+    self.timeout_manager = AdaptiveTimeoutManager(base_timeout_ms)
+    self.workload_analyzer = WorkloadAnalyzer() if enable_workload_analysis else None
+    self.metrics = BatchMetrics()
 
-        # Processing state
-        self.running = False
-        self.processor_task: asyncio.Task | None = None
-        self.circuit_breaker_open = False
-        self.circuit_breaker_reset_time = 0.0
+    # Processing state
+    self.running = False
+    self.processor_task: asyncio.Task | None = None
+    self.priority_processor_task: asyncio.Task | None = None  # New: priority lane processor
+    self.circuit_breaker_open = False
+    self.circuit_breaker_reset_time = 0.0
 
-        # Batch collection state
-        self.current_batch: list[BatchRequest] = []
-        self.batch_start_time = time.time()
+    # Batch collection state
+    self.current_batch: list[BatchRequest] = []
+    self.batch_start_time = time.time()
+    
+    # Performance optimization state
+    self.last_batch_size = 0
+    self.optimal_batch_size_cache = {}  # Cache optimal batch sizes per camera pattern
+    self.frame_skip_mode = False  # Emergency frame skipping when overloaded
 
-        logger.info(f"Adaptive batch processor initialized: max_batch={max_batch_size}")
+    logger.info(f"Ultra-low latency adaptive batch processor initialized: "
+                f"max_batch={max_batch_size}, timeout={base_timeout_ms}ms, "
+                f"micro_batching={enable_micro_batching}, target_latency={target_latency_ms}ms")
 
     async def start(self) -> None:
-        """Start the adaptive batch processing system."""
-        if self.running:
-            return
+    """Start the ultra-low latency batch processing system."""
+    if self.running:
+        return
 
-        self.running = True
-        self.processor_task = asyncio.create_task(self._process_batches())
+    self.running = True
+    self.processor_task = asyncio.create_task(self._process_batches())
+    
+    # Start priority lane processor for emergency vehicles
+    if self.enable_micro_batching and self.priority_lane_queue:
+        self.priority_processor_task = asyncio.create_task(self._process_priority_lane())
 
-        logger.info("Adaptive batch processor started")
+    logger.info("Ultra-low latency adaptive batch processor started with priority lane support")
 
     async def stop(self) -> None:
         """Stop the batch processing system gracefully."""
@@ -453,6 +474,222 @@ class AdaptiveBatchProcessor:
                     break
 
         logger.info("Adaptive batch processor stopped")
+
+    async def _process_priority_lane(self) -> None:
+        """Ultra-fast processing lane for emergency/priority vehicles."""
+        logger.info("Starting priority lane processor for emergency vehicles")
+        
+        while self.running:
+            try:
+                # Wait for priority requests with minimal timeout
+                try:
+                    request = await asyncio.wait_for(
+                        self.priority_lane_queue.get(),
+                        timeout=self.priority_lane_timeout_ms / 1000.0
+                    )
+                    
+                    # Process immediately with micro-batching (batch size = 1)
+                    start_time = time.time()
+                    
+                    try:
+                        # Run inference with highest priority
+                        result = await asyncio.get_event_loop().run_in_executor(
+                            None, 
+                            self.inference_func,
+                            [request.frame],
+                            [request.frame_id],
+                            [request.camera_id]
+                        )
+                        
+                        processing_time = (time.time() - start_time) * 1000
+                        
+                        # Complete the request immediately
+                        if not request.future.done():
+                            request.future.set_result(result[0] if result else None)
+                        
+                        # Log priority processing
+                        logger.debug(f"Priority lane processed {request.frame_id} in {processing_time:.1f}ms")
+                        
+                        # Update metrics
+                        self.metrics.total_requests += 1
+                        self.metrics.completed_requests += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Priority lane processing failed: {e}")
+                        if not request.future.done():
+                            request.future.set_exception(e)
+                        self.metrics.failed_requests += 1
+                
+                except asyncio.TimeoutError:
+                    # No priority requests, continue
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Priority lane processor error: {e}")
+                await asyncio.sleep(0.001)  # Brief pause on error
+
+    async def submit_priority_request(
+        self,
+        frame: np.ndarray,
+        frame_id: str,
+        camera_id: str = "unknown",
+        is_emergency: bool = False
+    ) -> Any:
+        """
+        Submit ultra-priority request for emergency vehicles or critical frames.
+        
+        This bypasses normal batching for <5ms processing time.
+        """
+        if not self.running:
+            raise RuntimeError("Batch processor not running")
+        
+        if not self.enable_micro_batching or not self.priority_lane_queue:
+            # Fall back to regular submission with highest priority
+            return await self.submit_request(
+                frame, frame_id, camera_id, BatchPriority.HIGH, deadline_ms=5
+            )
+        
+        timestamp = time.time()
+        future = asyncio.Future()
+        
+        request = BatchRequest(
+            frame=frame,
+            frame_id=frame_id,
+            camera_id=camera_id,
+            priority=BatchPriority.HIGH,
+            future=future,
+            timestamp=timestamp,
+            deadline=timestamp + 0.005  # 5ms deadline
+        )
+        
+        try:
+            # Add to priority lane (non-blocking)
+            self.priority_lane_queue.put_nowait(request)
+            
+            # Wait for ultra-fast result
+            result = await asyncio.wait_for(future, timeout=0.01)  # 10ms max wait
+            
+            logger.debug(f"Priority request {frame_id} processed via priority lane")
+            return result
+            
+        except asyncio.QueueFull:
+            logger.warning(f"Priority lane full, falling back to regular processing for {frame_id}")
+            # Fall back to regular high-priority processing
+            return await self.submit_request(
+                frame, frame_id, camera_id, BatchPriority.HIGH, deadline_ms=10
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Priority request {frame_id} timed out")
+            raise RuntimeError(f"Priority request {frame_id} exceeded timeout")
+
+    async def _collect_ultra_fast_batch(self) -> list[BatchRequest]:
+        """
+        Ultra-fast batch collection with aggressive timeout reduction.
+        
+        Target: <3ms batch collection time
+        """
+        batch: list[BatchRequest] = []
+        start_time = time.time()
+
+        # Get workload analysis for smart batching
+        workload_info = None
+        if self.workload_analyzer:
+            workload_info = self.workload_analyzer.analyze_workload()
+            optimal_batch_size = min(
+                workload_info.get('optimal_batch_size', self.max_batch_size),
+                self.max_batch_size
+            )
+        else:
+            optimal_batch_size = self.max_batch_size
+
+        # Use cached optimal batch size if available
+        if self.last_batch_size > 0:
+            # Adaptive batch size based on recent performance
+            if time.time() - start_time < 0.001:  # If collection is very fast
+                optimal_batch_size = min(self.last_batch_size + 2, self.max_batch_size)
+            elif time.time() - start_time > 0.002:  # If collection is slow
+                optimal_batch_size = max(1, self.last_batch_size - 1)
+
+        # Collect requests with ultra-aggressive timeout
+        timeout_seconds = min(0.003, self.timeout_manager.current_timeout_ms / 1000.0)  # 3ms max
+        
+        collection_tasks = []
+        for priority in BatchPriority:
+            queue = self.queues[priority]
+            if not queue.empty():
+                collection_tasks.append(self._drain_queue_fast(queue, optimal_batch_size - len(batch)))
+        
+        if collection_tasks:
+            # Collect from all queues simultaneously with timeout
+            try:
+                completed_tasks = await asyncio.wait_for(
+                    asyncio.gather(*collection_tasks, return_exceptions=True),
+                    timeout=timeout_seconds
+                )
+                
+                for task_result in completed_tasks:
+                    if isinstance(task_result, list):
+                        batch.extend(task_result)
+                        if len(batch) >= optimal_batch_size:
+                            break
+                            
+            except asyncio.TimeoutError:
+                # Time budget exceeded, process what we have
+                pass
+
+        # Apply frame skipping if system is overloaded
+        if self.frame_skip_mode and len(batch) > optimal_batch_size:
+            # Keep only the most recent frames from each camera
+            camera_latest = {}
+            for request in batch:
+                if (request.camera_id not in camera_latest or 
+                    request.timestamp > camera_latest[request.camera_id].timestamp):
+                    camera_latest[request.camera_id] = request
+            
+            # Cancel skipped requests
+            skipped_requests = [req for req in batch if req not in camera_latest.values()]
+            for req in skipped_requests:
+                if not req.future.done():
+                    req.future.set_exception(RuntimeError("Frame skipped due to overload"))
+            
+            batch = list(camera_latest.values())
+            logger.debug(f"Frame skipping activated: kept {len(batch)} of {len(batch) + len(skipped_requests)} frames")
+
+        self.last_batch_size = len(batch)
+        return batch
+
+    async def _drain_queue_fast(self, queue: asyncio.Queue, max_items: int) -> list[BatchRequest]:
+        """Fast queue draining with timeout protection."""
+        items = []
+        
+        try:
+            while len(items) < max_items and not queue.empty():
+                try:
+                    item = queue.get_nowait()
+                    
+                    # Check if request is expired
+                    if item.is_expired:
+                        if not item.future.done():
+                            item.future.set_exception(RuntimeError(f"Request {item.frame_id} expired"))
+                        continue
+                    
+                    items.append(item)
+                    
+                except asyncio.QueueEmpty:
+                    break
+                    
+        except Exception as e:
+            logger.error(f"Fast queue draining error: {e}")
+        
+        return items
+
+    def enable_frame_skipping(self, enabled: bool = True) -> None:
+        """Enable/disable emergency frame skipping mode."""
+        self.frame_skip_mode = enabled
+        if enabled:
+            logger.warning("Frame skipping mode enabled due to system overload")
+        else:
+            logger.info("Frame skipping mode disabled")
 
     async def submit_request(
         self,

@@ -46,27 +46,159 @@ class CUDAPreprocessor:
     """
 
     def __init__(
-        self,
-        input_size: tuple[int, int] = (640, 640),
-        device_id: int = 0,
-        max_batch_size: int = 32,
-        enable_quality_scoring: bool = False
-    ):
-        self.input_size = input_size
-        self.device_id = device_id
-        self.max_batch_size = max_batch_size
-        self.enable_quality_scoring = enable_quality_scoring
+    self,
+    input_size: tuple[int, int] = (640, 640),
+    device_id: int = 0,
+    max_batch_size: int = 32,
+    enable_quality_scoring: bool = False,
+    target_latency_ms: float = 2.0,  # Ultra-low latency target
+    use_cuda_graphs: bool = True,
+    use_dali: bool = True
+):
 
-        self.device = torch.device(f"cuda:{device_id}")
-        self.stream = torch.cuda.Stream(device=self.device)
+    def _initialize_cuda_graphs(self) -> None:
+        """Initialize CUDA graphs for static preprocessing pipeline."""
+        self.cuda_graphs = {}
+        
+        # Create graphs for common batch sizes
+        common_batch_sizes = [1, 2, 4, 8, 16, 32]
+        
+        for batch_size in common_batch_sizes:
+            if batch_size <= self.max_batch_size:
+                try:
+                    # Create dummy input for graph capture
+                    dummy_input = torch.zeros(
+                        (batch_size, *self.input_size, 3), 
+                        dtype=torch.uint8, 
+                        device=self.device
+                    )
+                    
+                    # Warm up the operations
+                    for _ in range(3):
+                        self._preprocess_with_cuda_graph(dummy_input, capture_mode=False)
+                    
+                    # Capture the graph
+                    graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(graph):
+                        output = self._preprocess_with_cuda_graph(dummy_input, capture_mode=True)
+                    
+                    self.cuda_graphs[batch_size] = {
+                        'graph': graph,
+                        'input_tensor': dummy_input,
+                        'output_tensor': output
+                    }
+                    
+                    logger.debug(f"CUDA graph created for batch size {batch_size}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to create CUDA graph for batch size {batch_size}: {e}")
+    
+    def _initialize_dali_pipeline(self) -> None:
+        """Initialize NVIDIA DALI pipeline for ultra-fast preprocessing."""
+        if not DALI_AVAILABLE:
+            return
+            
+        try:
+            import nvidia.dali as dali
+            import nvidia.dali.fn as fn
+            from nvidia.dali import pipeline_def
+            
+            @pipeline_def
+            def preprocessing_pipeline():
+                images = fn.external_source(device="gpu", name="images")
+                
+                # Decode and resize in one operation
+                images = fn.resize(
+                    images,
+                    size=self.input_size,
+                    interp_type=dali.types.INTERP_LINEAR,
+                    device="gpu"
+                )
+                
+                # Normalize to [0, 1] range
+                images = fn.crop_mirror_normalize(
+                    images,
+                    dtype=dali.types.FLOAT16,
+                    mean=[0.0, 0.0, 0.0],
+                    std=[255.0, 255.0, 255.0],
+                    device="gpu"
+                )
+                
+                return images
+            
+            self.dali_pipeline = preprocessing_pipeline(
+                batch_size=self.max_batch_size,
+                num_threads=2,
+                device_id=self.device_id
+            )
+            self.dali_pipeline.build()
+            
+            logger.info("NVIDIA DALI pipeline initialized for ultra-fast preprocessing")
+            
+        except Exception as e:
+            logger.warning(f"Failed to initialize DALI pipeline: {e}")
+            self.use_dali = False
 
-        # Pre-allocate GPU tensors for zero-copy operations
-        self._preallocate_tensors()
+    def _preprocess_with_cuda_graph(
+        self, 
+        input_tensor: torch.Tensor, 
+        capture_mode: bool = False
+    ) -> torch.Tensor:
+        """Preprocessing operations that can be captured in CUDA graph."""
+        batch_size = input_tensor.shape[0]
+        
+        # Convert to CHW format
+        if input_tensor.shape[-1] == 3:  # HWC to CHW
+            input_tensor = input_tensor.permute(0, 3, 1, 2)
+        
+        # Resize to target size using interpolation
+        if input_tensor.shape[2:] != self.input_size:
+            input_tensor = F.interpolate(
+                input_tensor.float(),
+                size=self.input_size,
+                mode='bilinear',
+                align_corners=False
+            )
+        
+        # Normalize to FP16 range [0, 1]
+        output_tensor = input_tensor.half() / 255.0
+        
+        return output_tensor
+    self.input_size = input_size
+    self.device_id = device_id
+    self.max_batch_size = max_batch_size
+    self.enable_quality_scoring = enable_quality_scoring
+    self.target_latency_ms = target_latency_ms
+    self.use_cuda_graphs = use_cuda_graphs
+    self.use_dali = use_dali
 
-        # Initialize CUDA kernels
-        self._initialize_cuda_kernels()
+    self.device = torch.device(f"cuda:{device_id}")
+    
+    # Create multiple streams for pipeline parallelism
+    self.streams = [torch.cuda.Stream(device=self.device) for _ in range(4)]
+    self.current_stream_idx = 0
 
-        logger.info(f"CUDAPreprocessor initialized on GPU {device_id}")
+    # Pre-allocate GPU tensors for zero-copy operations
+    self._preallocate_tensors()
+
+    # Initialize CUDA kernels and graphs
+    self._initialize_cuda_kernels()
+    if self.use_cuda_graphs:
+        self._initialize_cuda_graphs()
+    
+    # Initialize DALI pipeline if available
+    if self.use_dali and DALI_AVAILABLE:
+        self._initialize_dali_pipeline()
+
+    # Performance tracking
+    self.preprocessing_stats = {
+        "total_frames": 0,
+        "avg_latency_ms": 0.0,
+        "cuda_graphs_hits": 0,
+        "memory_pool_hits": 0,
+    }
+
+    logger.info(f"Ultra-fast CUDAPreprocessor initialized on GPU {device_id} - Target: {target_latency_ms}ms")
 
     def _preallocate_tensors(self) -> None:
         """Pre-allocate GPU tensors to avoid allocation overhead."""
@@ -138,60 +270,89 @@ class CUDAPreprocessor:
             logger.info("Custom CUDA kernels initialized with CuPy")
 
     @torch.inference_mode()
-    def preprocess_batch_gpu(
-        self,
-        frames: list[np.ndarray],
-        target_size: tuple[int, int] | None = None
-    ) -> tuple[torch.Tensor, list[dict[str, Any]]]:
-        """
-        GPU-accelerated batch preprocessing with zero-copy operations.
+def preprocess_batch_gpu(
+    self,
+    frames: list[np.ndarray],
+    target_size: tuple[int, int] | None = None
+) -> tuple[torch.Tensor, list[dict[str, Any]]]:
+    """
+    Ultra-fast GPU preprocessing with CUDA graphs and sub-2ms latency.
 
-        Args:
-            frames: List of input frames as numpy arrays (H, W, C)
-            target_size: Optional target size, defaults to self.input_size
+    Args:
+        frames: List of input frames as numpy arrays (H, W, C)
+        target_size: Optional target size, defaults to self.input_size
 
-        Returns:
-            Tuple of (preprocessed_tensor, metadata_list)
-        """
-        if not frames:
-            raise ValueError("Empty frames list")
+    Returns:
+        Tuple of (preprocessed_tensor, metadata_list)
+    """
+    if not frames:
+        raise ValueError("Empty frames list")
 
-        target_size = target_size or self.input_size
-        batch_size = len(frames)
+    target_size = target_size or self.input_size
+    batch_size = len(frames)
 
-        if batch_size > self.max_batch_size:
-            raise ValueError(f"Batch size {batch_size} exceeds maximum {self.max_batch_size}")
+    if batch_size > self.max_batch_size:
+        raise ValueError(f"Batch size {batch_size} exceeds maximum {self.max_batch_size}")
 
-        start_time = time.time()
+    start_time = time.perf_counter()
+    
+    # Use round-robin stream selection for pipeline parallelism
+    stream = self.streams[self.current_stream_idx]
+    self.current_stream_idx = (self.current_stream_idx + 1) % len(self.streams)
 
-        with torch.cuda.stream(self.stream):
-            # Get or allocate output tensor
-            output_shape = (batch_size, 3, target_size[0], target_size[1])
-            output_tensor = self._get_tensor_from_pool(output_shape, dtype=torch.half)
-
-            metadata_list = []
-
-            if CUPY_AVAILABLE and batch_size > 1:
-                # Use CuPy for batch processing
-                output_tensor, metadata_list = self._preprocess_batch_cupy(
-                    frames, output_tensor, target_size
+    with torch.cuda.stream(stream):
+        # Try CUDA graph first for maximum speed
+        if self.use_cuda_graphs and batch_size in self.cuda_graphs:
+            output_tensor, metadata_list = self._preprocess_with_cuda_graph_cached(
+                frames, batch_size, target_size, stream
+            )
+            self.preprocessing_stats["cuda_graphs_hits"] += 1
+        
+        # Fall back to DALI if available
+        elif self.use_dali and DALI_AVAILABLE and batch_size <= self.max_batch_size:
+            try:
+                output_tensor, metadata_list = self._preprocess_with_dali(
+                    frames, target_size
                 )
-            else:
-                # Fall back to PyTorch operations
-                output_tensor, metadata_list = self._preprocess_batch_pytorch(
-                    frames, output_tensor, target_size
+            except Exception as e:
+                logger.debug(f"DALI preprocessing failed, falling back: {e}")
+                output_tensor, metadata_list = self._preprocess_batch_optimized(
+                    frames, target_size, stream
                 )
+        
+        # Optimized PyTorch/CuPy fallback
+        else:
+            output_tensor, metadata_list = self._preprocess_batch_optimized(
+                frames, target_size, stream
+            )
 
-        # Synchronize stream to ensure completion
-        self.stream.synchronize()
+    # Synchronize only the current stream
+    stream.synchronize()
 
-        processing_time = (time.time() - start_time) * 1000
+    processing_time = (time.perf_counter() - start_time) * 1000
+    
+    # Update performance statistics
+    self.preprocessing_stats["total_frames"] += batch_size
+    alpha = 0.1  # EMA smoothing factor
+    self.preprocessing_stats["avg_latency_ms"] = (
+        alpha * processing_time + 
+        (1 - alpha) * self.preprocessing_stats["avg_latency_ms"]
+    )
 
-        # Update metadata with batch processing time
-        for metadata in metadata_list:
-            metadata["batch_processing_time_ms"] = processing_time / len(frames)
+    # Update metadata with actual processing time
+    for metadata in metadata_list:
+        metadata["preprocessing_time_ms"] = processing_time / batch_size
+        metadata["used_cuda_graphs"] = batch_size in self.cuda_graphs if self.use_cuda_graphs else False
+        metadata["target_latency_ms"] = self.target_latency_ms
+        
+    # Performance warning if exceeding target
+    if processing_time > self.target_latency_ms:
+        logger.warning(
+            f"Preprocessing latency {processing_time:.2f}ms exceeds target {self.target_latency_ms}ms "
+            f"(batch_size={batch_size})"
+        )
 
-        return output_tensor, metadata_list
+    return output_tensor, metadata_list
 
     def _preprocess_batch_cupy(
         self,

@@ -11,11 +11,11 @@ from typing import Any
 
 import numpy as np
 
-from its_camera_ai.data.grpc_serialization import (
+from its_camera_ai.flow.grpc_serialization import (
     ImageCompressor,
     ProcessedFrameSerializer,
 )
-from its_camera_ai.data.streaming_processor import (
+from its_camera_ai.flow.streaming_processor import (
     ProcessedFrame,
     ProcessingStage,
 )
