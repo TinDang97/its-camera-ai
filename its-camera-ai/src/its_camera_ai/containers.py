@@ -272,9 +272,22 @@ class ServiceContainer(containers.DeclarativeContainer):
         settings=config,
     )
 
+    # Prediction Service - Factory for ML predictions
+    prediction_service = providers.Factory(
+        "its_camera_ai.services.prediction_service.PredictionService",
+        cache_service=cache_service,
+        settings=config,
+    )
+
     # Unified Analytics Service - Factory for comprehensive analytics
     unified_analytics_service = providers.Factory(
         "its_camera_ai.services.unified_analytics_service.UnifiedAnalyticsService",
+        aggregation_service=analytics_aggregation_service,
+        incident_detection_service=incident_detection_service,
+        traffic_rule_service=traffic_rule_service,
+        speed_calculation_service=speed_calculation_service,
+        anomaly_detection_service=anomaly_detection_service,
+        prediction_service=prediction_service,
         analytics_repository=repositories.analytics_repository,
         cache_service=cache_service,
         settings=config,
@@ -284,13 +297,6 @@ class ServiceContainer(containers.DeclarativeContainer):
     incident_detection_engine = providers.Factory(
         "its_camera_ai.services.incident_detection_service.IncidentDetectionService",
         alert_repository=repositories.alert_repository,
-        cache_service=cache_service,
-        settings=config,
-    )
-
-    # Prediction Service - Factory for ML predictions
-    prediction_service = providers.Factory(
-        "its_camera_ai.services.prediction_service.PredictionService",
         cache_service=cache_service,
         settings=config,
     )

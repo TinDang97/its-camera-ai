@@ -5,7 +5,6 @@ speed limits with zone-based configurations.
 """
 
 from datetime import UTC, datetime
-from typing import Any
 
 from ..core.config import Settings
 from ..core.logging import get_logger
@@ -13,6 +12,7 @@ from ..models.analytics import ViolationType
 from ..repositories.analytics_repository import AnalyticsRepository
 from .analytics_dtos import (
     DetectionData,
+    DetectionResultDTO,
     RuleDefinition,
     SpeedLimitInfo,
     ViolationRecord,
@@ -171,7 +171,7 @@ class TrafficRuleService:
 
     async def _check_speed_violation(
         self,
-        detection: dict[str, Any],
+        detection: DetectionResultDTO,
         zone_id: str | None,
         weather_condition: str,
         camera_id: str,
@@ -179,7 +179,7 @@ class TrafficRuleService:
         """Check for speed violations.
 
         Args:
-            detection: Single detection data
+            detection: Detection result DTO
             zone_id: Zone identifier
             weather_condition: Weather condition
             camera_id: Camera identifier
@@ -187,13 +187,13 @@ class TrafficRuleService:
         Returns:
             Violation record if violation detected
         """
-        speed = detection.get("speed")
+        speed = detection.speed
         if not speed or speed <= 0:
             return None
 
         # Get speed limit for zone
         speed_limit_info = await self._get_speed_limit(
-            zone_id, detection.get("vehicle_type", "car")
+            zone_id, detection.vehicle_type or detection.class_name
         )
 
         # Apply weather adjustments
@@ -213,13 +213,13 @@ class TrafficRuleService:
                 measured_value=speed,
                 threshold_value=adjusted_limit,
                 excess_amount=excess,
-                confidence=detection.get("confidence", 0.8),
-                detection_id=detection.get("id"),
+                confidence=detection.confidence,
+                detection_id=detection.detection_id,
                 camera_id=camera_id,
-                track_id=detection.get("track_id"),
-                license_plate=detection.get("license_plate"),
-                detection_time=datetime.now(UTC),
-                vehicle_type=detection.get("vehicle_type", "car"),
+                track_id=int(detection.track_id) if detection.track_id else None,
+                license_plate=detection.license_plate,
+                detection_time=detection.timestamp,
+                vehicle_type=detection.vehicle_type or detection.class_name,
                 rule_definition=RuleDefinition(
                     rule_type=ViolationType.SPEEDING,
                     speed_limit=speed_limit_info.speed_limit_kmh,
@@ -280,19 +280,19 @@ class TrafficRuleService:
         return None
 
     async def _check_wrong_way_violation(
-        self, detection: dict[str, Any], camera_id: str
+        self, detection: DetectionResultDTO, camera_id: str
     ) -> ViolationRecord | None:
         """Check for wrong-way driving.
 
         Args:
-            detection: Single detection data
+            detection: Detection result DTO
             camera_id: Camera identifier
 
         Returns:
             Violation record if wrong-way detected
         """
-        direction = detection.get("direction")
-        expected_direction = detection.get("expected_direction")
+        direction = detection.direction
+        expected_direction = detection.attributes.get("expected_direction")
 
         if direction and expected_direction and direction != expected_direction:
             # Check if it's opposite direction (180 degrees)
@@ -317,26 +317,26 @@ class TrafficRuleService:
         return None
 
     async def _check_illegal_parking_violation(
-        self, detection: dict[str, Any], zone_id: str | None, camera_id: str
+        self, detection: DetectionResultDTO, zone_id: str | None, camera_id: str
     ) -> ViolationRecord | None:
         """Check for illegal parking.
 
         Args:
-            detection: Single detection data
+            detection: Detection result DTO
             zone_id: Zone identifier
             camera_id: Camera identifier
 
         Returns:
             Violation record if illegal parking detected
         """
-        if detection.get("status") != "parked":
+        if detection.attributes.get("status") != "parked":
             return None
 
         # Check if parking is allowed in zone
         no_parking_zone = await self._is_no_parking_zone(zone_id)
 
         if no_parking_zone:
-            duration = detection.get("duration", 0)
+            duration = detection.attributes.get("duration", 0)
             severity = "high" if duration > 300 else "medium"  # 5 minutes
 
             return ViolationRecord(
@@ -344,13 +344,13 @@ class TrafficRuleService:
                 severity=severity,
                 measured_value=duration,
                 threshold_value=0,
-                confidence=detection.get("confidence", 0.8),
-                detection_id=detection.get("id"),
+                confidence=detection.confidence,
+                detection_id=detection.detection_id,
                 camera_id=camera_id,
-                track_id=detection.get("track_id"),
-                license_plate=detection.get("license_plate"),
-                detection_time=datetime.now(UTC),
-                vehicle_type=detection.get("vehicle_type"),
+                track_id=int(detection.track_id) if detection.track_id else None,
+                license_plate=detection.license_plate,
+                detection_time=detection.timestamp,
+                vehicle_type=detection.vehicle_type or detection.class_name,
                 rule_definition=RuleDefinition(
                     rule_type=ViolationType.ILLEGAL_PARKING,
                     zone_id=zone_id,
@@ -360,20 +360,20 @@ class TrafficRuleService:
         return None
 
     async def _check_stop_violation(
-        self, detection: dict[str, Any], zone_id: str | None, camera_id: str
+        self, detection: DetectionResultDTO, zone_id: str | None, camera_id: str
     ) -> ViolationRecord | None:
         """Check for stop sign violations.
 
         Args:
-            detection: Single detection data
+            detection: Detection result DTO
             zone_id: Zone identifier
             camera_id: Camera identifier
 
         Returns:
             Violation record if stop violation detected
         """
-        at_stop_sign = detection.get("at_stop_sign", False)
-        stopped = detection.get("stopped", False)
+        at_stop_sign = detection.attributes.get("at_stop_sign", False)
+        stopped = detection.attributes.get("stopped", False)
 
         if at_stop_sign and not stopped:
             return ViolationRecord(
@@ -381,13 +381,13 @@ class TrafficRuleService:
                 severity="high",
                 measured_value=0,  # Did not stop
                 threshold_value=1,  # Should stop
-                confidence=detection.get("confidence", 0.8),
-                detection_id=detection.get("id"),
+                confidence=detection.confidence,
+                detection_id=detection.detection_id,
                 camera_id=camera_id,
-                track_id=detection.get("track_id"),
-                license_plate=detection.get("license_plate"),
-                detection_time=datetime.now(UTC),
-                vehicle_type=detection.get("vehicle_type"),
+                track_id=int(detection.track_id) if detection.track_id else None,
+                license_plate=detection.license_plate,
+                detection_time=detection.timestamp,
+                vehicle_type=detection.vehicle_type or detection.class_name,
                 rule_definition=RuleDefinition(
                     rule_type=ViolationType.STOP_VIOLATION,
                     zone_id=zone_id,
@@ -397,20 +397,20 @@ class TrafficRuleService:
         return None
 
     async def _check_signal_violation(
-        self, detection: dict[str, Any], zone_id: str | None, camera_id: str
+        self, detection: DetectionResultDTO, zone_id: str | None, camera_id: str
     ) -> ViolationRecord | None:
         """Check for traffic signal violations.
 
         Args:
-            detection: Single detection data
+            detection: Detection result DTO
             zone_id: Zone identifier
             camera_id: Camera identifier
 
         Returns:
             Violation record if signal violation detected
         """
-        signal_state = detection.get("signal_state")
-        vehicle_action = detection.get("action")
+        signal_state = detection.attributes.get("signal_state")
+        vehicle_action = detection.attributes.get("action")
 
         if signal_state == "red" and vehicle_action in ["crossing", "entering"]:
             return ViolationRecord(
@@ -418,13 +418,13 @@ class TrafficRuleService:
                 severity="critical",
                 measured_value=1,  # Crossed on red
                 threshold_value=0,  # Should not cross
-                confidence=detection.get("confidence", 0.8),
-                detection_id=detection.get("id"),
+                confidence=detection.confidence,
+                detection_id=detection.detection_id,
                 camera_id=camera_id,
-                track_id=detection.get("track_id"),
-                license_plate=detection.get("license_plate"),
-                detection_time=datetime.now(UTC),
-                vehicle_type=detection.get("vehicle_type"),
+                track_id=int(detection.track_id) if detection.track_id else None,
+                license_plate=detection.license_plate,
+                detection_time=detection.timestamp,
+                vehicle_type=detection.vehicle_type or detection.class_name,
                 rule_definition=RuleDefinition(
                     rule_type=ViolationType.RED_LIGHT,
                     zone_id=zone_id,

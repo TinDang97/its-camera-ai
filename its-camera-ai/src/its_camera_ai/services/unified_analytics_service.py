@@ -22,11 +22,13 @@ from .analytics_dtos import (
     SpeedMeasurement,
     TimeWindow,
     TrafficDataPoint,
+    TrafficPredictionDTO,
     ViolationRecord,
 )
 from .anomaly_detection_service import AnomalyDetectionService
 from .cache import CacheService
 from .incident_detection_service import IncidentDetectionService
+from .prediction_service import PredictionHorizon, PredictionService
 from .speed_calculation_service import SpeedCalculationService
 from .traffic_rule_service import TrafficRuleService
 
@@ -42,6 +44,12 @@ class UnifiedAnalyticsService:
 
     def __init__(
         self,
+        aggregation_service: AnalyticsAggregationService,
+        incident_detection_service: IncidentDetectionService,
+        traffic_rule_service: TrafficRuleService,
+        speed_calculation_service: SpeedCalculationService,
+        anomaly_detection_service: AnomalyDetectionService,
+        prediction_service: PredictionService,
         analytics_repository: AnalyticsRepository,
         cache_service: CacheService,
         settings: Settings,
@@ -49,6 +57,12 @@ class UnifiedAnalyticsService:
         """Initialize with injected dependencies.
 
         Args:
+            aggregation_service: Service for time-series aggregation
+            incident_detection_service: Service for incident detection and alerting
+            traffic_rule_service: Service for traffic rule evaluation
+            speed_calculation_service: Service for speed calculations
+            anomaly_detection_service: Service for ML-based anomaly detection
+            prediction_service: Service for traffic predictions
             analytics_repository: Repository for analytics data access
             cache_service: Redis cache service
             settings: Application settings
@@ -57,36 +71,13 @@ class UnifiedAnalyticsService:
         self.cache_service = cache_service
         self.settings = settings
 
-        # Initialize component services
-        self.aggregation_service = AnalyticsAggregationService(
-            analytics_repository=analytics_repository,
-            cache_service=cache_service,
-            settings=settings,
-        )
-
-        self.incident_detection_service = IncidentDetectionService(
-            alert_repository=None,  # TODO: Create AlertRepository to handle alerts
-            cache_service=cache_service,
-            settings=settings,
-        )
-
-        self.traffic_rule_service = TrafficRuleService(
-            analytics_repository=analytics_repository,
-            cache_service=cache_service,
-            settings=settings,
-        )
-
-        self.speed_calculation_service = SpeedCalculationService(
-            analytics_repository=analytics_repository,
-            cache_service=cache_service,
-            settings=settings,
-        )
-
-        self.anomaly_detection_service = AnomalyDetectionService(
-            analytics_repository=analytics_repository,
-            cache_service=cache_service,
-            settings=settings,
-        )
+        # Inject component services via DI
+        self.aggregation_service = aggregation_service
+        self.incident_detection_service = incident_detection_service
+        self.traffic_rule_service = traffic_rule_service
+        self.speed_calculation_service = speed_calculation_service
+        self.anomaly_detection_service = anomaly_detection_service
+        self.prediction_service = prediction_service
 
     async def process_realtime_analytics(
         self,
@@ -349,17 +340,17 @@ class UnifiedAnalyticsService:
         Returns:
             Realtime traffic metrics
         """
-        # Extract vehicle breakdown
-        vehicle_breakdown = {}
+        # Extract vehicle breakdown using DTOs
+        vehicle_breakdown: dict[str, int] = {}
         for detection in detection_data.detections:
-            vehicle_type = detection.get("vehicle_type", "unknown")
+            vehicle_type = detection.vehicle_type or detection.class_name
             vehicle_breakdown[vehicle_type] = vehicle_breakdown.get(vehicle_type, 0) + 1
 
-        # Calculate average speed
+        # Calculate average speed from DetectionResultDTO
         speeds = [
-            d.get("speed", 0)
+            d.speed
             for d in detection_data.detections
-            if d.get("speed") and d.get("speed") > 0
+            if d.speed is not None and d.speed > 0
         ]
         average_speed = sum(speeds) / len(speeds) if speeds else None
 
@@ -409,11 +400,20 @@ class UnifiedAnalyticsService:
         trajectories = []
 
         for detection in detection_data.detections:
-            if "trajectory" in detection and detection["trajectory"]:
+            # Extract trajectory from DetectionResultDTO attributes
+            if "trajectory" in detection.attributes and detection.attributes["trajectory"]:
                 trajectory = {
-                    "points": detection["trajectory"],
-                    "track_id": detection.get("track_id"),
-                    "vehicle_type": detection.get("vehicle_type"),
+                    "points": detection.attributes["trajectory"],
+                    "track_id": detection.track_id,
+                    "vehicle_type": detection.vehicle_type or detection.class_name,
+                    "detection_id": detection.detection_id,
+                    "bbox_center": {
+                        "x": detection.bbox.center_x,
+                        "y": detection.bbox.center_y,
+                    },
+                    "timestamp": detection.timestamp,
+                    "speed": detection.speed,
+                    "direction": detection.direction,
                 }
                 trajectories.append(trajectory)
 
@@ -582,4 +582,209 @@ class UnifiedAnalyticsService:
             return {
                 "timestamp": datetime.now(UTC),
                 "error": str(e),
+            }
+
+    async def get_traffic_predictions(
+        self,
+        camera_id: str,
+        horizon_minutes: int = 30,
+        model_version: str | None = None,
+        confidence_level: float = 0.95,
+        include_features: bool = False,
+    ) -> TrafficPredictionDTO:
+        """Get traffic predictions for specified camera and horizon.
+
+        Args:
+            camera_id: Camera identifier
+            horizon_minutes: Prediction horizon in minutes
+            model_version: Specific model version to use
+            confidence_level: Confidence level for predictions
+            include_features: Whether to include feature information
+
+        Returns:
+            Traffic prediction DTO
+        """
+        try:
+            # Convert horizon to supported format
+            if horizon_minutes <= 15:
+                horizon = PredictionHorizon.FIFTEEN_MIN
+            elif horizon_minutes <= 60:
+                horizon = PredictionHorizon.ONE_HOUR
+            elif horizon_minutes <= 240:
+                horizon = PredictionHorizon.FOUR_HOUR
+            else:
+                horizon = PredictionHorizon.TWENTY_FOUR_HOUR
+
+            # Get prediction from prediction service
+            prediction_result = await self.prediction_service.predict_traffic(
+                camera_id=camera_id,
+                horizon=horizon,
+                model_version=model_version,
+                confidence_level=confidence_level,
+                include_features=include_features,
+            )
+
+            # Convert to TrafficPredictionDTO
+            return TrafficPredictionDTO(
+                camera_id=prediction_result["camera_id"],
+                prediction_timestamp=datetime.fromisoformat(
+                    prediction_result["prediction_timestamp"]
+                ),
+                forecast_start=datetime.fromisoformat(
+                    prediction_result["forecast_start"]
+                ),
+                forecast_end=datetime.fromisoformat(
+                    prediction_result["forecast_end"]
+                ),
+                horizon_minutes=horizon_minutes,
+                predicted_vehicle_count=prediction_result["predictions"][0][
+                    "predicted_vehicle_count"
+                ]
+                if prediction_result["predictions"]
+                else 0,
+                confidence_interval=prediction_result["confidence_interval"],
+                model_version=prediction_result["ml_model_version"],
+                model_accuracy=prediction_result["ml_model_accuracy"],
+                processing_time_ms=prediction_result.get("processing_time_ms", 0),
+                factors_considered=prediction_result["factors_considered"],
+                predictions=prediction_result["predictions"],
+                is_fallback=prediction_result.get("is_fallback", False),
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get traffic predictions for {camera_id}: {e}")
+            # Return fallback prediction
+            now = datetime.now(UTC)
+            return TrafficPredictionDTO(
+                camera_id=camera_id,
+                prediction_timestamp=now,
+                forecast_start=now,
+                forecast_end=now + timedelta(minutes=horizon_minutes),
+                horizon_minutes=horizon_minutes,
+                predicted_vehicle_count=10.0,  # Default fallback
+                confidence_interval={"lower": 5.0, "upper": 15.0, "mean": 10.0},
+                model_version="fallback_v1.0",
+                model_accuracy=0.5,
+                processing_time_ms=0,
+                factors_considered=["fallback"],
+                predictions=[],
+                is_fallback=True,
+            )
+
+    async def get_batch_traffic_predictions(
+        self,
+        camera_ids: list[str],
+        horizon_minutes: int = 30,
+        model_version: str | None = None,
+        confidence_level: float = 0.95,
+    ) -> dict[str, TrafficPredictionDTO]:
+        """Get batch traffic predictions for multiple cameras.
+
+        Args:
+            camera_ids: List of camera identifiers
+            horizon_minutes: Prediction horizon in minutes
+            model_version: Specific model version to use
+            confidence_level: Confidence level for predictions
+
+        Returns:
+            Dictionary mapping camera_id to prediction DTO
+        """
+        try:
+            # Convert horizon to supported format
+            if horizon_minutes <= 15:
+                horizon = PredictionHorizon.FIFTEEN_MIN
+            elif horizon_minutes <= 60:
+                horizon = PredictionHorizon.ONE_HOUR
+            elif horizon_minutes <= 240:
+                horizon = PredictionHorizon.FOUR_HOUR
+            else:
+                horizon = PredictionHorizon.TWENTY_FOUR_HOUR
+
+            # Get batch predictions from prediction service
+            batch_results = await self.prediction_service.batch_predict(
+                camera_ids=camera_ids,
+                horizon=horizon,
+                model_version=model_version,
+                confidence_level=confidence_level,
+            )
+
+            # Convert results to DTOs
+            predictions = {}
+            for camera_id, result in batch_results.items():
+                try:
+                    predictions[camera_id] = TrafficPredictionDTO(
+                        camera_id=result["camera_id"],
+                        prediction_timestamp=datetime.fromisoformat(
+                            result["prediction_timestamp"]
+                        ),
+                        forecast_start=datetime.fromisoformat(
+                            result["forecast_start"]
+                        ),
+                        forecast_end=datetime.fromisoformat(
+                            result["forecast_end"]
+                        ),
+                        horizon_minutes=horizon_minutes,
+                        predicted_vehicle_count=result["predictions"][0][
+                            "predicted_vehicle_count"
+                        ]
+                        if result["predictions"]
+                        else 0,
+                        confidence_interval=result["confidence_interval"],
+                        model_version=result["ml_model_version"],
+                        model_accuracy=result["ml_model_accuracy"],
+                        processing_time_ms=result.get("processing_time_ms", 0),
+                        factors_considered=result["factors_considered"],
+                        predictions=result["predictions"],
+                        is_fallback=result.get("is_fallback", False),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to convert prediction for camera {camera_id}: {e}"
+                    )
+                    # Add fallback prediction
+                    now = datetime.now(UTC)
+                    predictions[camera_id] = TrafficPredictionDTO(
+                        camera_id=camera_id,
+                        prediction_timestamp=now,
+                        forecast_start=now,
+                        forecast_end=now + timedelta(minutes=horizon_minutes),
+                        horizon_minutes=horizon_minutes,
+                        predicted_vehicle_count=10.0,
+                        confidence_interval={"lower": 5.0, "upper": 15.0, "mean": 10.0},
+                        model_version="fallback_v1.0",
+                        model_accuracy=0.5,
+                        processing_time_ms=0,
+                        factors_considered=["fallback"],
+                        predictions=[],
+                        is_fallback=True,
+                    )
+
+            logger.info(
+                f"Generated batch predictions for {len(camera_ids)} cameras, "
+                f"successful: {len([p for p in predictions.values() if not p.is_fallback])}"
+            )
+
+            return predictions
+
+        except Exception as e:
+            logger.error(f"Batch prediction failed: {e}")
+            # Return fallback predictions for all cameras
+            now = datetime.now(UTC)
+            return {
+                camera_id: TrafficPredictionDTO(
+                    camera_id=camera_id,
+                    prediction_timestamp=now,
+                    forecast_start=now,
+                    forecast_end=now + timedelta(minutes=horizon_minutes),
+                    horizon_minutes=horizon_minutes,
+                    predicted_vehicle_count=10.0,
+                    confidence_interval={"lower": 5.0, "upper": 15.0, "mean": 10.0},
+                    model_version="fallback_v1.0",
+                    model_accuracy=0.5,
+                    processing_time_ms=0,
+                    factors_considered=["fallback"],
+                    predictions=[],
+                    is_fallback=True,
+                )
+                for camera_id in camera_ids
             }

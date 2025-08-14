@@ -5,13 +5,14 @@ dictionary usage throughout the analytics services.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 import numpy as np
 
 from ..models.analytics import ViolationType
+from ..models.detection_result import DetectionClass
 
 # ============================
 # Enums
@@ -364,6 +365,55 @@ class VehicleTrajectoryDTO:
 
 
 # ============================
+# Traffic Prediction DTOs
+# ============================
+
+@dataclass
+class TrafficPredictionDTO:
+    """Traffic prediction result data transfer object."""
+    camera_id: str
+    prediction_timestamp: datetime
+    forecast_start: datetime
+    forecast_end: datetime
+    horizon_minutes: int
+    predicted_vehicle_count: float
+    confidence_interval: dict[str, float]
+    model_version: str
+    model_accuracy: float
+    processing_time_ms: float
+    factors_considered: list[str]
+    predictions: list[dict[str, Any]] = field(default_factory=list)
+    is_fallback: bool = False
+
+    @property
+    def confidence_lower(self) -> float:
+        """Get lower confidence bound."""
+        return self.confidence_interval.get("lower", 0.0)
+
+    @property
+    def confidence_upper(self) -> float:
+        """Get upper confidence bound."""
+        return self.confidence_interval.get("upper", 0.0)
+
+    @property
+    def is_high_confidence(self) -> bool:
+        """Check if prediction has high confidence."""
+        return self.model_accuracy >= 0.8 and not self.is_fallback
+
+
+@dataclass
+class PredictionRequest:
+    """Request parameters for traffic predictions."""
+    camera_id: str
+    horizon_minutes: int = 60
+    model_version: str | None = None
+    confidence_level: float = 0.95
+    include_features: bool = False
+    weather_condition: str | None = None
+    historical_data: list[dict[str, Any]] | None = None
+
+
+# ============================
 # Real-time Metrics DTOs
 # ============================
 
@@ -432,17 +482,467 @@ class AnalyticsReportDTO:
 # Detection Data DTOs (for input)
 # ============================
 
+# ============================
+# Detection Result DTOs
+# ============================
+
 @dataclass
-class DetectionData:
-    """Detection data from ML models."""
+class BoundingBoxDTO:
+    """Bounding box coordinates for detection results."""
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    normalized: bool = False  # Whether coordinates are normalized (0.0-1.0) or absolute pixels
+
+    @property
+    def width(self) -> float:
+        """Calculate bounding box width."""
+        return self.x2 - self.x1
+
+    @property
+    def height(self) -> float:
+        """Calculate bounding box height."""
+        return self.y2 - self.y1
+
+    @property
+    def area(self) -> float:
+        """Calculate bounding box area."""
+        return self.width * self.height
+
+    @property
+    def center_x(self) -> float:
+        """Calculate center X coordinate."""
+        return (self.x1 + self.x2) / 2
+
+    @property
+    def center_y(self) -> float:
+        """Calculate center Y coordinate."""
+        return (self.y1 + self.y2) / 2
+
+
+@dataclass
+class DetectionResultDTO:
+    """Comprehensive detection result data transfer object.
+    
+    Maps directly to DetectionResult model but provides additional
+    convenience methods and type safety for analytics processing.
+    """
+    detection_id: str
+    frame_id: str
     camera_id: str
     timestamp: datetime
+    track_id: str | None
+    class_id: int
+    class_name: str
+    confidence: float
+    bbox: BoundingBoxDTO
+    attributes: dict[str, Any]
+    zone_id: str | None = None
+    speed: float | None = None  # Speed in km/h
+    direction: float | None = None  # Direction in degrees (0-360)
+    vehicle_type: str | None = None
+    vehicle_confidence: float | None = None
+    license_plate: str | None = None
+    license_plate_confidence: float | None = None
+    color_primary: str | None = None
+    color_secondary: str | None = None
+    estimated_length: float | None = None  # In meters
+    estimated_width: float | None = None  # In meters
+    detection_quality: float = 1.0
+    occlusion_ratio: float | None = None
+    blur_score: float | None = None
+    model_version: str | None = None
+    processing_time_ms: float | None = None
+    is_false_positive: bool = False
+    is_verified: bool = False
+    is_anomaly: bool = False
+
+    @property
+    def is_vehicle(self) -> bool:
+        """Check if detection is a vehicle."""
+        vehicle_classes = {
+            DetectionClass.CAR.value,
+            DetectionClass.TRUCK.value,
+            DetectionClass.BUS.value,
+            DetectionClass.MOTORCYCLE.value,
+            DetectionClass.BICYCLE.value,
+        }
+        return self.class_name in vehicle_classes
+
+    @property
+    def is_high_confidence(self) -> bool:
+        """Check if detection has high confidence."""
+        return self.confidence >= 0.8
+
+    @property
+    def is_reliable(self) -> bool:
+        """Check if detection is reliable for analytics."""
+        return (
+            self.is_high_confidence
+            and self.detection_quality >= 0.7
+            and not self.is_false_positive
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "detection_id": self.detection_id,
+            "frame_id": self.frame_id,
+            "camera_id": self.camera_id,
+            "timestamp": self.timestamp.isoformat(),
+            "track_id": self.track_id,
+            "class_id": self.class_id,
+            "class_name": self.class_name,
+            "confidence": self.confidence,
+            "bbox": {
+                "x1": self.bbox.x1,
+                "y1": self.bbox.y1,
+                "x2": self.bbox.x2,
+                "y2": self.bbox.y2,
+                "normalized": self.bbox.normalized,
+            },
+            "attributes": self.attributes,
+            "zone_id": self.zone_id,
+            "speed": self.speed,
+            "direction": self.direction,
+            "vehicle_type": self.vehicle_type,
+            "detection_quality": self.detection_quality,
+            "model_version": self.model_version,
+            "is_reliable": self.is_reliable,
+        }
+
+
+@dataclass
+class FrameMetadataDTO:
+    """Frame metadata for detection processing."""
+    frame_id: str
+    camera_id: str
+    timestamp: datetime
+    frame_number: int
+    width: int
+    height: int
+    quality_score: float | None = None
+    model_version: str | None = None
+    processing_time_ms: float | None = None
+    storage_path: str | None = None
+    weather_conditions: dict[str, Any] | None = None
+    lighting_conditions: str | None = None
+
+
+@dataclass
+class DetectionData:
+    """Detection data from ML models with proper DTO integration."""
+    camera_id: str
+    timestamp: datetime
+    frame_id: str
+    detections: list[DetectionResultDTO]  # Replaced with proper DetectionResultDTO
     vehicle_count: int
-    detections: list[dict[str, Any]]  # Will be replaced with proper DetectionResult usage
+    metadata: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.8
     source: str = "ml_model"
     model_version: str | None = None
     pipeline_id: str | None = None
+    frame_metadata: FrameMetadataDTO | None = None
+
+    @property
+    def reliable_detections(self) -> list[DetectionResultDTO]:
+        """Get only reliable detections for analytics."""
+        return [d for d in self.detections if d.is_reliable]
+
+    @property
+    def vehicle_detections(self) -> list[DetectionResultDTO]:
+        """Get only vehicle detections."""
+        return [d for d in self.detections if d.is_vehicle]
+
+    @property
+    def high_confidence_detections(self) -> list[DetectionResultDTO]:
+        """Get only high confidence detections."""
+        return [d for d in self.detections if d.is_high_confidence]
+
+    def get_detections_by_class(self, class_name: str) -> list[DetectionResultDTO]:
+        """Get detections filtered by class name."""
+        return [d for d in self.detections if d.class_name == class_name]
+
+    def get_detections_in_zone(self, zone_id: str) -> list[DetectionResultDTO]:
+        """Get detections in specific zone."""
+        return [d for d in self.detections if d.zone_id == zone_id]
+
+
+# ============================
+# ML Output Conversion Utilities
+# ============================
+
+class DetectionResultConverter:
+    """Converter for transforming ML model outputs to DetectionResult DTOs.
+    
+    Handles coordinate normalization, type mapping, and data validation
+    for various ML model output formats.
+    """
+
+    @staticmethod
+    def from_ml_output(
+        ml_detection: dict[str, Any],
+        frame_metadata: FrameMetadataDTO,
+        model_version: str | None = None
+    ) -> DetectionResultDTO:
+        """Convert ML model detection output to DetectionResultDTO.
+        
+        Args:
+            ml_detection: Raw ML model detection output
+            frame_metadata: Frame metadata information
+            model_version: Model version used for detection
+            
+        Returns:
+            DetectionResultDTO with properly mapped data
+        """
+        # Extract bounding box coordinates
+        bbox_data = ml_detection.get("bbox", ml_detection.get("bounding_box", {}))
+        if isinstance(bbox_data, list) and len(bbox_data) >= 4:
+            # Handle [x1, y1, x2, y2] format
+            x1, y1, x2, y2 = bbox_data[:4]
+        else:
+            # Handle dictionary format
+            x1 = bbox_data.get("x1", bbox_data.get("left", 0))
+            y1 = bbox_data.get("y1", bbox_data.get("top", 0))
+            x2 = bbox_data.get("x2", bbox_data.get("right", x1 + bbox_data.get("width", 0)))
+            y2 = bbox_data.get("y2", bbox_data.get("bottom", y1 + bbox_data.get("height", 0)))
+
+        # Determine if coordinates are normalized
+        normalized = ml_detection.get("normalized", False)
+        if not normalized and frame_metadata:
+            # Check if coordinates appear normalized (values between 0 and 1)
+            normalized = all(0 <= coord <= 1 for coord in [x1, y1, x2, y2])
+
+        bbox = BoundingBoxDTO(
+            x1=float(x1),
+            y1=float(y1),
+            x2=float(x2),
+            y2=float(y2),
+            normalized=normalized
+        )
+
+        # Extract detection ID
+        detection_id = ml_detection.get("detection_id", ml_detection.get("id", str(hash(str(ml_detection)))))
+
+        # Extract class information
+        class_name = ml_detection.get("class", ml_detection.get("class_name", "unknown"))
+        class_id = ml_detection.get("class_id", DetectionResultConverter._get_class_id(class_name))
+        confidence = float(ml_detection.get("confidence", ml_detection.get("score", 0.0)))
+
+        # Extract tracking information
+        track_id = ml_detection.get("track_id", ml_detection.get("tracking_id"))
+        if track_id is not None:
+            track_id = str(track_id)
+
+        # Extract vehicle-specific information
+        vehicle_type = ml_detection.get("vehicle_type")
+        vehicle_confidence = ml_detection.get("vehicle_confidence")
+
+        # Extract motion information
+        speed = ml_detection.get("speed")
+        direction = ml_detection.get("direction", ml_detection.get("heading"))
+
+        # Extract additional attributes
+        attributes = ml_detection.get("attributes", {})
+        if "additional_data" in ml_detection:
+            attributes.update(ml_detection["additional_data"])
+
+        return DetectionResultDTO(
+            detection_id=detection_id,
+            frame_id=frame_metadata.frame_id,
+            camera_id=frame_metadata.camera_id,
+            timestamp=frame_metadata.timestamp,
+            track_id=track_id,
+            class_id=class_id,
+            class_name=class_name,
+            confidence=confidence,
+            bbox=bbox,
+            attributes=attributes,
+            zone_id=ml_detection.get("zone_id"),
+            speed=speed,
+            direction=direction,
+            vehicle_type=vehicle_type,
+            vehicle_confidence=vehicle_confidence,
+            license_plate=ml_detection.get("license_plate"),
+            license_plate_confidence=ml_detection.get("license_plate_confidence"),
+            color_primary=ml_detection.get("color_primary"),
+            color_secondary=ml_detection.get("color_secondary"),
+            estimated_length=ml_detection.get("estimated_length"),
+            estimated_width=ml_detection.get("estimated_width"),
+            detection_quality=ml_detection.get("quality_score", 1.0),
+            occlusion_ratio=ml_detection.get("occlusion_ratio"),
+            blur_score=ml_detection.get("blur_score"),
+            model_version=model_version,
+            processing_time_ms=ml_detection.get("processing_time_ms"),
+        )
+
+    @staticmethod
+    def from_ml_batch(
+        ml_detections: list[dict[str, Any]],
+        frame_metadata: FrameMetadataDTO,
+        model_version: str | None = None
+    ) -> list[DetectionResultDTO]:
+        """Convert batch of ML detections to DTOs.
+        
+        Args:
+            ml_detections: List of ML detection outputs
+            frame_metadata: Frame metadata information
+            model_version: Model version used for detection
+            
+        Returns:
+            List of DetectionResultDTO objects
+        """
+        return [
+            DetectionResultConverter.from_ml_output(detection, frame_metadata, model_version)
+            for detection in ml_detections
+        ]
+
+    @staticmethod
+    def to_detection_data(
+        ml_output: dict[str, Any],
+        camera_id: str,
+        timestamp: datetime | None = None
+    ) -> DetectionData:
+        """Convert complete ML output to DetectionData.
+        
+        Args:
+            ml_output: Complete ML pipeline output
+            camera_id: Camera identifier
+            timestamp: Processing timestamp
+            
+        Returns:
+            DetectionData with converted DTOs
+        """
+        if timestamp is None:
+            timestamp = datetime.now(UTC)
+
+        # Extract frame metadata
+        frame_info = ml_output.get("frame", {})
+        frame_metadata = FrameMetadataDTO(
+            frame_id=frame_info.get("frame_id", str(hash(str(ml_output)))),
+            camera_id=camera_id,
+            timestamp=timestamp,
+            frame_number=frame_info.get("frame_number", 0),
+            width=frame_info.get("width", 1920),
+            height=frame_info.get("height", 1080),
+            quality_score=frame_info.get("quality_score"),
+            model_version=ml_output.get("model_version"),
+            processing_time_ms=ml_output.get("processing_time_ms"),
+            storage_path=frame_info.get("storage_path"),
+            weather_conditions=frame_info.get("weather_conditions"),
+            lighting_conditions=frame_info.get("lighting_conditions"),
+        )
+
+        # Convert detections
+        raw_detections = ml_output.get("detections", [])
+        detections = DetectionResultConverter.from_ml_batch(
+            raw_detections, frame_metadata, ml_output.get("model_version")
+        )
+
+        # Count vehicles
+        vehicle_count = len([d for d in detections if d.is_vehicle])
+
+        return DetectionData(
+            camera_id=camera_id,
+            timestamp=timestamp,
+            frame_id=frame_metadata.frame_id,
+            detections=detections,
+            vehicle_count=vehicle_count,
+            metadata=ml_output.get("metadata", {}),
+            confidence=ml_output.get("overall_confidence", 0.8),
+            source=ml_output.get("source", "ml_model"),
+            model_version=ml_output.get("model_version"),
+            pipeline_id=ml_output.get("pipeline_id"),
+            frame_metadata=frame_metadata,
+        )
+
+    @staticmethod
+    def _get_class_id(class_name: str) -> int:
+        """Map class name to class ID.
+        
+        Args:
+            class_name: Detection class name
+            
+        Returns:
+            Numeric class ID
+        """
+        class_mapping = {
+            "car": 0,
+            "truck": 1,
+            "bus": 2,
+            "motorcycle": 3,
+            "bicycle": 4,
+            "person": 5,
+            "traffic_light": 6,
+            "stop_sign": 7,
+            "ambulance": 8,
+            "fire_truck": 9,
+            "police": 10,
+            "unknown": 99,
+        }
+        return class_mapping.get(class_name.lower(), 99)
+
+
+class CoordinateNormalizer:
+    """Utility for coordinate system conversions.
+    
+    Handles conversion between normalized (0.0-1.0) and absolute pixel coordinates.
+    """
+
+    @staticmethod
+    def normalize_bbox(
+        bbox: BoundingBoxDTO,
+        frame_width: int,
+        frame_height: int
+    ) -> BoundingBoxDTO:
+        """Convert absolute coordinates to normalized.
+        
+        Args:
+            bbox: Bounding box with absolute coordinates
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            
+        Returns:
+            BoundingBoxDTO with normalized coordinates
+        """
+        if bbox.normalized:
+            return bbox
+
+        return BoundingBoxDTO(
+            x1=bbox.x1 / frame_width,
+            y1=bbox.y1 / frame_height,
+            x2=bbox.x2 / frame_width,
+            y2=bbox.y2 / frame_height,
+            normalized=True
+        )
+
+    @staticmethod
+    def denormalize_bbox(
+        bbox: BoundingBoxDTO,
+        frame_width: int,
+        frame_height: int
+    ) -> BoundingBoxDTO:
+        """Convert normalized coordinates to absolute.
+        
+        Args:
+            bbox: Bounding box with normalized coordinates
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            
+        Returns:
+            BoundingBoxDTO with absolute coordinates
+        """
+        if not bbox.normalized:
+            return bbox
+
+        return BoundingBoxDTO(
+            x1=bbox.x1 * frame_width,
+            y1=bbox.y1 * frame_height,
+            x2=bbox.x2 * frame_width,
+            y2=bbox.y2 * frame_height,
+            normalized=False
+        )
 
 
 # ============================
