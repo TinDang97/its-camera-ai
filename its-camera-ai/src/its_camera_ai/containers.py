@@ -220,14 +220,79 @@ class ServiceContainer(containers.DeclarativeContainer):
         config=config.sse_streaming,
     )
 
-    # Analytics Service - Factory for per-request instances
+    # Legacy Analytics Service - Factory for per-request instances
     analytics_service = providers.Factory(
-        "its_camera_ai.services.analytics_service.AnalyticsService",
+        "its_camera_ai.services.analytics_service.EnhancedAnalyticsService",
         analytics_repository=repositories.analytics_repository,
         metrics_repository=repositories.metrics_repository,
         detection_repository=repositories.detection_repository,
         settings=config,
         cache_service=cache_service,
+    )
+
+    # Refactored Analytics Components with DI
+
+    # Analytics Aggregation Service - Factory for time-series aggregation
+    analytics_aggregation_service = providers.Factory(
+        "its_camera_ai.services.analytics_aggregation_service.AnalyticsAggregationService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Incident Detection Service - Factory for incident processing
+    incident_detection_service = providers.Factory(
+        "its_camera_ai.services.incident_detection_service.IncidentDetectionService",
+        alert_repository=repositories.alert_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Traffic Rule Service - Factory for rule evaluation
+    traffic_rule_service = providers.Factory(
+        "its_camera_ai.services.traffic_rule_service.TrafficRuleService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Speed Calculation Service - Factory for speed analysis
+    speed_calculation_service = providers.Factory(
+        "its_camera_ai.services.speed_calculation_service.SpeedCalculationService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Anomaly Detection Service - Factory for ML-based anomaly detection
+    anomaly_detection_service = providers.Factory(
+        "its_camera_ai.services.anomaly_detection_service.AnomalyDetectionService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Unified Analytics Service - Factory for comprehensive analytics
+    unified_analytics_service = providers.Factory(
+        "its_camera_ai.services.unified_analytics_service.UnifiedAnalyticsService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Legacy support - Incident Detection Engine alias
+    incident_detection_engine = providers.Factory(
+        "its_camera_ai.services.incident_detection_service.IncidentDetectionService",
+        alert_repository=repositories.alert_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Prediction Service - Factory for ML predictions
+    prediction_service = providers.Factory(
+        "its_camera_ai.services.prediction_service.PredictionService",
+        cache_service=cache_service,
+        settings=config,
     )
 
     # Alert Service - Factory for per-request instances
@@ -272,7 +337,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         "its_camera_ai.services.service_mesh.ServiceMesh",
         camera_service=services.camera_service,
         streaming_service=services.streaming_service,
-        analytics_service=services.analytics_service,
+        analytics_service=services.unified_analytics_service,  # Use unified analytics
         alert_service=services.alert_service,
         config=config.service_mesh,
     )

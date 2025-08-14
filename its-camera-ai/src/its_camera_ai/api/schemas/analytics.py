@@ -465,6 +465,43 @@ class AnomalyDetectionRequest(BaseModel):
         return v
 
 
+class WebSocketAnalyticsUpdate(BaseModel):
+    """WebSocket analytics update message schema."""
+
+    event_type: Literal["metrics", "incident", "vehicle_count", "speed_update", "prediction"] = Field(
+        description="Type of analytics event"
+    )
+    camera_id: str = Field(description="Source camera ID")
+    timestamp: datetime = Field(description="Event timestamp")
+    data: dict[str, Any] = Field(description="Event data payload")
+    processing_latency_ms: float = Field(description="Processing latency in milliseconds", ge=0)
+    confidence_score: float = Field(description="Data confidence score", ge=0, le=1)
+    sequence_id: int | None = Field(None, description="Message sequence identifier")
+    metadata: dict[str, Any] | None = Field(None, description="Additional metadata")
+
+
+class PredictionData(BaseModel):
+    """Prediction data for WebSocket updates."""
+
+    timestamp: datetime = Field(description="Prediction timestamp")
+    predicted_vehicle_count: int = Field(description="Predicted vehicle count", ge=0)
+    predicted_avg_speed: float = Field(description="Predicted average speed", ge=0)
+    predicted_congestion_level: str = Field(description="Predicted congestion level")
+    confidence: float = Field(description="Prediction confidence", ge=0, le=1)
+    horizon_minutes: int = Field(description="Prediction horizon in minutes", ge=1)
+
+
+class SpeedData(BaseModel):
+    """Speed data for WebSocket updates."""
+
+    timestamp: datetime = Field(description="Speed measurement timestamp")
+    average_speed: float = Field(description="Average speed in km/h", ge=0)
+    speed_limit: float = Field(description="Speed limit in km/h", ge=0)
+    violation_count: int = Field(description="Speed violations count", ge=0)
+    vehicle_speeds: dict[str, float] = Field(description="Individual vehicle speeds")
+    zone_id: str | None = Field(None, description="Speed measurement zone")
+
+
 class ReportGenerationRequest(BaseModel):
     """Request schema for generating analytics reports."""
 

@@ -197,6 +197,18 @@ def get_analytics_service(
 
 
 @inject
+def get_prediction_service(
+    prediction_service=Provide[ApplicationContainer.services.prediction_service],
+):
+    """Get prediction service from dependency injection container.
+
+    Returns:
+        PredictionService: Prediction service instance
+    """
+    return prediction_service
+
+
+@inject
 def get_alert_service(
     alert_service=Provide[ApplicationContainer.services.alert_service],
 ):

@@ -295,6 +295,7 @@ select = [
     "SIM", # flake8-simplify
     "TCH", # flake8-type-checking
     "S",   # bandit security checks
+    "W293", # blank line contains whitespace
 ]
 ignore = [
     "E501",  # line too long (handled by black)
