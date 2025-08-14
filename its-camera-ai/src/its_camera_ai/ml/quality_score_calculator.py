@@ -88,7 +88,7 @@ class QualityScoreCalculator:
     MAX_POSITION_DELTA = 50.0  # Max pixel movement between frames
     MAX_SIZE_DELTA = 0.2  # Max size change ratio
 
-    def __init__(self, cache_service: CacheService):
+    def __init__(self, cache_service: CacheService, enable_compression: bool = True):
         """Initialize quality score calculator.
 
         Args:
@@ -146,7 +146,10 @@ class QualityScoreCalculator:
             )
 
             # 2. Image quality metrics (most expensive calculation)
-            image_quality = await self._calculate_image_quality(frame, detection)
+            # Use compressed caching for image features to reduce memory usage
+            image_quality = await self._calculate_image_quality_with_caching(
+                frame, detection, cache_key
+            )
 
             # 3. Model uncertainty (entropy-based)
             model_uncertainty = self._calculate_model_uncertainty(model_output)
@@ -751,7 +754,7 @@ class QualityScoreCalculator:
         """
         cache_hit_rate = self.stats["cache_hits"] / max(1, self.stats["calculations"])
 
-        return {
+        stats = {
             "quality_calculator": {
                 "total_calculations": self.stats["calculations"],
                 "cache_hits": self.stats["cache_hits"],
@@ -761,3 +764,380 @@ class QualityScoreCalculator:
                 "weights": self.WEIGHTS,
             }
         }
+
+        # Add compression-specific stats if enabled
+        if self.enable_compression:
+            stats["quality_calculator"].update({
+                "compression_enabled": True,
+                "compressed_cache_hits": self.stats["compressed_cache_hits"],
+                "compressed_cache_hit_rate": (
+                    self.stats["compressed_cache_hits"] / max(1, self.stats["calculations"])
+                ),
+                "avg_compression_ratio": self.stats["compression_ratio"],
+                "memory_saved_mb": self.stats["memory_saved_bytes"] / (1024 * 1024),
+                "feature_cache_size": len(self.feature_cache),
+            })
+
+        return stats
+
+    def get_performance_metrics(self) -> dict[str, Any]:
+        """Get comprehensive performance metrics including compression stats."""
+        total_requests = self.stats["calculations"]
+        cache_hit_rate = (
+            (self.stats["cache_hits"] + self.stats["compressed_cache_hits"]) / total_requests
+            if total_requests > 0 else 0
+        )
+
+        metrics = {
+            "total_calculations": total_requests,
+            "cache_hit_rate": cache_hit_rate,
+            "compressed_cache_hit_rate": (
+                self.stats["compressed_cache_hits"] / total_requests
+                if total_requests > 0 else 0
+            ),
+            "avg_calculation_time_ms": self.stats["avg_calculation_time_ms"],
+            "compression_enabled": self.enable_compression,
+        }
+
+        if self.enable_compression:
+            metrics.update({
+                "avg_compression_ratio": self.stats["compression_ratio"],
+                "total_memory_saved_bytes": self.stats["memory_saved_bytes"],
+                "total_memory_saved_mb": self.stats["memory_saved_bytes"] / (1024 * 1024),
+                "feature_cache_size": len(self.feature_cache),
+            })
+
+        return metrics
+
+    async def _calculate_image_quality_with_caching(
+        self, frame: np.ndarray, detection: dict[str, Any], cache_key: str
+    ) -> float:
+        """Calculate image quality with compressed feature caching.
+        
+        Args:
+            frame: Input frame
+            detection: Detection data
+            cache_key: Cache key for compressed features
+            
+        Returns:
+            Image quality score (0.0-1.0)
+        """
+        try:
+            # Check for compressed cached features
+            feature_cache_key = f"features_{cache_key}"
+            cached_features = await self._get_compressed_features(feature_cache_key)
+
+            if cached_features is not None:
+                self.stats["compressed_cache_hits"] += 1
+                return self._compute_image_quality_from_features(cached_features)
+
+            # Calculate image quality and extract cacheable features
+            image_quality, features = await self._calculate_image_quality_detailed(
+                frame, detection
+            )
+
+            # Cache compressed features for reuse
+            if self.enable_compression and features is not None:
+                await self._cache_compressed_features(feature_cache_key, features)
+
+            return image_quality
+
+        except Exception as e:
+            logger.error(f"Image quality calculation with caching failed: {e}")
+            return await self._calculate_image_quality(frame, detection)
+
+    async def _calculate_image_quality_detailed(
+        self, frame: np.ndarray, detection: dict[str, Any]
+    ) -> tuple[float, dict[str, np.ndarray] | None]:
+        """Calculate detailed image quality with extractable features.
+        
+        Args:
+            frame: Input frame
+            detection: Detection data
+            
+        Returns:
+            Tuple of (quality_score, cacheable_features)
+        """
+        try:
+            # Extract ROI from frame
+            bbox = detection.get("bbox", [])
+            if len(bbox) >= 4:
+                x1, y1, x2, y2 = map(int, bbox[:4])
+                roi = frame[y1:y2, x1:x2]
+            else:
+                roi = frame
+
+            if roi.size == 0:
+                return 0.5, None
+
+            # Convert to grayscale for feature extraction
+            if len(roi.shape) == 3:
+                gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            else:
+                gray_roi = roi
+
+            # Calculate detailed metrics with feature extraction
+            blur_score, blur_features = self._calculate_blur_with_features(gray_roi)
+            brightness_score, brightness_features = self._calculate_brightness_with_features(gray_roi)
+            contrast_score, contrast_features = self._calculate_contrast_with_features(gray_roi)
+            noise_score, noise_features = self._calculate_noise_with_features(gray_roi)
+            sharpness_score, sharpness_features = self._calculate_sharpness_with_features(gray_roi)
+
+            # Combine metrics
+            metrics = ImageQualityMetrics(
+                blur_score=blur_score,
+                brightness_score=brightness_score,
+                contrast_score=contrast_score,
+                noise_score=noise_score,
+                sharpness_score=sharpness_score,
+            )
+
+            # Weighted average of quality metrics
+            quality_score = (
+                metrics.blur_score * 0.25 +
+                metrics.brightness_score * 0.20 +
+                metrics.contrast_score * 0.20 +
+                metrics.noise_score * 0.15 +
+                metrics.sharpness_score * 0.20
+            )
+
+            # Collect features for caching
+            features = {
+                "blur_features": blur_features,
+                "brightness_features": brightness_features,
+                "contrast_features": contrast_features,
+                "noise_features": noise_features,
+                "sharpness_features": sharpness_features,
+                "roi_shape": np.array(roi.shape, dtype=np.int32),
+                "quality_metrics": np.array([
+                    metrics.blur_score, metrics.brightness_score,
+                    metrics.contrast_score, metrics.noise_score,
+                    metrics.sharpness_score
+                ], dtype=np.float32)
+            }
+
+            return quality_score, features
+
+        except Exception as e:
+            logger.error(f"Detailed image quality calculation failed: {e}")
+            return 0.5, None
+
+    def _calculate_blur_with_features(self, gray_roi: np.ndarray) -> tuple[float, np.ndarray]:
+        """Calculate blur score with extractable features."""
+        # Laplacian variance for blur detection
+        laplacian = cv2.Laplacian(gray_roi, cv2.CV_64F)
+        variance = laplacian.var()
+        blur_score = min(1.0, variance / self.BLUR_THRESHOLD)
+
+        # Extract gradient features for caching
+        grad_x = cv2.Sobel(gray_roi, cv2.CV_32F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray_roi, cv2.CV_32F, 0, 1, ksize=3)
+        grad_features = np.array([
+            np.mean(np.abs(grad_x)), np.std(grad_x),
+            np.mean(np.abs(grad_y)), np.std(grad_y),
+            variance
+        ], dtype=np.float32)
+
+        return blur_score, grad_features
+
+    def _calculate_brightness_with_features(self, gray_roi: np.ndarray) -> tuple[float, np.ndarray]:
+        """Calculate brightness score with extractable features."""
+        mean_brightness = np.mean(gray_roi)
+        brightness_deviation = abs(mean_brightness - self.BRIGHTNESS_OPTIMAL)
+        brightness_score = max(0.0, 1.0 - brightness_deviation / 128.0)
+
+        # Extract histogram features for caching
+        hist = cv2.calcHist([gray_roi], [0], None, [16], [0, 256])
+        hist_features = hist.flatten().astype(np.float32)
+
+        brightness_features = np.concatenate([
+            [mean_brightness, np.std(gray_roi), brightness_score],
+            hist_features
+        ])
+
+        return brightness_score, brightness_features
+
+    def _calculate_contrast_with_features(self, gray_roi: np.ndarray) -> tuple[float, np.ndarray]:
+        """Calculate contrast score with extractable features."""
+        contrast = np.std(gray_roi)
+        contrast_score = min(1.0, contrast / 100.0)
+
+        # Dynamic range features
+        min_val, max_val = np.min(gray_roi), np.max(gray_roi)
+        dynamic_range = max_val - min_val
+
+        contrast_features = np.array([
+            contrast, dynamic_range, min_val, max_val,
+            np.percentile(gray_roi, 25), np.percentile(gray_roi, 75)
+        ], dtype=np.float32)
+
+        return contrast_score, contrast_features
+
+    def _calculate_noise_with_features(self, gray_roi: np.ndarray) -> tuple[float, np.ndarray]:
+        """Calculate noise score with extractable features."""
+        # Simple noise estimation using high-pass filter
+        kernel = np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]])
+        noise_map = cv2.filter2D(gray_roi.astype(np.float32), -1, kernel)
+        noise_level = np.std(noise_map) / 255.0
+        noise_score = max(0.0, 1.0 - noise_level / self.NOISE_THRESHOLD)
+
+        noise_features = np.array([
+            noise_level, np.mean(np.abs(noise_map)),
+            np.percentile(np.abs(noise_map), 90)
+        ], dtype=np.float32)
+
+        return noise_score, noise_features
+
+    def _calculate_sharpness_with_features(self, gray_roi: np.ndarray) -> tuple[float, np.ndarray]:
+        """Calculate sharpness score with extractable features."""
+        # Sobel edge detection for sharpness
+        sobelx = cv2.Sobel(gray_roi, cv2.CV_64F, 1, 0, ksize=3)
+        sobely = cv2.Sobel(gray_roi, cv2.CV_64F, 0, 1, ksize=3)
+        edge_magnitude = np.sqrt(sobelx**2 + sobely**2)
+        sharpness = np.mean(edge_magnitude)
+        sharpness_score = min(1.0, sharpness / 100.0)
+
+        sharpness_features = np.array([
+            sharpness, np.std(edge_magnitude),
+            np.percentile(edge_magnitude, 95)
+        ], dtype=np.float32)
+
+        return sharpness_score, sharpness_features
+
+    def _compute_image_quality_from_features(self, features: dict[str, np.ndarray]) -> float:
+        """Compute image quality score from cached features."""
+        try:
+            quality_metrics = features.get("quality_metrics")
+            if quality_metrics is not None and len(quality_metrics) >= 5:
+                # Weighted average of cached quality metrics
+                return (
+                    quality_metrics[0] * 0.25 +  # blur_score
+                    quality_metrics[1] * 0.20 +  # brightness_score
+                    quality_metrics[2] * 0.20 +  # contrast_score
+                    quality_metrics[3] * 0.15 +  # noise_score
+                    quality_metrics[4] * 0.20     # sharpness_score
+                )
+            return 0.5
+        except Exception as e:
+            logger.error(f"Failed to compute quality from cached features: {e}")
+            return 0.5
+
+    async def _get_compressed_features(self, cache_key: str) -> dict[str, np.ndarray] | None:
+        """Retrieve and decompress cached features."""
+        if not self.enable_compression or not self.compressor:
+            return None
+
+        try:
+            # Check in-memory feature cache first
+            if cache_key in self.feature_cache:
+                cached_data, timestamp = self.feature_cache[cache_key]
+                if time.time() - timestamp < self.cache_ttl:
+                    return self._decompress_features(cached_data)
+                else:
+                    del self.feature_cache[cache_key]
+
+            # Check Redis cache
+            cached_compressed = await self.cache.get_bytes(cache_key)
+            if cached_compressed:
+                features = self._decompress_features(cached_compressed)
+                # Update in-memory cache
+                self.feature_cache[cache_key] = (cached_compressed, time.time())
+                return features
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to get compressed features: {e}")
+            return None
+
+    async def _cache_compressed_features(self, cache_key: str, features: dict[str, np.ndarray]) -> None:
+        """Compress and cache features."""
+        if not self.enable_compression or not self.compressor:
+            return
+
+        try:
+            compressed_data = self._compress_features(features)
+
+            # Calculate compression statistics
+            original_size = sum(arr.nbytes for arr in features.values())
+            compressed_size = len(compressed_data)
+            compression_ratio = compressed_size / original_size if original_size > 0 else 0
+
+            # Update statistics
+            self.stats["compression_ratio"] = (
+                self.stats["compression_ratio"] + compression_ratio
+            ) / 2  # Running average
+            self.stats["memory_saved_bytes"] += original_size - compressed_size
+
+            # Cache in memory and Redis
+            self.feature_cache[cache_key] = (compressed_data, time.time())
+            await self.cache.set_bytes(cache_key, compressed_data, ttl=self.cache_ttl)
+
+            logger.debug(
+                f"Cached compressed features: {original_size} -> {compressed_size} bytes "
+                f"({compression_ratio:.3f} ratio)"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to cache compressed features: {e}")
+
+    def _compress_features(self, features: dict[str, np.ndarray]) -> bytes:
+        """Compress feature dictionary using blosc."""
+        # Serialize features to single array for compression
+        feature_data = []
+        feature_metadata = []
+
+        for key, array in features.items():
+            feature_data.append(array.flatten())
+            feature_metadata.append({
+                "key": key,
+                "shape": array.shape,
+                "dtype": str(array.dtype),
+                "size": array.size
+            })
+
+        # Combine all features into single array
+        combined_array = np.concatenate(feature_data).astype(np.float32)
+
+        # Compress with metadata
+        compressed_features = self.compressor.compress_with_metadata(combined_array)
+
+        # Combine with metadata (simple JSON serialization)
+        import json
+        metadata_json = json.dumps(feature_metadata).encode('utf-8')
+        metadata_size = len(metadata_json)
+
+        # Pack: [metadata_size:4][metadata][compressed_features]
+        result = metadata_size.to_bytes(4, 'little') + metadata_json + compressed_features
+
+        return result
+
+    def _decompress_features(self, compressed_data: bytes) -> dict[str, np.ndarray]:
+        """Decompress feature dictionary."""
+        # Unpack metadata
+        metadata_size = int.from_bytes(compressed_data[:4], 'little')
+        metadata_json = compressed_data[4:4+metadata_size]
+        compressed_features = compressed_data[4+metadata_size:]
+
+        import json
+        feature_metadata = json.loads(metadata_json.decode('utf-8'))
+
+        # Decompress features
+        combined_array = self.compressor.decompress_with_metadata(compressed_features)
+
+        # Reconstruct individual feature arrays
+        features = {}
+        offset = 0
+
+        for meta in feature_metadata:
+            key = meta["key"]
+            shape = tuple(meta["shape"])
+            dtype = np.dtype(meta["dtype"])
+            size = meta["size"]
+
+            # Extract array data
+            array_data = combined_array[offset:offset+size]
+            features[key] = array_data.reshape(shape).astype(dtype)
+            offset += size
+
+        return features

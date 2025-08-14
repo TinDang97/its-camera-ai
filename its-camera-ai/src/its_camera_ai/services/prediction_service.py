@@ -223,6 +223,234 @@ class MLModelRegistry:
         }
 
 
+
+class PredictiveCacheManager:
+    """ML-based predictive caching for traffic predictions."""
+
+    def __init__(self, cache_service: CacheService):
+        self.cache_service = cache_service
+        self.access_patterns = {}
+        self.prediction_accuracy = {}
+
+    def record_access(self, cache_key: str, camera_id: str, timestamp: datetime):
+        """Record cache access pattern for ML-based prediction."""
+        pattern_key = f"{camera_id}:{timestamp.hour}"
+        if pattern_key not in self.access_patterns:
+            self.access_patterns[pattern_key] = []
+
+        self.access_patterns[pattern_key].append({
+            "cache_key": cache_key,
+            "timestamp": timestamp,
+            "hour": timestamp.hour,
+            "day_of_week": timestamp.weekday()
+        })
+
+    async def warm_cache_predictively(self, camera_id: str, current_time: datetime):
+        """Predictively warm cache based on historical access patterns."""
+        try:
+            # Predict which caches will be needed in next 15 minutes
+            predicted_keys = self._predict_cache_needs(camera_id, current_time)
+
+            # Pre-warm high probability cache entries
+            for key_info in predicted_keys:
+                if key_info["probability"] > 0.7:  # 70% probability threshold
+                    await self._pre_warm_cache(key_info["cache_key"], camera_id)
+
+        except Exception as e:
+            logger.error(f"Predictive cache warming failed: {e}")
+
+    def _predict_cache_needs(self, camera_id: str, current_time: datetime) -> list[dict]:
+        """Predict cache needs using simple pattern matching."""
+        pattern_key = f"{camera_id}:{current_time.hour}"
+
+        if pattern_key not in self.access_patterns:
+            return []
+
+        # Simple frequency-based prediction
+        cache_frequency = {}
+        patterns = self.access_patterns[pattern_key]
+
+        for pattern in patterns[-50:]:  # Last 50 accesses for this hour
+            cache_key = pattern["cache_key"]
+            cache_frequency[cache_key] = cache_frequency.get(cache_key, 0) + 1
+
+        # Calculate probability based on frequency
+        total_accesses = sum(cache_frequency.values())
+        predictions = []
+
+        for cache_key, frequency in cache_frequency.items():
+            probability = frequency / total_accesses if total_accesses > 0 else 0
+            predictions.append({
+                "cache_key": cache_key,
+                "probability": probability,
+                "frequency": frequency
+            })
+
+        return sorted(predictions, key=lambda x: x["probability"], reverse=True)
+
+    async def _pre_warm_cache(self, cache_key: str, camera_id: str):
+        """Pre-warm specific cache entry."""
+        try:
+            # Generate prediction data for this cache key
+            # This is a simplified version - in production, this would trigger
+            # actual prediction generation for the specific key
+            warm_data = {
+                "camera_id": camera_id,
+                "warmed_at": datetime.now(UTC).isoformat(),
+                "prediction_type": "pre_warmed",
+                "status": "ready"
+            }
+
+            await self.cache_service.set_json(
+                cache_key,
+                warm_data,
+                ttl=900  # 15 minutes
+            )
+
+            logger.debug(f"Pre-warmed cache key: {cache_key}")
+
+        except Exception as e:
+            logger.error(f"Failed to pre-warm cache key {cache_key}: {e}")
+
+
+class ModelPerformanceTracker:
+    """Advanced performance tracking with circuit breaker integration."""
+
+    def __init__(self):
+        self.model_metrics = {}
+        self.performance_thresholds = {
+            "accuracy": 0.85,      # 85% minimum accuracy
+            "latency_ms": 50.0,    # 50ms maximum latency
+            "error_rate": 0.05     # 5% maximum error rate
+        }
+        self.circuit_breaker_status = {}
+
+    def record_prediction_performance(self, model_name: str,
+                                    actual_value: float,
+                                    predicted_value: float,
+                                    prediction_time_ms: float):
+        """Record individual prediction performance."""
+        if model_name not in self.model_metrics:
+            self.model_metrics[model_name] = {
+                "predictions": [],
+                "latencies": [],
+                "errors": [],
+                "circuit_breaker_opens": 0
+            }
+
+        # Calculate accuracy metrics
+        error = abs(actual_value - predicted_value)
+        relative_error = error / max(abs(actual_value), 1.0)
+
+        # Store metrics
+        metrics = self.model_metrics[model_name]
+        metrics["predictions"].append({
+            "timestamp": datetime.now(UTC),
+            "actual": actual_value,
+            "predicted": predicted_value,
+            "error": error,
+            "relative_error": relative_error
+        })
+
+        metrics["latencies"].append(prediction_time_ms)
+
+        # Keep only last 1000 predictions for memory management
+        if len(metrics["predictions"]) > 1000:
+            metrics["predictions"] = metrics["predictions"][-1000:]
+            metrics["latencies"] = metrics["latencies"][-1000:]
+
+    def get_model_health(self, model_name: str) -> dict:
+        """Get comprehensive model health metrics."""
+        if model_name not in self.model_metrics:
+            return {"status": "no_data", "health_score": 0.0}
+
+        metrics = self.model_metrics[model_name]
+        recent_predictions = metrics["predictions"][-100:]  # Last 100 predictions
+        recent_latencies = metrics["latencies"][-100:]
+
+        if not recent_predictions:
+            return {"status": "insufficient_data", "health_score": 0.0}
+
+        # Calculate health metrics
+        avg_relative_error = np.mean([p["relative_error"] for p in recent_predictions])
+        accuracy = max(0.0, 1.0 - avg_relative_error)  # Simple accuracy metric
+        avg_latency = np.mean(recent_latencies)
+
+        # Determine health status
+        health_score = 0.0
+        status = "healthy"
+
+        # Accuracy component (40% weight)
+        if accuracy >= self.performance_thresholds["accuracy"]:
+            health_score += 0.4
+        else:
+            health_score += 0.4 * (accuracy / self.performance_thresholds["accuracy"])
+            if accuracy < 0.7:
+                status = "degraded"
+
+        # Latency component (30% weight)
+        if avg_latency <= self.performance_thresholds["latency_ms"]:
+            health_score += 0.3
+        else:
+            health_score += 0.3 * (self.performance_thresholds["latency_ms"] / avg_latency)
+            if avg_latency > self.performance_thresholds["latency_ms"] * 2:
+                status = "degraded"
+
+        # Error rate component (30% weight)
+        error_rate = len([p for p in recent_predictions if p["relative_error"] > 0.2]) / len(recent_predictions)
+        if error_rate <= self.performance_thresholds["error_rate"]:
+            health_score += 0.3
+        else:
+            health_score += 0.3 * (1.0 - min(1.0, error_rate))
+            if error_rate > 0.15:
+                status = "degraded"
+
+        # Determine final status
+        if health_score < 0.5:
+            status = "unhealthy"
+        elif health_score < 0.8:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "health_score": round(health_score, 3),
+            "accuracy": round(accuracy, 3),
+            "avg_latency_ms": round(avg_latency, 2),
+            "error_rate": round(error_rate, 3),
+            "sample_size": len(recent_predictions),
+            "circuit_breaker_opens": metrics.get("circuit_breaker_opens", 0)
+        }
+
+    def should_circuit_break(self, model_name: str) -> bool:
+        """Determine if model should be circuit-broken based on performance."""
+        health = self.get_model_health(model_name)
+
+        # Circuit break if health score is too low or status is unhealthy
+        should_break = (
+            health["health_score"] < 0.3 or
+            health["status"] == "unhealthy" or
+            health["error_rate"] > 0.25  # 25% error rate
+        )
+
+        if should_break and model_name not in self.circuit_breaker_status:
+            self.circuit_breaker_status[model_name] = {
+                "opened_at": datetime.now(UTC),
+                "failure_count": 0
+            }
+
+            if model_name in self.model_metrics:
+                self.model_metrics[model_name]["circuit_breaker_opens"] += 1
+
+            logger.warning(f"Circuit breaker opened for model {model_name}: {health}")
+
+        return should_break
+
+    def reset_circuit_breaker(self, model_name: str):
+        """Reset circuit breaker for model after recovery."""
+        if model_name in self.circuit_breaker_status:
+            del self.circuit_breaker_status[model_name]
+            logger.info(f"Circuit breaker reset for model {model_name}")
+
 class PredictionService:
     """Traffic prediction service with ML pipeline integration."""
 

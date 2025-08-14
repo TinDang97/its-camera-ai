@@ -478,3 +478,17 @@ class QualityValidationError(StreamingError):
         self.frame_id = frame_id
         self.quality_score = quality_score
         self.issues = issues or []
+
+
+class ServiceError(BaseException):
+    """Base class for all service-related errors."""
+
+    def __init__(
+        self,
+        message: str,
+        service: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.service = service
+        self.details = details or {}

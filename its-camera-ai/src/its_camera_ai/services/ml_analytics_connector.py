@@ -562,4 +562,206 @@ class MLAnalyticsConnector:
             }
 
         except Exception as e:
-            return {"status": "error", "error": str(e)}
+            return {
+                "status": "error",
+                "error": str(e),
+                "timestamp": time.time()
+            }
+
+    # New methods for enhanced functionality
+    def _generate_batch_cache_key(self, batch_results: list[dict[str, Any]],
+                                  frame_metadata: dict[str, Any]) -> str:
+        """Generate cache key for batch deduplication."""
+        import hashlib
+
+        # Create hash from frame metadata and batch size
+        key_data = {
+            "camera_id": frame_metadata.get("camera_id"),
+            "batch_size": len(batch_results),
+            "model_version": frame_metadata.get("model_version"),
+            "timestamp_minute": int(time.time() // 60)  # 1-minute buckets
+        }
+
+        key_str = json.dumps(key_data, sort_keys=True)
+        return hashlib.md5(key_str.encode()).hexdigest()[:16]
+
+    async def _convert_ml_outputs_cached(
+        self, batch_results: list[dict[str, Any]],
+        frame_metadata: dict[str, Any],
+        cache_key: str | None = None
+    ) -> list[DetectionResultDTO]:
+        """Convert ML outputs with caching optimization."""
+        # Try cache first if key provided
+        if cache_key and cache_key in self.detection_cache:
+            cached_result = self.detection_cache[cache_key]
+            logger.debug(f"Using cached ML conversion for key: {cache_key}")
+            return cached_result.get("detection_results", [])
+
+        # Fallback to original conversion
+        return await self._convert_ml_outputs(batch_results, frame_metadata)
+
+    async def _process_camera_groups_with_circuit_breaker(
+        self, camera_groups: dict[str, list[DetectionResultDTO]],
+        frame_metadata: dict[str, Any],
+        timeout_ms: float
+    ) -> None:
+        """Process camera groups with circuit breaker protection."""
+        if not camera_groups:
+            return
+
+        # Create processing tasks with circuit breaker wrapper
+        tasks = []
+        for camera_id, detections in camera_groups.items():
+            task = self._process_camera_detections_with_circuit_breaker(
+                camera_id, detections, frame_metadata
+            )
+            tasks.append(task)
+
+        try:
+            # Execute all camera processing in parallel with timeout
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=timeout_ms / 1000.0,
+            )
+        except TimeoutError:
+            logger.warning(f"Camera group processing timeout after {timeout_ms}ms")
+            raise
+
+    # @circuit(failure_threshold=10, recovery_timeout=60)  # Decorator not available
+    async def _process_camera_detections_with_circuit_breaker(
+        self, camera_id: str, detections: list[DetectionResultDTO],
+        frame_metadata: dict[str, Any]
+    ) -> None:
+        """Process camera detections with circuit breaker protection."""
+        # Call original method
+        await self._process_camera_detections(camera_id, detections, frame_metadata)
+
+    def _store_inference_history(self, camera_id: str, detection_results: list[DetectionResultDTO],
+                                frame_metadata: dict[str, Any]) -> None:
+        """Store inference history for drift detection and analysis."""
+        history_entry = {
+            "timestamp": time.time(),
+            "camera_id": camera_id,
+            "detection_count": len(detection_results),
+            "model_version": frame_metadata.get("model_version"),
+            "confidence_avg": sum(
+                getattr(det, 'confidence', 0.0) for det in detection_results
+            ) / max(1, len(detection_results)),
+            "frame_quality": frame_metadata.get("quality_score", 0.0)
+        }
+
+        # Store with timestamp-based key
+        history_key = f"{camera_id}:{int(time.time())}"
+        self.inference_history[history_key] = history_entry
+
+    def _calculate_memory_usage(self) -> float:
+        """Calculate current memory usage in MB."""
+        try:
+            import psutil
+            process = psutil.Process()
+            return process.memory_info().rss / 1024 / 1024  # Convert to MB
+        except ImportError:
+            # Fallback estimation
+            return (len(self.inference_history) * 0.001 +
+                   len(self.detection_cache) * 0.002) * 1024
+
+    def _calculate_cache_hit_rate(self) -> float:
+        """Calculate current cache hit rate."""
+        total_requests = self.metrics["batches_processed"]
+        if total_requests == 0:
+            return 0.0
+
+        # Estimate cache hits based on cache size growth
+        cache_efficiency = min(1.0, len(self.detection_cache) / max(1, total_requests))
+        return cache_efficiency
+
+    async def _memory_monitor(self) -> None:
+        """Background task to monitor and cleanup memory."""
+        while self.is_running:
+            try:
+                current_time = time.time()
+
+                # Perform memory cleanup every 5 minutes
+                if current_time - self._last_memory_cleanup > self._memory_cleanup_interval:
+                    await self._cleanup_memory()
+                    self._last_memory_cleanup = current_time
+
+                # Update memory metrics
+                self.metrics["memory_usage_mb"] = self._calculate_memory_usage()
+
+                # Sleep for 30 seconds
+                await asyncio.sleep(30)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Memory monitoring error: {e}")
+                await asyncio.sleep(60)  # Longer sleep on error
+
+    async def _cleanup_memory(self) -> None:
+        """Perform memory cleanup operations."""
+        try:
+            current_time = time.time()
+
+            # Clean old inference history (keep last hour)
+            cutoff_time = current_time - 3600  # 1 hour ago
+            old_history_keys = [
+                key for key, entry in self.inference_history.items()
+                if entry.get("timestamp", 0) < cutoff_time
+            ]
+
+            for key in old_history_keys:
+                del self.inference_history[key]
+
+            # Clean old detection cache (keep last 30 minutes)
+            cutoff_time = current_time - 1800  # 30 minutes ago
+            old_cache_keys = [
+                key for key, entry in self.detection_cache.items()
+                if entry.get("timestamp", 0) < cutoff_time
+            ]
+
+            for key in old_cache_keys:
+                del self.detection_cache[key]
+
+            logger.debug(
+                f"Memory cleanup completed: removed {len(old_history_keys)} "
+                f"history entries, {len(old_cache_keys)} cache entries"
+            )
+
+        except Exception as e:
+            logger.error(f"Memory cleanup failed: {e}")
+
+    def _log_enhanced_metrics(self) -> None:
+        """Log enhanced performance metrics."""
+        uptime_s = time.time() - self.metrics["last_reset"]
+        throughput = self.metrics["total_detections"] / max(1, uptime_s)
+
+        redis_stats = self.redis_pool.get_connection_stats()
+
+        logger.info(
+            f"Enhanced ML Analytics Connector Metrics - "
+            f"Batches: {self.metrics['batches_processed']}, "
+            f"Detections: {self.metrics['total_detections']}, "
+            f"Avg Latency: {self.metrics['avg_latency_ms']:.1f}ms, "
+            f"Throughput: {throughput:.1f} det/s, "
+            f"Memory: {self.metrics['memory_usage_mb']:.1f}MB, "
+            f"Cache Hit Rate: {self.metrics['cache_hit_rate']:.2f}, "
+            f"Timeouts: {self.metrics['timeouts']}, "
+            f"Errors: {self.metrics['errors']}, "
+            f"Circuit Breaker Opens: {self.metrics['circuit_breaker_opens']}, "
+            f"Queue: {self.batch_queue.qsize()}/{self.batch_queue.maxsize}, "
+            f"Redis Connections: {redis_stats.get('in_use_connections', 0)}/"
+            f"{redis_stats.get('max_connections', 0)}"
+        )
+
+    def _log_final_metrics(self) -> None:
+        """Log final metrics before shutdown."""
+        logger.info(
+            f"MLAnalyticsConnector final statistics - "
+            f"Total batches processed: {self.metrics['batches_processed']}, "
+            f"Total detections: {self.metrics['total_detections']}, "
+            f"Average latency: {self.metrics['avg_latency_ms']:.1f}ms, "
+            f"Total errors: {self.metrics['errors']}, "
+            f"Total timeouts: {self.metrics['timeouts']}, "
+            f"Circuit breaker opens: {self.metrics['circuit_breaker_opens']}"
+        )

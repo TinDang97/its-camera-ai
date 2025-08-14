@@ -39,7 +39,6 @@ dependencies = [
     # WebRTC Support
     "aiortc>=1.6.0",
     "aioice>=0.9.0",
-    "pyav>=12.3.0",
     # Computer Vision & ML
     "torch>=2.8.0",
     "torchvision>=0.23.0",
@@ -105,6 +104,8 @@ dependencies = [
     "scikit-learn>=1.5.2",
     "seaborn>=0.13.2",
     "matplotlib>=3.9.0",
+    "aiokafka>=0.12.0",
+    "blosc>=1.11.3",
 ]
 
 [dependency-groups]
