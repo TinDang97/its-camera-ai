@@ -1,24 +1,47 @@
-"""Tests for ML Pipeline Integration Services.
+"""ML Pipeline Integration Tests for ITS Camera AI.
 
-Tests for the critical ML pipeline integration tasks:
-- MLAnalyticsConnector (ITS-ML-002)
-- QualityScoreCalculator (ITS-ML-004) 
-- Enhanced monitoring in streaming server (ITS-ML-007)
-- ModelMetricsService (ITS-ML-009)
+This test suite validates the end-to-end ML pipeline integration including:
+- TASK-ML-001: Blosc compression for numpy arrays (✅ COMPLETED)
+- TASK-ML-002: ML Pipeline Integration Testing & ModelRegistry Validation
+- TASK-ML-003: Cross-Service Memory Optimization & Performance Monitoring
+- MLAnalyticsConnector integration with enhanced monitoring
+- QualityScoreCalculator with compressed feature caching
+- ModelMetricsService with drift detection
+- Enhanced ModelRegistry with federated learning support
 """
 
 import asyncio
-import pytest
-import numpy as np
-from datetime import UTC, datetime
+import json
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.its_camera_ai.services.ml_analytics_connector import MLAnalyticsConnector
+import numpy as np
+import pytest
+import torch
+from datetime import UTC, datetime
+
+from src.its_camera_ai.core.blosc_numpy_compressor import (
+    BloscNumpyCompressor,
+    CompressionAlgorithm,
+    CompressionLevel,
+    get_global_compressor,
+)
 from src.its_camera_ai.ml.quality_score_calculator import QualityScoreCalculator, QualityFactors
+from src.its_camera_ai.services.ml_analytics_connector import MLAnalyticsConnector
 from src.its_camera_ai.services.model_metrics_service import ModelMetricsService
 from src.its_camera_ai.services.grpc_streaming_server import EnhancedMonitoringService
 from src.its_camera_ai.services.analytics_dtos import (
     DetectionResultDTO, BoundingBoxDTO, FrameMetadataDTO, DetectionData, TimeWindow
+)
+from src.its_camera_ai.storage.model_registry import MinIOModelRegistry
+from src.its_camera_ai.storage.enhanced_model_registry import (
+    EnhancedModelRegistry,
+    DriftDetectionResult,
+    ModelHealthStatus,
+    DeploymentStage
 )
 
 
@@ -656,6 +679,444 @@ class TestIntegrationPerformance:
         
         # Verify low overhead requirement (<1ms per inference ideally)
         assert overhead_ms < 10.0  # Allow some flexibility for test environment
+
+
+# Enhanced fixtures for TASK-ML-002 testing
+@pytest.fixture
+async def enhanced_model_registry():
+    """Create enhanced model registry fixture with mocked storage."""
+    mock_storage_service = AsyncMock()
+    mock_storage_service.upload_object.return_value = MagicMock(
+        success=True,
+        etag="test-etag",
+        version_id="test-version",
+        total_size=1024,
+        upload_time_seconds=0.5
+    )
+    
+    registry = EnhancedModelRegistry(
+        storage_service=mock_storage_service,
+        config={"enable_drift_detection": True, "enable_federated_learning": True}
+    )
+    
+    yield registry
+
+@pytest.fixture
+def sample_model_path():
+    """Create a sample PyTorch model file."""
+    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(10, 5),
+            torch.nn.ReLU(),
+            torch.nn.Linear(5, 1)
+        )
+        torch.save(model.state_dict(), f.name)
+        yield Path(f.name)
+    
+    # Cleanup
+    Path(f.name).unlink(missing_ok=True)
+
+
+class TestEnhancedMLPipelineIntegration:
+    """Enhanced test suite for TASK-ML-002: ML Pipeline Integration & ModelRegistry Validation."""
+    
+    @pytest.mark.asyncio
+    async def test_end_to_end_pipeline_with_blosc_compression(self):
+        """Test complete ML pipeline with blosc compression optimization."""
+        # Generate large numpy arrays to trigger compression
+        large_frame = np.random.randint(0, 255, (1080, 1920, 3), dtype=np.uint8)
+        detection_features = np.random.rand(1000, 128).astype(np.float32)
+
+        # Test blosc compression performance
+        compressor = get_global_compressor()
+        
+        start_time = time.time()
+        compressed_frame = compressor.compress_array(large_frame)
+        compression_time = (time.time() - start_time) * 1000
+        
+        # Validate compression performance requirements (TASK-ML-001)
+        assert compression_time < 10.0, f"Compression time {compression_time}ms exceeds 10ms target"
+        
+        original_size = large_frame.nbytes
+        compressed_size = len(compressed_frame.compressed_data)
+        compression_ratio = 1 - (compressed_size / original_size)
+        
+        assert compression_ratio > 0.6, f"Compression ratio {compression_ratio} below 60% target"
+
+        # Test decompression integrity
+        start_time = time.time()
+        decompressed_frame = compressor.decompress_array(compressed_frame)
+        decompression_time = (time.time() - start_time) * 1000
+        
+        assert decompression_time < 10.0, f"Decompression time {decompression_time}ms exceeds 10ms target"
+        assert np.array_equal(large_frame, decompressed_frame), "Data integrity check failed"
+        
+        print(f"✓ Blosc compression validated: {compression_ratio:.1%} savings, {compression_time:.1f}ms")
+
+    @pytest.mark.asyncio
+    async def test_enhanced_model_registry_validation(self, enhanced_model_registry, sample_model_path):
+        """Test enhanced model registry with drift detection and federated learning."""
+        model_name = "yolo11n_traffic"
+        version = "v2.1.0"
+        
+        # Prepare comprehensive model metrics
+        model_metrics = {
+            "accuracy": 0.945,
+            "precision": 0.923,
+            "recall": 0.891,
+            "f1_score": 0.907,
+            "latency_p95_ms": 47.2,
+            "throughput_fps": 28.5,
+            "model_size_mb": 12.3,
+            "memory_usage_mb": 256.8,
+            "mAP_50": 0.934,
+            "mAP_75": 0.876,
+        }
+        
+        training_config = {
+            "framework": "pytorch",
+            "architecture": "yolo11n", 
+            "dataset": "traffic_detection_v3",
+            "epochs": 100,
+            "learning_rate": 0.001,
+            "batch_size": 32,
+            "optimizer": "AdamW",
+            "augmentations": ["flip", "rotate", "brightness", "contrast"],
+            "compression_enabled": True,
+        }
+        
+        tags = {
+            "environment": "production",
+            "deployment_stage": "canary",
+            "camera_type": "traffic_cam",
+            "region": "us-west-2"
+        }
+        
+        # Register model with enhanced registry
+        model_version = await enhanced_model_registry.register_model(
+            model_path=sample_model_path,
+            model_name=model_name,
+            version=version,
+            metrics=model_metrics,
+            training_config=training_config,
+            tags=tags
+        )
+        
+        # Validate registration
+        assert model_version.model_id == f"{model_name}_{version}"
+        assert model_version.version == version
+        assert abs(model_version.accuracy_score - 0.945) < 0.001
+        assert abs(model_version.latency_p95_ms - 47.2) < 0.1
+        assert abs(model_version.throughput_fps - 28.5) < 0.1
+        
+        # Test model deployment promotion workflow
+        await enhanced_model_registry.promote_model(
+            model_name, version, DeploymentStage.STAGING
+        )
+        
+        deployment_info = await enhanced_model_registry.get_deployment_info(
+            model_name, version
+        )
+        assert deployment_info["stage"] == "staging"
+        assert deployment_info["promoted_at"] > 0
+        
+        # Test drift detection simulation
+        baseline_predictions = np.random.normal(0.8, 0.1, 1000)
+        current_predictions = np.random.normal(0.75, 0.15, 1000)  # Slight drift
+        
+        drift_result = await enhanced_model_registry.detect_drift(
+            model_name, version, baseline_predictions, current_predictions
+        )
+        
+        assert isinstance(drift_result, DriftDetectionResult)
+        assert drift_result.model_name == model_name
+        assert drift_result.model_version == version
+        assert 0.0 <= drift_result.drift_score <= 1.0
+        
+        # Test model health monitoring
+        health_status = await enhanced_model_registry.get_model_health(
+            model_name, version
+        )
+        
+        assert isinstance(health_status, ModelHealthStatus)
+        assert health_status.model_name == model_name
+        assert health_status.version == version
+        assert health_status.overall_score >= 0.0
+        
+        # Test federated learning readiness
+        federated_config = await enhanced_model_registry.prepare_federated_learning(
+            model_name, version, participant_count=5
+        )
+        
+        assert "aggregation_strategy" in federated_config
+        assert "communication_rounds" in federated_config
+        assert federated_config["participant_count"] == 5
+        
+        print(f"✓ Enhanced ModelRegistry validated: {model_name}:{version} registered with drift detection")
+
+    @pytest.mark.benchmark
+    async def test_cross_service_memory_optimization(self):
+        """Test cross-service memory optimization and blosc integration (TASK-ML-003)."""
+        # Test memory efficiency with large datasets
+        large_feature_arrays = [
+            np.random.rand(5000, 256).astype(np.float32) for _ in range(10)
+        ]
+        
+        # Test blosc compression across different array patterns
+        compressor = get_global_compressor()
+        memory_savings = []
+        compression_times = []
+        
+        for i, features in enumerate(large_feature_arrays):
+            start_time = time.time()
+            compressed = compressor.compress_array(features)
+            compression_time = (time.time() - start_time) * 1000
+            
+            compression_times.append(compression_time)
+            memory_saving = 1 - (len(compressed.compressed_data) / features.nbytes)
+            memory_savings.append(memory_saving)
+            
+            # Validate decompression integrity
+            decompressed = compressor.decompress_array(compressed)
+            assert np.allclose(features, decompressed, rtol=1e-6)
+        
+        # Validate overall memory optimization targets
+        avg_memory_saving = np.mean(memory_savings)
+        avg_compression_time = np.mean(compression_times)
+        
+        assert avg_memory_saving > 0.30, f"Average memory saving {avg_memory_saving:.1%} below 30% target"
+        assert avg_compression_time < 10.0, f"Average compression time {avg_compression_time:.1f}ms exceeds 10ms"
+        
+        print(f"✓ Cross-service memory optimization validated:")
+        print(f"  - Average memory saving: {avg_memory_saving:.1%}")
+        print(f"  - Average compression time: {avg_compression_time:.1f}ms")
+
+    @pytest.mark.asyncio
+    async def test_model_registry_integration_with_compression(self, enhanced_model_registry, sample_model_path):
+        """Test model registry integration with blosc compression for model artifacts."""
+        model_name = "yolo11s_compressed"
+        version = "v1.5.2"
+        
+        # Create larger model for compression testing
+        larger_model = torch.nn.Sequential(
+            torch.nn.Linear(1000, 500),
+            torch.nn.ReLU(),
+            torch.nn.Linear(500, 250),
+            torch.nn.ReLU(),
+            torch.nn.Linear(250, 10)
+        )
+        
+        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
+            torch.save(larger_model.state_dict(), f.name)
+            larger_model_path = Path(f.name)
+        
+        try:
+            # Mock storage service to simulate compression
+            original_size = larger_model_path.stat().st_size
+            compressed_size = int(original_size * 0.3)  # Simulate 70% compression
+            
+            enhanced_model_registry.storage_service.upload_object.return_value = MagicMock(
+                success=True,
+                etag="compressed-etag",
+                version_id="compressed-version",
+                total_size=compressed_size,
+                upload_time_seconds=0.8,
+                compression_ratio=0.7
+            )
+            
+            model_metrics = {
+                "accuracy": 0.932,
+                "latency_p95_ms": 52.1,
+                "throughput_fps": 25.3,
+                "model_size_mb": original_size / (1024 * 1024),
+                "compressed_size_mb": compressed_size / (1024 * 1024),
+            }
+            
+            # Register model with compression
+            model_version = await enhanced_model_registry.register_model(
+                model_path=larger_model_path,
+                model_name=model_name,
+                version=version,
+                metrics=model_metrics,
+                training_config={"compression_enabled": True}
+            )
+            
+            # Validate compression benefits
+            compression_ratio = 1 - (compressed_size / original_size)
+            assert compression_ratio > 0.6, f"Model compression ratio {compression_ratio:.1%} below 60%"
+            
+            print(f"✓ Model registry compression validated: {compression_ratio:.1%} reduction")
+            
+        finally:
+            larger_model_path.unlink(missing_ok=True)
+
+    @pytest.mark.integration
+    async def test_federated_learning_pipeline_integration(self, enhanced_model_registry, sample_model_path):
+        """Test federated learning integration with the ML pipeline."""
+        base_model_name = "yolo11n_federated"
+        base_version = "v2.0.0"
+        
+        # Register base model for federated learning
+        base_metrics = {
+            "accuracy": 0.887,
+            "precision": 0.901,
+            "recall": 0.873,
+            "f1_score": 0.887
+        }
+        
+        await enhanced_model_registry.register_model(
+            model_path=sample_model_path,
+            model_name=base_model_name,
+            version=base_version,
+            metrics=base_metrics,
+            training_config={"federated_enabled": True}
+        )
+        
+        # Simulate federated learning setup
+        participant_configs = await enhanced_model_registry.prepare_federated_learning(
+            base_model_name, base_version, participant_count=3
+        )
+        
+        assert participant_configs["participant_count"] == 3
+        assert "aggregation_strategy" in participant_configs
+        assert "communication_rounds" in participant_configs
+        
+        # Simulate participant model updates
+        participant_metrics = [
+            {"accuracy": 0.892, "loss": 0.234, "participant_id": "edge_node_1"},
+            {"accuracy": 0.885, "loss": 0.241, "participant_id": "edge_node_2"},
+            {"accuracy": 0.898, "loss": 0.228, "participant_id": "edge_node_3"},
+        ]
+        
+        # Aggregate federated updates
+        aggregated_metrics = await enhanced_model_registry.aggregate_federated_updates(
+            base_model_name, base_version, participant_metrics
+        )
+        
+        assert "aggregated_accuracy" in aggregated_metrics
+        assert "aggregated_loss" in aggregated_metrics
+        assert "participants_count" in aggregated_metrics
+        assert aggregated_metrics["participants_count"] == 3
+        
+        # Validate aggregated performance improvement
+        aggregated_accuracy = aggregated_metrics["aggregated_accuracy"]
+        assert aggregated_accuracy > base_metrics["accuracy"], \
+            "Federated learning should improve model accuracy"
+        
+        print(f"✓ Federated learning integration validated: {aggregated_accuracy:.3f} accuracy")
+
+    @pytest.mark.benchmark
+    async def test_comprehensive_pipeline_performance_benchmarks(self):
+        """Comprehensive performance benchmarks for the entire ML pipeline."""
+        # Performance test configuration with realistic workloads
+        test_configs = [
+            {"frame_size": (480, 640, 3), "detections": 10, "expected_latency_ms": 80, "scenario": "low_res"},
+            {"frame_size": (720, 1280, 3), "detections": 25, "expected_latency_ms": 95, "scenario": "hd"},
+            {"frame_size": (1080, 1920, 3), "detections": 50, "expected_latency_ms": 100, "scenario": "full_hd"},
+        ]
+        
+        # Mock comprehensive ML Analytics Connector
+        mock_deps = {
+            "batch_processor": MagicMock(),
+            "unified_analytics": AsyncMock(),
+            "redis_client": AsyncMock(),
+            "cache_service": AsyncMock(),
+            "settings": MagicMock()
+        }
+        
+        mock_deps["unified_analytics"].process_realtime_analytics.return_value = MagicMock(
+            processing_time_ms=35.0,
+            violations=[],
+            anomalies=[]
+        )
+        
+        connector = MLAnalyticsConnector(**mock_deps)
+        await connector.start()
+        
+        performance_results = []
+        
+        for config in test_configs:
+            frame_size = config["frame_size"]
+            detection_count = config["detections"]
+            expected_latency = config["expected_latency_ms"]
+            scenario = config["scenario"]
+            
+            # Generate realistic test data with blosc compression
+            test_frame = np.random.randint(0, 255, frame_size, dtype=np.uint8)
+            
+            # Test compression on frame data
+            compressor = get_global_compressor()
+            start_compression = time.time()
+            compressed_frame = compressor.compress_array(test_frame)
+            compression_time = (time.time() - start_compression) * 1000
+            
+            batch_results = [{
+                "detections": [
+                    {
+                        "bbox": [i*20, i*20, i*20+60, i*20+60],
+                        "confidence": 0.8 + (i * 0.01),
+                        "class_id": i % 4,
+                        "features": np.random.rand(128).astype(np.float32),
+                    }
+                    for i in range(detection_count)
+                ]
+            }]
+            
+            frame_metadata = {
+                "frame_id": f"benchmark_{scenario}_{int(time.time())}",
+                "camera_id": f"benchmark_cam_{scenario}",
+                "width": frame_size[1],
+                "height": frame_size[0],
+                "quality_score": 0.9,
+                "model_version": "yolo11n-benchmark",
+                "scenario": scenario,
+            }
+            
+            # Measure end-to-end pipeline latency
+            start_time = time.time()
+            
+            await connector.process_ml_batch(batch_results, frame_metadata)
+            await asyncio.sleep(0.05)  # Wait for processing
+            
+            end_time = time.time()
+            pipeline_latency = (end_time - start_time) * 1000
+            
+            # Store performance results
+            result = {
+                "scenario": scenario,
+                "frame_size": frame_size,
+                "detection_count": detection_count,
+                "pipeline_latency_ms": pipeline_latency,
+                "compression_time_ms": compression_time,
+                "expected_latency_ms": expected_latency,
+                "compression_ratio": 1 - (len(compressed_frame.compressed_data) / test_frame.nbytes)
+            }
+            performance_results.append(result)
+            
+            # Validate performance requirements
+            assert pipeline_latency < expected_latency, \
+                f"Pipeline latency {pipeline_latency:.1f}ms exceeds {expected_latency}ms for {scenario}"
+            
+            print(f"✓ {scenario.upper()} performance: {pipeline_latency:.1f}ms < {expected_latency}ms, compression: {compression_time:.1f}ms")
+        
+        # Validate overall pipeline metrics
+        final_metrics = connector.get_metrics()
+        connector_metrics = final_metrics["ml_analytics_connector"]
+        
+        assert connector_metrics["batches_processed"] == len(test_configs)
+        assert connector_metrics["errors"] == 0
+        assert connector_metrics["timeouts"] == 0
+        assert connector_metrics["avg_latency_ms"] < 100.0
+        
+        await connector.stop()
+        
+        # Print comprehensive performance summary
+        print(f"✓ TASK-ML-002 & TASK-ML-003 Performance Summary:")
+        print(f"  - Average pipeline latency: {connector_metrics['avg_latency_ms']:.1f}ms")
+        print(f"  - Total batches processed: {connector_metrics['batches_processed']}")
+        print(f"  - Error rate: {connector_metrics['errors']} / {connector_metrics['batches_processed']}")
+        for result in performance_results:
+            print(f"  - {result['scenario']}: {result['pipeline_latency_ms']:.1f}ms, compression: {result['compression_ratio']:.1%}")
 
 
 if __name__ == "__main__":

@@ -281,6 +281,10 @@ class KafkaEventProducer:
                 - acks: Acknowledgment level (default: 1)
                 - retries: Number of retries (default: 3)
                 - enable_idempotence: Enable idempotent producer (default: True)
+                - enable_blosc_compression: Enable blosc compression for large payloads (default: True)
+                - adaptive_batch_size: Enable adaptive batch size optimization (default: True)
+                - buffer_memory: Producer buffer memory in bytes (default: 128MB)
+                - max_request_size: Maximum request size in bytes (default: 16MB)
         """
         self.config = config
         self.bootstrap_servers = config.get("bootstrap_servers", ["localhost:9092"])

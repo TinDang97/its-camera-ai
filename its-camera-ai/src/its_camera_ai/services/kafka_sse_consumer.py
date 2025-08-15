@@ -113,16 +113,20 @@ class KafkaSSEConsumer:
         self.topic_prefix = config.get("topic_prefix", "its-camera-ai")
         self.consumer_group_id = config.get("consumer_group_id", "sse-streaming")
 
-        # Consumer configuration
+        # Optimized consumer configuration for high throughput
         self.consumer_config = {
             "bootstrap_servers": self.bootstrap_servers,
             "group_id": self.consumer_group_id,
             "auto_offset_reset": config.get("auto_offset_reset", "latest"),
             "enable_auto_commit": config.get("enable_auto_commit", True),
-            "auto_commit_interval_ms": config.get("auto_commit_interval_ms", 5000),
-            "max_poll_records": config.get("max_poll_records", 500),
-            "session_timeout_ms": config.get("session_timeout_ms", 30000),
-            "heartbeat_interval_ms": config.get("heartbeat_interval_ms", 3000),
+            "auto_commit_interval_ms": config.get("auto_commit_interval_ms", 3000),  # Faster commits
+            "max_poll_records": config.get("max_poll_records", 1000),  # Increased for better throughput
+            "session_timeout_ms": config.get("session_timeout_ms", 20000),  # Shorter timeout
+            "heartbeat_interval_ms": config.get("heartbeat_interval_ms", 2000),  # More frequent heartbeats
+            "fetch_min_bytes": config.get("fetch_min_bytes", 1024),  # Minimum fetch size
+            "fetch_max_wait_ms": config.get("fetch_max_wait_ms", 500),  # Faster fetch
+            "max_partition_fetch_bytes": config.get("max_partition_fetch_bytes", 2 * 1024 * 1024),  # 2MB
+            "connections_max_idle_ms": config.get("connections_max_idle_ms", 300000),  # 5 min idle
             "value_deserializer": self._deserialize_value,
             "key_deserializer": lambda x: x.decode('utf-8') if x else None,
         }
@@ -150,9 +154,19 @@ class KafkaSSEConsumer:
         self.connection_errors = 0
         self.last_error_time = 0.0
 
-        # Rate limiting
-        self.rate_limiter = defaultdict(lambda: deque(maxlen=100))  # Track events per connection
-        self.max_events_per_second = config.get("max_events_per_second", 50)
+        # Enhanced rate limiting with adaptive throttling
+        self.rate_limiter = defaultdict(lambda: deque(maxlen=200))  # Increased tracking
+        self.max_events_per_second = config.get("max_events_per_second", 100)  # Increased limit
+        self.adaptive_rate_limiting = config.get("adaptive_rate_limiting", True)
+        self.current_rate_limits = defaultdict(lambda: self.max_events_per_second)
+
+        # Blosc compression support for event deserialization
+        self.enable_blosc_decompression = config.get("enable_blosc_decompression", True)
+
+        # Connection pool optimization
+        self.parallel_processing = config.get("parallel_processing", True)
+        self.max_concurrent_messages = config.get("max_concurrent_messages", 50)
+        self.message_processing_semaphore = asyncio.Semaphore(self.max_concurrent_messages)
 
         # Event transformation callbacks
         self.event_transformers: dict[str, Callable] = {}
@@ -179,9 +193,33 @@ class KafkaSSEConsumer:
         ]
 
     def _deserialize_value(self, value: bytes) -> dict[str, Any]:
-        """Deserialize Kafka message value."""
+        """Deserialize Kafka message value with blosc decompression support."""
         try:
-            return json.loads(value.decode('utf-8'))
+            # Check for blosc compression header
+            if self.enable_blosc_decompression and value.startswith(b"BLOSC_COMPRESSED:"):
+                try:
+                    # Extract original size and compressed data
+                    header_size = len(b"BLOSC_COMPRESSED:") + 4
+                    original_size = int.from_bytes(value[len(b"BLOSC_COMPRESSED:"):header_size], 'little')
+                    compressed_data = value[header_size:]
+
+                    # Decompress using blosc
+                    import blosc
+
+                    # Decompress to numpy array then back to bytes
+                    decompressed_array = blosc.decompress(compressed_data)
+                    json_data = bytes(decompressed_array)
+
+                    logger.debug(f"Decompressed event: {len(value)} -> {len(json_data)} bytes")
+
+                except Exception as e:
+                    logger.warning(f"Blosc decompression failed, using raw data: {e}")
+                    json_data = value
+            else:
+                json_data = value
+
+            return json.loads(json_data.decode('utf-8'))
+
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error("Failed to deserialize message value", error=str(e))
             return {}
@@ -229,30 +267,25 @@ class KafkaSSEConsumer:
             raise ServiceError(f"Kafka SSE consumer startup failed: {e}", service="kafka_sse_consumer") from e
 
     async def _consume_events(self):
-        """Main event consumption loop."""
-        logger.info("Kafka event consumption started")
+        """Optimized main event consumption loop with parallel processing."""
+        logger.info("Optimized Kafka event consumption started")
 
         while self.is_running:
             try:
-                # Poll for messages with timeout
-                msg_pack = await self.consumer.getmany(timeout_ms=1000, max_records=100)
+                # Poll for more messages with optimized settings
+                msg_pack = await self.consumer.getmany(
+                    timeout_ms=500,  # Faster polling
+                    max_records=self.consumer_config["max_poll_records"]
+                )
 
                 if not msg_pack:
                     continue
 
-                # Process messages by topic
-                for topic_partition, messages in msg_pack.items():
-                    topic = topic_partition.topic
-
-                    for message in messages:
-                        try:
-                            await self._process_message(topic, message)
-                        except Exception as e:
-                            logger.error("Error processing message",
-                                       topic=topic,
-                                       offset=message.offset,
-                                       error=str(e))
-                            self.metrics["events_failed"][topic] += 1
+                # Process messages in parallel if enabled
+                if self.parallel_processing:
+                    await self._process_messages_parallel(msg_pack)
+                else:
+                    await self._process_messages_sequential(msg_pack)
 
             except KafkaTimeoutError:
                 continue  # Normal timeout, continue polling
@@ -270,6 +303,51 @@ class KafkaSSEConsumer:
             except Exception as e:
                 logger.error("Unexpected consumption error", error=str(e))
                 await asyncio.sleep(0.5)
+
+    async def _process_messages_parallel(self, msg_pack):
+        """Process messages in parallel for higher throughput."""
+        tasks = []
+
+        for topic_partition, messages in msg_pack.items():
+            topic = topic_partition.topic
+
+            for message in messages:
+                # Use semaphore to limit concurrent processing
+                task = asyncio.create_task(
+                    self._process_message_with_semaphore(topic, message)
+                )
+                tasks.append(task)
+
+        # Process all messages concurrently
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _process_messages_sequential(self, msg_pack):
+        """Process messages sequentially (fallback method)."""
+        for topic_partition, messages in msg_pack.items():
+            topic = topic_partition.topic
+
+            for message in messages:
+                try:
+                    await self._process_message(topic, message)
+                except Exception as e:
+                    logger.error("Error processing message",
+                               topic=topic,
+                               offset=message.offset,
+                               error=str(e))
+                    self.metrics["events_failed"][topic] += 1
+
+    async def _process_message_with_semaphore(self, topic: str, message):
+        """Process individual message with semaphore limiting."""
+        async with self.message_processing_semaphore:
+            try:
+                await self._process_message(topic, message)
+            except Exception as e:
+                logger.error("Error processing message",
+                           topic=topic,
+                           offset=message.offset,
+                           error=str(e))
+                self.metrics["events_failed"][topic] += 1
 
     async def _process_message(self, topic: str, message):
         """Process individual Kafka message."""
@@ -438,17 +516,30 @@ class KafkaSSEConsumer:
             return True  # Default to sending if filter check fails
 
     def _is_rate_limited(self, connection_id: str) -> bool:
-        """Check if connection is rate limited."""
+        """Check if connection is rate limited with adaptive throttling."""
         now = time.time()
+        current_limit = self.current_rate_limits[connection_id]
 
         # Clean old entries
         rate_queue = self.rate_limiter[connection_id]
         while rate_queue and now - rate_queue[0] > 1.0:  # 1 second window
             rate_queue.popleft()
 
-        # Check rate limit
-        if len(rate_queue) >= self.max_events_per_second:
+        # Check current rate limit
+        if len(rate_queue) >= current_limit:
+            # Adaptive rate limiting: decrease limit if consistently hitting it
+            if self.adaptive_rate_limiting and len(rate_queue) >= current_limit * 0.95:
+                self.current_rate_limits[connection_id] = max(
+                    current_limit * 0.9, self.max_events_per_second * 0.1
+                )
+                logger.debug(f"Reduced rate limit for {connection_id} to {self.current_rate_limits[connection_id]}")
             return True
+
+        # Adaptive rate limiting: increase limit if under-utilized
+        if self.adaptive_rate_limiting and len(rate_queue) < current_limit * 0.5:
+            self.current_rate_limits[connection_id] = min(
+                current_limit * 1.1, self.max_events_per_second
+            )
 
         # Add current event
         rate_queue.append(now)
@@ -544,6 +635,10 @@ class KafkaSSEConsumer:
                 "consumer_group": self.consumer_group_id,
                 "topics": self.topics,
                 "max_events_per_second": self.max_events_per_second,
+                "parallel_processing_enabled": self.parallel_processing,
+                "max_concurrent_messages": self.max_concurrent_messages,
+                "adaptive_rate_limiting_enabled": self.adaptive_rate_limiting,
+                "blosc_decompression_enabled": self.enable_blosc_decompression,
             },
             "sse_broadcaster_stats": self.sse_broadcaster.get_stats()
         }
@@ -587,14 +682,14 @@ def create_kafka_sse_consumer(
     config: dict[str, Any] | None = None,
     sse_broadcaster: SSEBroadcaster | None = None
 ) -> KafkaSSEConsumer:
-    """Create and configure a Kafka SSE consumer.
+    """Create and configure an optimized Kafka SSE consumer for high throughput.
     
     Args:
         config: Optional configuration dictionary
         sse_broadcaster: SSE broadcaster instance
         
     Returns:
-        Configured KafkaSSEConsumer instance
+        Configured KafkaSSEConsumer instance optimized for real-time streaming
     """
     default_config = {
         "bootstrap_servers": ["localhost:9092"],
@@ -602,8 +697,14 @@ def create_kafka_sse_consumer(
         "consumer_group_id": "sse-streaming",
         "auto_offset_reset": "latest",
         "enable_auto_commit": True,
-        "max_poll_records": 500,
-        "max_events_per_second": 50,
+        "max_poll_records": 1000,  # Increased for better throughput
+        "max_events_per_second": 100,  # Increased rate limit
+        "enable_blosc_decompression": True,  # Enable blosc decompression
+        "parallel_processing": True,  # Enable parallel message processing
+        "max_concurrent_messages": 50,  # Concurrent message processing limit
+        "adaptive_rate_limiting": True,  # Enable adaptive rate limiting
+        "fetch_min_bytes": 1024,  # Minimum fetch size for efficiency
+        "fetch_max_wait_ms": 500,  # Faster message fetching
     }
 
     if config:
