@@ -1,0 +1,198 @@
+{
+  "Navigation": {
+    "dashboard": "Dashboard",
+    "alerts": "Alerts",
+    "cameras": "Cameras",
+    "analytics": "Analytics",
+    "settings": "Settings"
+  },
+  "Dashboard": {
+    "title": "Traffic Monitoring Dashboard",
+    "subtitle": "Real-time traffic analytics and camera monitoring",
+    "lastUpdated": "Last updated",
+    "totalVehicles": "Total Vehicles",
+    "activeCameras": "Active Cameras",
+    "activeAlerts": "Active Alerts",
+    "avgSpeed": "Average Speed",
+    "overview": "Overview",
+    "liveCameras": "Live Cameras",
+    "alerts": "Alerts",
+    "analytics": "Analytics",
+    "onlineStatus": "online",
+    "fromLastHour": "from last hour",
+    "critical": "critical",
+    "warnings": "warnings",
+    "fromAverage": "from average"
+  },
+  "Alerts": {
+    "title": "Alert Details",
+    "subtitle": "Comprehensive view of alert with detailed analysis",
+    "recentAlerts": "Recent Alerts",
+    "active": "Active",
+    "resolved": "Resolved",
+    "investigating": "Investigating",
+    "priority": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "status": {
+      "active": "Active",
+      "resolved": "Resolved",
+      "investigating": "Investigating"
+    },
+    "category": {
+      "traffic_violation": "Traffic Violation",
+      "accident": "Accident",
+      "congestion": "Congestion",
+      "system": "System",
+      "security": "Security"
+    },
+    "details": {
+      "created": "Created",
+      "location": "Location",
+      "camera": "Camera",
+      "confidence": "Confidence",
+      "assignTo": "Assign",
+      "export": "Export",
+      "share": "Share",
+      "escalate": "Escalate",
+      "viewLive": "View Live"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "detections": "Object Detection",
+      "timeline": "Timeline",
+      "analysis": "Analysis"
+    },
+    "summary": {
+      "totalDetections": "Total Detections",
+      "avgConfidence": "Average Confidence",
+      "highConfidence": "High Confidence",
+      "objectClasses": "Object Classes",
+      "duration": "Duration",
+      "falsePredictions": "False Positives"
+    },
+    "detectionSummary": "Detection Summary",
+    "recentActivity": "Recent Activity"
+  },
+  "ObjectDetection": {
+    "title": "Object Detection Details",
+    "detectionList": "Detection List",
+    "visualization": "Visualization",
+    "searchPlaceholder": "Search detections...",
+    "sortBy": {
+      "confidence": "Confidence",
+      "class": "Class",
+      "time": "Time"
+    },
+    "filterBy": {
+      "all": "All",
+      "high": "High (80%+)",
+      "medium": "Medium (60-80%)",
+      "low": "Low (<60%)"
+    },
+    "withFeedback": "With Feedback",
+    "stats": {
+      "total": "Total",
+      "highConfidence": "High Confidence",
+      "avgConfidence": "Average Confidence",
+      "uniqueClasses": "Unique Classes"
+    },
+    "boundingBox": "Bounding Box Visualization",
+    "trajectories": "Trajectories",
+    "selectedDetection": "Selected Detection",
+    "subCategory": "Sub-category",
+    "attributes": "Attributes",
+    "falsePosQuestion": "False positive?",
+    "yes": "Yes",
+    "no": "No",
+    "moreDetails": "More Details",
+    "lessDetails": "Less Details",
+    "noDetections": "No detections found matching your filters.",
+    "export": {
+      "json": "JSON",
+      "csv": "CSV"
+    }
+  },
+  "Timeline": {
+    "title": "Advanced Timeline",
+    "timelineView": "Timeline View",
+    "correlations": "Correlations",
+    "playback": "Playback",
+    "searchPlaceholder": "Search events...",
+    "scale": "Scale",
+    "minute": "minute",
+    "hour": "hour",
+    "day": "day",
+    "filters": {
+      "allEvents": "All Events",
+      "highSeverity": "High Severity",
+      "cameraEvents": "Camera Events",
+      "correlated": "Correlated",
+      "predictions": "Predictions"
+    },
+    "stats": {
+      "totalEvents": "Total Events",
+      "clusters": "Clusters",
+      "critical": "Critical",
+      "correlated": "Correlated",
+      "predicted": "Predicted"
+    },
+    "eventDetails": "Event Details",
+    "type": "Type",
+    "severity": "Severity",
+    "time": "Time",
+    "description": "Description",
+    "correlatedEvents": "Correlated Events",
+    "playbackInfo": "Playback Information",
+    "currentEvent": "Current Event",
+    "speed": "Speed",
+    "timeScale": "Time Scale",
+    "zoomLevel": "Zoom Level",
+    "currentEventLabel": "Current Event",
+    "noEvents": "No events found matching your filters.",
+    "saveFilter": "Save Filter",
+    "settings": "Settings"
+  },
+  "LanguageSwitcher": {
+    "selectLanguage": "Select Language",
+    "currentLanguage": "Current Language"
+  },
+  "Common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "refresh": "Refresh",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "more": "More",
+    "less": "Less"
+  },
+  "Time": {
+    "justNow": "Just now",
+    "minutesAgo": "{count, plural, =1 {1 minute ago} other {# minutes ago}}",
+    "hoursAgo": "{count, plural, =1 {1 hour ago} other {# hours ago}}",
+    "daysAgo": "{count, plural, =1 {1 day ago} other {# days ago}}",
+    "realTime": "Real-time"
+  },
+  "Errors": {
+    "genericError": "Something went wrong. Please try again.",
+    "networkError": "Network error. Please check your connection.",
+    "notFound": "The requested resource was not found.",
+    "unauthorized": "You are not authorized to access this resource.",
+    "validationError": "Please check your input and try again."
+  }
+}

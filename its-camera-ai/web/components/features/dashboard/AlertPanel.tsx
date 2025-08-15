@@ -1,205 +1,389 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { AlertCircle, AlertTriangle, Info, XCircle, Clock, MapPin } from 'lucide-react'
+import { useState, useMemo, useCallback, memo, use, Suspense, startTransition } from 'react';
+import {
+  IconAlertCircle,
+  IconClock,
+  IconMapPin,
+  IconCamera,
+  IconAlertTriangle,
+  IconBolt,
+  IconShield
+} from '@tabler/icons-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Skeleton } from '@/components/ui/skeleton';
+import { AlertDetailsModal } from '@/components/features/alerts/AlertDetailsModal';
 
-export interface Alert {
-  id: string
-  type: 'incident' | 'congestion' | 'detection' | 'system'
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
-  title: string
-  description: string
-  location?: string
-  timestamp: Date
-  acknowledged?: boolean
-  cameraId?: string
+type AlertType = 'critical' | 'warning' | 'info';
+type AlertCategory = 'traffic_violation' | 'accident' | 'congestion' | 'system' | 'security';
+
+interface AlertData {
+  id: string;
+  type: AlertType;
+  category: AlertCategory;
+  title: string;
+  description: string;
+  location: string;
+  cameraId: string;
+  timestamp: string;
+  confidence: number;
+  status: 'active' | 'resolved' | 'investigating';
+  metadata?: Record<string, any>;
 }
 
 interface AlertPanelProps {
-  alerts?: Alert[]
-  maxHeight?: string
-  onAlertClick?: (alert: Alert) => void
+  maxHeight?: string;
 }
 
-// Mock data generator
-const generateMockAlerts = (): Alert[] => [
+const mockAlerts: AlertData[] = [
   {
-    id: '1',
-    type: 'incident',
-    severity: 'critical',
-    title: 'Vehicle Collision Detected',
-    description: 'Multiple vehicles involved in collision at intersection',
-    location: 'Main St & 5th Ave',
-    timestamp: new Date(Date.now() - 2 * 60000),
-    cameraId: 'CAM-001'
+    id: 'alert-001',
+    type: 'critical',
+    category: 'traffic_violation',
+    title: 'Speed Violation Detected',
+    description: 'Vehicle exceeded speed limit by 25 km/h in school zone',
+    location: 'Main St & Oak Ave (Camera-07)',
+    cameraId: 'CAM-007',
+    timestamp: '2024-01-15T14:30:22Z',
+    confidence: 95.2,
+    status: 'active',
+    metadata: {
+      vehicleType: 'sedan',
+      licensePlate: 'ABC-123',
+      speed: 65,
+      speedLimit: 40,
+      coordinates: { lat: 40.7128, lng: -74.0060 }
+    }
   },
   {
-    id: '2',
-    type: 'congestion',
-    severity: 'high',
-    title: 'Heavy Traffic Congestion',
-    description: 'Traffic speed below 20 km/h for more than 5 minutes',
-    location: 'Highway I-95 North',
-    timestamp: new Date(Date.now() - 10 * 60000),
-    cameraId: 'CAM-015'
+    id: 'alert-002',
+    type: 'warning',
+    category: 'congestion',
+    title: 'Traffic Congestion',
+    description: 'Heavy traffic detected, estimated delay 15 minutes',
+    location: 'Highway 101 North (Camera-12)',
+    cameraId: 'CAM-012',
+    timestamp: '2024-01-15T14:25:10Z',
+    confidence: 87.8,
+    status: 'active',
+    metadata: {
+      vehicleCount: 47,
+      avgSpeed: 15,
+      normalSpeed: 65,
+      coordinates: { lat: 40.7589, lng: -73.9851 }
+    }
   },
   {
-    id: '3',
-    type: 'detection',
-    severity: 'medium',
-    title: 'Unauthorized Vehicle in Bus Lane',
-    description: 'Non-bus vehicle detected in dedicated bus lane',
-    location: 'Downtown Transit Corridor',
-    timestamp: new Date(Date.now() - 15 * 60000),
-    acknowledged: true,
-    cameraId: 'CAM-008'
+    id: 'alert-003',
+    type: 'critical',
+    category: 'accident',
+    title: 'Possible Accident',
+    description: 'Vehicle stopped in traffic lane, emergency services notified',
+    location: 'Broadway & 5th St (Camera-03)',
+    cameraId: 'CAM-003',
+    timestamp: '2024-01-15T14:22:45Z',
+    confidence: 92.1,
+    status: 'investigating',
+    metadata: {
+      vehicleCount: 2,
+      emergencyServices: true,
+      coordinates: { lat: 40.7505, lng: -73.9934 }
+    }
   },
   {
-    id: '4',
-    type: 'system',
-    severity: 'low',
-    title: 'Camera Feed Quality Degraded',
-    description: 'Video quality below threshold on Camera CAM-022',
-    timestamp: new Date(Date.now() - 30 * 60000),
-    cameraId: 'CAM-022'
+    id: 'alert-004',
+    type: 'info',
+    category: 'system',
+    title: 'Camera Maintenance',
+    description: 'Scheduled maintenance completed on Camera-15',
+    location: 'Park Ave & 3rd St (Camera-15)',
+    cameraId: 'CAM-015',
+    timestamp: '2024-01-15T13:45:30Z',
+    confidence: 100,
+    status: 'resolved',
+    metadata: {
+      maintenanceType: 'lens_cleaning',
+      duration: '15 minutes',
+      coordinates: { lat: 40.7614, lng: -73.9776 }
+    }
   },
   {
-    id: '5',
-    type: 'detection',
-    severity: 'info',
-    title: 'Pedestrian Crossing Activity',
-    description: 'High pedestrian traffic detected at crosswalk',
-    location: 'School Zone - Oak Elementary',
-    timestamp: new Date(Date.now() - 45 * 60000),
-    cameraId: 'CAM-012'
+    id: 'alert-005',
+    type: 'warning',
+    category: 'security',
+    title: 'Suspicious Activity',
+    description: 'Person detected in restricted area for extended period',
+    location: 'Government Plaza (Camera-21)',
+    cameraId: 'CAM-021',
+    timestamp: '2024-01-15T13:30:15Z',
+    confidence: 78.5,
+    status: 'investigating',
+    metadata: {
+      duration: '12 minutes',
+      personCount: 1,
+      restrictedZone: 'Zone-A',
+      coordinates: { lat: 40.7282, lng: -74.0776 }
+    }
   }
-]
+];
 
-export function AlertPanel({ 
-  alerts = generateMockAlerts(), 
-  maxHeight = '400px',
-  onAlertClick 
-}: AlertPanelProps) {
-  const [localAlerts, setLocalAlerts] = useState(alerts)
-  
-  // Simulate real-time updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Randomly add a new alert every 30 seconds
-      if (Math.random() > 0.7) {
-        const newAlert: Alert = {
-          id: Date.now().toString(),
-          type: ['incident', 'congestion', 'detection', 'system'][Math.floor(Math.random() * 4)] as Alert['type'],
-          severity: ['critical', 'high', 'medium', 'low', 'info'][Math.floor(Math.random() * 5)] as Alert['severity'],
-          title: 'New Traffic Event Detected',
-          description: 'Automated detection system triggered',
-          location: 'Zone ' + Math.floor(Math.random() * 10),
-          timestamp: new Date(),
-          cameraId: 'CAM-' + Math.floor(Math.random() * 100).toString().padStart(3, '0')
-        }
-        setLocalAlerts(prev => [newAlert, ...prev].slice(0, 20)) // Keep max 20 alerts
-      }
-    }, 30000)
-    
-    return () => clearInterval(interval)
-  }, [])
+// Memoized constants for better performance with design system colors
+const ALERT_TYPE_STYLES = {
+  critical: 'border-primary/20 bg-primary/5 hover:bg-primary/10',
+  warning: 'border-accent/20 bg-accent/5 hover:bg-accent/10',
+  info: 'border-secondary/20 bg-secondary/5 hover:bg-secondary/10'
+} as const;
 
-  const getSeverityIcon = (severity: Alert['severity']) => {
-    switch (severity) {
-      case 'critical': return <XCircle className="h-4 w-4" />
-      case 'high': return <AlertCircle className="h-4 w-4" />
-      case 'medium': return <AlertTriangle className="h-4 w-4" />
-      default: return <Info className="h-4 w-4" />
+const ALERT_TYPE_ICONS = {
+  critical: IconAlertTriangle,
+  warning: IconAlertCircle,
+  info: IconBolt
+} as const;
+
+const ALERT_TYPE_BADGES = {
+  critical: 'destructive',
+  warning: 'warning',
+  info: 'secondary'
+} as const;
+
+const CATEGORY_ICONS = {
+  traffic_violation: IconBolt,
+  accident: IconAlertTriangle,
+  congestion: IconClock,
+  system: IconCamera,
+  security: IconShield
+} as const;
+
+const ALERT_TYPE_COLORS = {
+  critical: 'text-primary',
+  warning: 'text-accent-foreground',
+  info: 'text-secondary'
+} as const;
+
+// Optimized timestamp formatting with caching
+const timestampCache = new Map<string, string>();
+
+function formatTimestamp(timestamp: string): string {
+  if (timestampCache.has(timestamp)) {
+    return timestampCache.get(timestamp)!;
+  }
+
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+
+  let result: string;
+  if (diffMins < 1) result = 'Just now';
+  else if (diffMins < 60) result = `${diffMins}m ago`;
+  else {
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) result = `${diffHours}h ago`;
+    else {
+      const diffDays = Math.floor(diffHours / 24);
+      result = `${diffDays}d ago`;
     }
   }
 
-  const getSeverityColor = (severity: Alert['severity']) => {
-    switch (severity) {
-      case 'critical': return 'destructive'
-      case 'high': return 'destructive'
-      case 'medium': return 'secondary'
-      case 'low': return 'outline'
-      default: return 'default'
-    }
-  }
+  timestampCache.set(timestamp, result);
+  return result;
+}
 
-  const getTypeColor = (type: Alert['type']) => {
-    switch (type) {
-      case 'incident': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-      case 'congestion': return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
-      case 'detection': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-      case 'system': return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
-    }
-  }
+// Mock data provider with React 19 use() API
+const getAlertsData = (): Promise<AlertData[]> => Promise.resolve(mockAlerts);
 
-  const formatTime = (date: Date) => {
-    const mins = Math.floor((Date.now() - date.getTime()) / 60000)
-    if (mins < 1) return 'Just now'
-    if (mins < 60) return `${mins}m ago`
-    const hours = Math.floor(mins / 60)
-    if (hours < 24) return `${hours}h ago`
-    return `${Math.floor(hours / 24)}d ago`
-  }
+// Memoized Alert Item Component
+const AlertItem = memo<{
+  alert: AlertData;
+  onSelect: (alert: AlertData) => void;
+}>(({ alert, onSelect }) => {
+  const handleClick = useCallback(() => {
+    startTransition(() => {
+      onSelect(alert);
+    });
+  }, [alert, onSelect]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleClick();
+    }
+  }, [handleClick]);
+
+  const AlertIcon = ALERT_TYPE_ICONS[alert.type];
+  const CategoryIcon = CATEGORY_ICONS[alert.category];
+  const styleClass = ALERT_TYPE_STYLES[alert.type];
+  const colorClass = ALERT_TYPE_COLORS[alert.type];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <span>Active Alerts</span>
-          <Badge variant="outline">{localAlerts.filter(a => !a.acknowledged).length} New</Badge>
-        </CardTitle>
-        <CardDescription>Real-time traffic incidents and system notifications</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className={`pr-4`} style={{ height: maxHeight }}>
-          <div className="space-y-3">
-            {localAlerts.map((alert) => (
-              <div
-                key={alert.id}
-                className={`p-3 rounded-lg border cursor-pointer transition-colors hover:bg-accent ${
-                  alert.acknowledged ? 'opacity-60' : ''
-                }`}
-                onClick={() => onAlertClick?.(alert)}
+    <div
+      className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-soft hover:scale-[1.02] ${styleClass}`}
+      onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      aria-label={`Alert: ${alert.title}`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="flex items-center gap-2 mt-1">
+            <div className={`p-1.5 rounded-lg ${alert.type === 'critical' ? 'bg-primary/10' : alert.type === 'warning' ? 'bg-accent/10' : 'bg-secondary/10'}`}>
+              <AlertIcon className={`h-4 w-4 ${colorClass}`} />
+            </div>
+            <CategoryIcon className="h-3 w-3 text-muted-foreground" />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <h4 className="font-semibold text-sm text-foreground truncate">
+                {alert.title}
+              </h4>
+              <Badge
+                variant={ALERT_TYPE_BADGES[alert.type]}
+                className="text-2xs px-2 py-0.5 h-5 font-medium"
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center space-x-2">
-                    {getSeverityIcon(alert.severity)}
-                    <span className="font-semibold">{alert.title}</span>
-                  </div>
-                  <Badge variant={getSeverityColor(alert.severity)}>
-                    {alert.severity}
-                  </Badge>
-                </div>
-                
-                <p className="text-sm text-muted-foreground mb-2">
-                  {alert.description}
-                </p>
-                
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <div className="flex items-center space-x-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTypeColor(alert.type)}`}>
-                      {alert.type}
-                    </span>
-                    {alert.location && (
-                      <div className="flex items-center space-x-1">
-                        <MapPin className="h-3 w-3" />
-                        <span>{alert.location}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <Clock className="h-3 w-3" />
-                    <span>{formatTime(alert.timestamp)}</span>
-                  </div>
-                </div>
+                {alert.confidence}%
+              </Badge>
+            </div>
+
+            <p className="text-xs text-muted-foreground mb-3 line-clamp-2 leading-relaxed">
+              {alert.description}
+            </p>
+
+            <div className="flex items-center gap-4 text-2xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <IconMapPin className="h-3 w-3 text-secondary" />
+                <span className="truncate font-medium">{alert.location}</span>
               </div>
+              <div className="flex items-center gap-1.5">
+                <IconClock className="h-3 w-3 text-accent" />
+                <span className="font-medium">{formatTimestamp(alert.timestamp)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2">
+          <Badge
+            variant={alert.status === 'active' ? 'default' :
+                    alert.status === 'investigating' ? 'secondary' : 'outline'}
+            className="text-2xs shrink-0 font-medium"
+          >
+            {alert.status}
+          </Badge>
+          <div className={`w-2 h-2 rounded-full ${alert.status === 'active' ? 'bg-online animate-status-online' : alert.status === 'investigating' ? 'bg-maintenance' : 'bg-muted-foreground'}`} />
+        </div>
+      </div>
+    </div>
+  );
+});
+
+AlertItem.displayName = 'AlertItem';
+
+// Loading skeleton component
+const AlertSkeleton = memo(() => (
+  <div className="space-y-2 p-4 pt-0">
+    {Array.from({ length: 3 }, (_, i) => (
+      <div key={i} className="p-4 rounded-lg border animate-pulse">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <div className="flex items-center gap-1 mt-0.5">
+              <Skeleton className="h-4 w-4 rounded" />
+              <Skeleton className="h-3 w-3 rounded" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Skeleton className="h-4 w-32 rounded" />
+                <Skeleton className="h-5 w-12 rounded" />
+              </div>
+              <Skeleton className="h-3 w-full mb-2 rounded" />
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-3 w-20 rounded" />
+                <Skeleton className="h-3 w-16 rounded" />
+              </div>
+            </div>
+          </div>
+          <Skeleton className="h-5 w-12 rounded" />
+        </div>
+      </div>
+    ))}
+  </div>
+));
+
+AlertSkeleton.displayName = 'AlertSkeleton';
+
+// Alerts content component using React 19 use() API
+function AlertsContent({ onAlertSelect }: { onAlertSelect: (alert: AlertData) => void }) {
+  const alerts = use(getAlertsData());
+
+  const sortedAlerts = useMemo(() => {
+    const severityOrder = { critical: 0, warning: 1, info: 2 };
+    return [...alerts].sort((a, b) =>
+      severityOrder[a.type] - severityOrder[b.type]
+    );
+  }, [alerts]);
+
+  const activeAlertsCount = useMemo(() =>
+    alerts.filter(alert => alert.status === 'active').length,
+    [alerts]
+  );
+
+  return (
+    <>
+      <CardHeader className="pb-4 border-b border-border/50">
+        <CardTitle className="text-xl font-semibold flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <IconAlertCircle className="h-5 w-5 text-primary" />
+          </div>
+          <span className="text-foreground">Recent Alerts</span>
+          <Badge variant="secondary" className="ml-auto font-medium">
+            {activeAlertsCount} Active
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <ScrollArea style={{ height: '400px' }}>
+          <div className="space-y-3 p-6 pt-4">
+            {sortedAlerts.map((alert) => (
+              <AlertItem
+                key={alert.id}
+                alert={alert}
+                onSelect={onAlertSelect}
+              />
             ))}
           </div>
         </ScrollArea>
       </CardContent>
-    </Card>
-  )
+    </>
+  );
 }
+
+export const AlertPanel = memo(({ maxHeight = "400px" }: AlertPanelProps) => {
+  const [selectedAlert, setSelectedAlert] = useState<AlertData | null>(null);
+
+  const handleAlertSelect = useCallback((alert: AlertData) => {
+    setSelectedAlert(alert);
+  }, []);
+
+  const handleModalClose = useCallback(() => {
+    setSelectedAlert(null);
+  }, []);
+
+  return (
+    <Card className="h-full border-border/50 shadow-soft hover:shadow-medium transition-shadow duration-300">
+      <Suspense fallback={<AlertSkeleton />}>
+        <AlertsContent onAlertSelect={handleAlertSelect} />
+      </Suspense>
+
+      <AlertDetailsModal
+        alert={selectedAlert}
+        isOpen={selectedAlert !== null}
+        onClose={handleModalClose}
+      />
+    </Card>
+  );
+});
+
+AlertPanel.displayName = 'AlertPanel';
