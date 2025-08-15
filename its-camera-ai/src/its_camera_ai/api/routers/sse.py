@@ -5,12 +5,14 @@ Provides streaming endpoints for live camera status, detection results,
 and system monitoring data.
 """
 
+import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from ...core.exceptions import ServiceError
 from ...core.logging import get_logger
 from ...models.user import User
 from ..dependencies import get_current_user, require_permissions
@@ -36,6 +38,7 @@ async def stream_camera_events(
     event_types: list[str] | None = Query(None, description="Filter by event types"),
     zones: list[str] | None = Query(None, description="Filter by zone IDs"),
     include_history: bool = Query(False, description="Include recent events"),
+    max_events_per_second: int = Query(10, ge=1, le=50, description="Rate limit events per second"),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """
@@ -62,6 +65,20 @@ async def stream_camera_events(
     """
     connection_id = f"camera_stream_{uuid.uuid4().hex}"
 
+    # Validate event types
+    valid_event_types = {
+        "status_change", "detection_result", "health_update",
+        "configuration_change", "error", "maintenance",
+        "traffic_violation", "incident_detection"
+    }
+    if event_types:
+        invalid_types = set(event_types) - valid_event_types
+        if invalid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid event types: {', '.join(invalid_types)}"
+            )
+
     filters = {}
     if camera_ids:
         filters["camera_ids"] = camera_ids
@@ -70,6 +87,7 @@ async def stream_camera_events(
     if zones:
         filters["zones"] = zones
     filters["include_history"] = include_history
+    filters["max_events_per_second"] = max_events_per_second
 
     logger.info(
         "Camera SSE stream requested",
@@ -78,7 +96,15 @@ async def stream_camera_events(
         filters=filters,
     )
 
-    return await create_sse_response(request, connection_id, filters)
+    try:
+        return await create_sse_response(request, connection_id, filters)
+    except ServiceError as e:
+        if "Maximum connections reached" in str(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Server at maximum capacity. Please try again later."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
@@ -90,6 +116,7 @@ async def stream_system_events(
     request: Request,
     event_types: list[str] | None = Query(None, description="Filter by event types"),
     include_history: bool = Query(False, description="Include recent events"),
+    max_events_per_second: int = Query(20, ge=1, le=100, description="Rate limit events per second"),
     current_user: User = Depends(get_current_user),
     _permissions: None = Depends(require_permissions(["system:monitor"])),
 ) -> StreamingResponse:
@@ -118,10 +145,24 @@ async def stream_system_events(
     """
     connection_id = f"system_stream_{uuid.uuid4().hex}"
 
+    # Validate event types
+    valid_system_event_types = {
+        "performance_alert", "resource_usage", "service_status",
+        "system_error", "maintenance", "statistics"
+    }
+    if event_types:
+        invalid_types = set(event_types) - valid_system_event_types
+        if invalid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid system event types: {', '.join(invalid_types)}"
+            )
+
     filters = {"stream_type": "system"}
     if event_types:
         filters["event_types"] = event_types
     filters["include_history"] = include_history
+    filters["max_events_per_second"] = max_events_per_second
 
     logger.info(
         "System SSE stream requested",
@@ -130,7 +171,15 @@ async def stream_system_events(
         filters=filters,
     )
 
-    return await create_sse_response(request, connection_id, filters)
+    try:
+        return await create_sse_response(request, connection_id, filters)
+    except ServiceError as e:
+        if "Maximum connections reached" in str(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Server at maximum capacity. Please try again later."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
@@ -144,6 +193,7 @@ async def stream_detection_events(
     vehicle_types: list[str] | None = Query(None, description="Filter by vehicle types"),
     min_confidence: float = Query(0.5, ge=0.0, le=1.0, description="Minimum detection confidence"),
     zones: list[str] | None = Query(None, description="Filter by zone IDs"),
+    max_events_per_second: int = Query(15, ge=1, le=100, description="Rate limit events per second"),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """
@@ -165,9 +215,22 @@ async def stream_detection_events(
     """
     connection_id = f"detection_stream_{uuid.uuid4().hex}"
 
+    # Validate vehicle types
+    valid_vehicle_types = {
+        "car", "truck", "bus", "motorcycle", "bicycle", "person", "van", "trailer"
+    }
+    if vehicle_types:
+        invalid_types = set(vehicle_types) - valid_vehicle_types
+        if invalid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid vehicle types: {', '.join(invalid_types)}"
+            )
+
     filters = {
         "event_types": ["detection_result"],
         "min_confidence": min_confidence,
+        "max_events_per_second": max_events_per_second,
     }
     if camera_ids:
         filters["camera_ids"] = camera_ids
@@ -183,7 +246,15 @@ async def stream_detection_events(
         filters=filters,
     )
 
-    return await create_sse_response(request, connection_id, filters)
+    try:
+        return await create_sse_response(request, connection_id, filters)
+    except ServiceError as e:
+        if "Maximum connections reached" in str(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Server at maximum capacity. Please try again later."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post(
@@ -282,6 +353,80 @@ async def broadcast_system_event(
 
 
 @router.get(
+    "/analytics",
+    summary="Traffic analytics stream",
+    description="Stream real-time traffic analytics, flow data, and speed calculations.",
+)
+async def stream_analytics_events(
+    request: Request,
+    zones: list[str] | None = Query(None, description="Filter by zone IDs"),
+    analytics_types: list[str] | None = Query(None, description="Filter by analytics types"),
+    min_confidence: float = Query(0.0, ge=0.0, le=1.0, description="Minimum confidence for analytics"),
+    max_events_per_second: int = Query(25, ge=1, le=100, description="Rate limit events per second"),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream real-time traffic analytics events.
+    
+    Analytics types include:
+    - `traffic_flow`: Real-time traffic flow measurements
+    - `speed_calculation`: Vehicle speed calculations
+    - `zone_analytics`: Zone-specific analytics and violations
+    - `occupancy_analysis`: Parking/zone occupancy analysis
+    - `congestion_detection`: Traffic congestion alerts
+    
+    Args:
+        request: FastAPI request object
+        zones: List of zone IDs to monitor
+        analytics_types: List of analytics types to include
+        min_confidence: Minimum confidence threshold for analytics
+        max_events_per_second: Rate limit for events per second
+        current_user: Authenticated user
+        
+    Returns:
+        StreamingResponse: SSE stream of analytics events
+    """
+    connection_id = f"analytics_stream_{uuid.uuid4().hex}"
+
+    # Validate analytics types
+    valid_analytics_types = {
+        "traffic_flow", "speed_calculation", "zone_analytics",
+        "occupancy_analysis", "congestion_detection"
+    }
+    if analytics_types:
+        invalid_types = set(analytics_types) - valid_analytics_types
+        if invalid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid analytics types: {', '.join(invalid_types)}"
+            )
+
+    filters = {
+        "event_types": analytics_types or list(valid_analytics_types),
+        "min_confidence": min_confidence,
+        "max_events_per_second": max_events_per_second,
+    }
+    if zones:
+        filters["zones"] = zones
+
+    logger.info(
+        "Analytics SSE stream requested",
+        connection_id=connection_id,
+        user_id=str(current_user.id),
+        filters=filters,
+    )
+
+    try:
+        return await create_sse_response(request, connection_id, filters)
+    except ServiceError as e:
+        if "Maximum connections reached" in str(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Server at maximum capacity. Please try again later."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
     "/stats",
     summary="SSE broadcaster statistics",
     description="Get statistics about active SSE connections and message throughput.",
@@ -311,3 +456,37 @@ async def get_sse_stats(
     logger.debug("SSE statistics requested", user_id=str(current_user.id))
 
     return stats
+
+
+@router.get(
+    "/health",
+    summary="SSE service health check",
+    description="Get health status of SSE service and Kafka integration.",
+)
+async def get_sse_health(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Get detailed health status of SSE service.
+    
+    Returns comprehensive health information including:
+    - Connection statistics and limits
+    - Kafka integration status
+    - Rate limiting status
+    - Performance metrics
+    
+    Args:
+        current_user: Authenticated user
+        
+    Returns:
+        Dict: Detailed health status
+    """
+    broadcaster = get_broadcaster()
+    health_data = broadcaster.get_stats()
+
+    # Add additional health checks
+    health_data["service_status"] = "healthy" if len(broadcaster.connections) < broadcaster.max_connections else "degraded"
+    health_data["timestamp"] = time.time()
+
+    logger.debug("SSE health check requested", user_id=str(current_user.id))
+
+    return health_data

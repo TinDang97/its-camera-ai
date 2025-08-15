@@ -51,6 +51,9 @@ from .commands import (
 from .commands import (
     services as service_commands,
 )
+from .commands import (
+    validate_optimizations as validation_commands,
+)
 from .utils import (
     console,
     print_info,
@@ -87,6 +90,9 @@ app.add_typer(
 app.add_typer(config_commands.app, name="config", help="⚙️ Configuration management")
 app.add_typer(
     performance_commands.performance_cli, name="performance", help="⚡ Performance optimization and monitoring"
+)
+app.add_typer(
+    validation_commands.app, name="validate", help="🧪 System optimization validation and testing"
 )
 
 # Add enhanced CLI features

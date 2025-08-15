@@ -8,20 +8,26 @@ to connected clients via HTTP SSE connections.
 import asyncio
 import json
 import time
+from collections import defaultdict, deque
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..core.exceptions import ServiceError
 from ..core.logging import get_logger
+
+if TYPE_CHECKING:
+    from ..services.kafka_sse_consumer import KafkaSSEConsumer
 
 logger = get_logger(__name__)
 
 
 class SSEMessage(BaseModel):
     """SSE message structure."""
+
     event: str
     data: dict[str, Any]
     id: str | None = None
@@ -30,6 +36,7 @@ class SSEMessage(BaseModel):
 
 class CameraEvent(BaseModel):
     """Camera-specific event data."""
+
     camera_id: str
     event_type: str
     timestamp: datetime
@@ -38,6 +45,7 @@ class CameraEvent(BaseModel):
 
 class SystemEvent(BaseModel):
     """System-wide event data."""
+
     event_type: str
     timestamp: datetime
     data: dict[str, Any]
@@ -60,11 +68,17 @@ class SSEConnection:
             return True
 
         # Camera ID filter
-        if "camera_ids" in self.filters and event.camera_id not in self.filters["camera_ids"]:
+        if (
+            "camera_ids" in self.filters
+            and event.camera_id not in self.filters["camera_ids"]
+        ):
             return False
 
         # Event type filter
-        if "event_types" in self.filters and event.event_type not in self.filters["event_types"]:
+        if (
+            "event_types" in self.filters
+            and event.event_type not in self.filters["event_types"]
+        ):
             return False
 
         # Zone filter
@@ -83,7 +97,9 @@ class SSEConnection:
             await asyncio.wait_for(self.queue.put(message), timeout=0.1)
             return True
         except (TimeoutError, asyncio.QueueFull):
-            logger.warning("Queue full for connection", connection_id=self.connection_id)
+            logger.warning(
+                "Queue full for connection", connection_id=self.connection_id
+            )
             return False
 
     async def get_event(self) -> SSEMessage | None:
@@ -96,8 +112,7 @@ class SSEConnection:
         except TimeoutError:
             # Send ping to keep connection alive
             return SSEMessage(
-                event="ping",
-                data={"timestamp": datetime.now().isoformat()}
+                event="ping", data={"timestamp": datetime.now().isoformat()}
             )
 
     def close(self):
@@ -106,9 +121,9 @@ class SSEConnection:
 
 
 class SSEBroadcaster:
-    """Server-Sent Events broadcaster for real-time updates."""
+    """Server-Sent Events broadcaster for real-time updates with Kafka integration."""
 
-    def __init__(self):
+    def __init__(self, kafka_config: dict[str, Any] | None = None):
         self.connections: dict[str, SSEConnection] = {}
         self.event_history: list[CameraEvent] = []
         self.max_history_size = 1000
@@ -117,16 +132,32 @@ class SSEBroadcaster:
             "active_connections": 0,
             "messages_sent": 0,
             "messages_dropped": 0,
+            "kafka_events_processed": 0,
         }
+
+        # Kafka integration
+        self.kafka_consumer: KafkaSSEConsumer | None = None
+        self.kafka_config = kafka_config
+
+        # Connection limits and rate limiting
+        self.max_connections = 200  # Increased limit for production
+        self.connection_rate_limits = defaultdict(list)  # Per-connection rate limiting
+        self.global_rate_limit = deque(maxlen=1000)  # Global rate limiting
+        self.max_global_events_per_second = 500
 
         # Start background tasks
         self._cleanup_task = None
-        self._start_cleanup_task()
+        self._start_background_tasks()
 
-    def _start_cleanup_task(self):
-        """Start background cleanup task."""
+    def _start_background_tasks(self):
+        """Start background tasks including cleanup and Kafka integration."""
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_connections())
+
+        # Start Kafka integration if enabled
+        self._kafka_integration_task = asyncio.create_task(
+            self._start_kafka_integration()
+        )
 
     async def _cleanup_connections(self):
         """Background task to clean up stale connections."""
@@ -143,11 +174,13 @@ class SSEBroadcaster:
                 # Remove stale connections
                 for connection_id in stale_connections:
                     await self.disconnect_client(connection_id)
-                    logger.info("Cleaned up stale connection", connection_id=connection_id)
+                    logger.info(
+                        "Cleaned up stale connection", connection_id=connection_id
+                    )
 
                 # Clean up event history
                 if len(self.event_history) > self.max_history_size:
-                    self.event_history = self.event_history[-self.max_history_size:]
+                    self.event_history = self.event_history[-self.max_history_size :]
 
                 await asyncio.sleep(30)  # Run cleanup every 30 seconds
 
@@ -155,12 +188,40 @@ class SSEBroadcaster:
                 logger.error("Error in cleanup task", error=str(e))
                 await asyncio.sleep(30)
 
+    async def _start_kafka_integration(self):
+        """Start Kafka consumer integration."""
+        try:
+            logger.info("Starting Kafka SSE integration")
+
+            # Create Kafka consumer with this broadcaster
+            from ..services.kafka_sse_consumer import create_kafka_sse_consumer
+
+            self.kafka_consumer = create_kafka_sse_consumer(
+                config=self.kafka_config, sse_broadcaster=self
+            )
+
+            # Start the consumer
+            await self.kafka_consumer.start()
+
+            logger.info("Kafka SSE integration started successfully")
+
+        except Exception as e:
+            logger.error("Failed to start Kafka integration", error=str(e))
+            self.kafka_consumer = None
+
     async def connect_client(
-        self,
-        connection_id: str,
-        filters: dict[str, Any] | None = None
+        self, connection_id: str, filters: dict[str, Any] | None = None
     ) -> SSEConnection:
         """Connect a new client for SSE updates."""
+        # Check connection limits
+        if len(self.connections) >= self.max_connections:
+            logger.warning(
+                "Maximum connections reached, rejecting new connection",
+                connection_id=connection_id,
+                max_connections=self.max_connections,
+            )
+            raise ServiceError("Maximum connections reached", service="sse_broadcaster")
+
         connection = SSEConnection(connection_id, filters)
         self.connections[connection_id] = connection
 
@@ -171,7 +232,7 @@ class SSEBroadcaster:
             "SSE client connected",
             connection_id=connection_id,
             filters=filters,
-            total_connections=self.stats["active_connections"]
+            total_connections=self.stats["active_connections"],
         )
 
         # Send recent history if requested
@@ -182,7 +243,7 @@ class SSEBroadcaster:
                     message = SSEMessage(
                         event="camera_update",
                         data=event.model_dump(),
-                        id=str(int(event.timestamp.timestamp() * 1000))
+                        id=str(int(event.timestamp.timestamp() * 1000)),
                     )
                     await connection.send_event(message)
 
@@ -195,12 +256,16 @@ class SSEBroadcaster:
             connection.close()
             del self.connections[connection_id]
 
+            # Clean up rate limiting data
+            if connection_id in self.connection_rate_limits:
+                del self.connection_rate_limits[connection_id]
+
             self.stats["active_connections"] = len(self.connections)
 
             logger.info(
                 "SSE client disconnected",
                 connection_id=connection_id,
-                active_connections=self.stats["active_connections"]
+                active_connections=self.stats["active_connections"],
             )
 
     async def broadcast_camera_event(self, event: CameraEvent):
@@ -214,18 +279,25 @@ class SSEBroadcaster:
         message = SSEMessage(
             event="camera_update",
             data=event.model_dump(),
-            id=str(int(event.timestamp.timestamp() * 1000))
+            id=str(int(event.timestamp.timestamp() * 1000)),
         )
 
-        # Send to all matching connections
+        # Send to all matching connections with rate limiting
         successful_sends = 0
         failed_connections = []
+        rate_limited_connections = 0
 
         for connection_id, connection in self.connections.items():
             if connection.matches_filter(event):
+                # Check rate limits
+                if self._is_connection_rate_limited(connection_id):
+                    rate_limited_connections += 1
+                    continue
+
                 success = await connection.send_event(message)
                 if success:
                     successful_sends += 1
+                    self._track_connection_event(connection_id)
                 else:
                     failed_connections.append(connection_id)
 
@@ -236,12 +308,16 @@ class SSEBroadcaster:
         self.stats["messages_sent"] += successful_sends
         self.stats["messages_dropped"] += len(failed_connections)
 
+        # Track global rate limiting
+        self._track_global_event()
+
         logger.debug(
             "Camera event broadcasted",
             camera_id=event.camera_id,
             event_type=event.event_type,
             successful_sends=successful_sends,
-            dropped=len(failed_connections)
+            dropped=len(failed_connections),
+            rate_limited=rate_limited_connections,
         )
 
     async def broadcast_system_event(self, event: SystemEvent):
@@ -252,17 +328,24 @@ class SSEBroadcaster:
         message = SSEMessage(
             event="system_update",
             data=event.model_dump(),
-            id=str(int(event.timestamp.timestamp() * 1000))
+            id=str(int(event.timestamp.timestamp() * 1000)),
         )
 
-        # Send to all connections
+        # Send to all connections with rate limiting
         successful_sends = 0
         failed_connections = []
+        rate_limited_connections = 0
 
         for connection_id, connection in self.connections.items():
+            # Check rate limits for system events (less strict)
+            if self._is_connection_rate_limited(connection_id, max_per_second=20):
+                rate_limited_connections += 1
+                continue
+
             success = await connection.send_event(message)
             if success:
                 successful_sends += 1
+                self._track_connection_event(connection_id)
             else:
                 failed_connections.append(connection_id)
 
@@ -273,11 +356,15 @@ class SSEBroadcaster:
         self.stats["messages_sent"] += successful_sends
         self.stats["messages_dropped"] += len(failed_connections)
 
+        # Track global rate limiting
+        self._track_global_event()
+
         logger.debug(
             "System event broadcasted",
             event_type=event.event_type,
             successful_sends=successful_sends,
-            dropped=len(failed_connections)
+            dropped=len(failed_connections),
+            rate_limited=rate_limited_connections,
         )
 
     async def get_connection_stream(self, connection_id: str):
@@ -300,7 +387,9 @@ class SSEBroadcaster:
                 yield self._format_sse_message(event)
 
         except Exception as e:
-            logger.error("Error in SSE stream", connection_id=connection_id, error=str(e))
+            logger.error(
+                "Error in SSE stream", connection_id=connection_id, error=str(e)
+            )
         finally:
             await self.disconnect_client(connection_id)
 
@@ -317,14 +406,103 @@ class SSEBroadcaster:
 
         # Format data (can be multiline)
         data_str = json.dumps(message.data, default=str)
-        for line in data_str.split('\n'):
+        for line in data_str.split("\n"):
             lines.append(f"data: {line}")
 
         lines.append("")  # Empty line to end message
         return "\n".join(lines) + "\n"
 
+    def _is_connection_rate_limited(
+        self, connection_id: str, max_per_second: int = 10
+    ) -> bool:
+        """Check if a connection is rate limited."""
+        now = time.time()
+
+        # Get connection events
+        events = self.connection_rate_limits[connection_id]
+
+        # Remove old events (older than 1 second)
+        while events and now - events[0] > 1.0:
+            events.pop(0)
+
+        # Check rate limit
+        return len(events) >= max_per_second
+
+    def _track_connection_event(self, connection_id: str):
+        """Track an event for connection rate limiting."""
+        self.connection_rate_limits[connection_id].append(time.time())
+
+    def _track_global_event(self):
+        """Track a global event for rate limiting."""
+        self.global_rate_limit.append(time.time())
+
+    def _is_global_rate_limited(self) -> bool:
+        """Check if global rate limit is exceeded."""
+        if len(self.global_rate_limit) < self.max_global_events_per_second:
+            return False
+
+        now = time.time()
+        oldest_event = self.global_rate_limit[0]
+
+        # Check if we're within the rate limit window
+        return now - oldest_event < 1.0
+
+    async def broadcast_kafka_event(self, sse_message: SSEMessage):
+        """Broadcast event received from Kafka consumer."""
+        if not self.connections:
+            return
+
+        # Check global rate limiting
+        if self._is_global_rate_limited():
+            logger.debug("Global rate limit exceeded, dropping Kafka event")
+            self.stats["messages_dropped"] += 1
+            return
+
+        successful_sends = 0
+        failed_connections = []
+
+        # Send to all connections (Kafka events are pre-filtered)
+        for connection_id, connection in self.connections.items():
+            try:
+                success = await connection.send_event(sse_message)
+                if success:
+                    successful_sends += 1
+                    self._track_connection_event(connection_id)
+                else:
+                    failed_connections.append(connection_id)
+            except Exception as e:
+                logger.debug(
+                    "Error sending Kafka event to connection",
+                    connection_id=connection_id,
+                    error=str(e),
+                )
+                failed_connections.append(connection_id)
+
+        # Clean up failed connections
+        for connection_id in failed_connections:
+            await self.disconnect_client(connection_id)
+
+        # Update stats
+        self.stats["messages_sent"] += successful_sends
+        self.stats["messages_dropped"] += len(failed_connections)
+        self.stats["kafka_events_processed"] += 1
+
+        # Track global event
+        self._track_global_event()
+
+        logger.debug(
+            "Kafka event broadcasted",
+            event_type=sse_message.event,
+            successful_sends=successful_sends,
+            dropped=len(failed_connections),
+        )
+
     def get_stats(self) -> dict[str, Any]:
         """Get broadcaster statistics."""
+        kafka_stats = {}
+        if self.kafka_consumer:
+            kafka_stats = self.kafka_consumer.get_health_status()
+
         return {
             **self.stats,
             "connection_details": [
@@ -337,6 +515,18 @@ class SSEBroadcaster:
                 for conn_id, conn in self.connections.items()
             ],
             "history_size": len(self.event_history),
+            "connection_limits": {
+                "max_connections": self.max_connections,
+                "current_connections": len(self.connections),
+                "max_global_events_per_second": self.max_global_events_per_second,
+            },
+            "kafka_integration": {
+                "enabled": self.kafka_enabled,
+                "consumer_healthy": (
+                    kafka_stats.get("is_healthy", False) if kafka_stats else False
+                ),
+                "consumer_stats": kafka_stats,
+            },
         }
 
 
@@ -344,15 +534,41 @@ class SSEBroadcaster:
 _broadcaster: SSEBroadcaster | None = None
 
 
-def get_broadcaster() -> SSEBroadcaster:
-    """Get global SSE broadcaster instance."""
+def get_broadcaster(kafka_config: dict[str, Any] | None = None) -> SSEBroadcaster:
+    """Get global SSE broadcaster instance with optional Kafka integration."""
     global _broadcaster
     if _broadcaster is None:
-        _broadcaster = SSEBroadcaster()
+        _broadcaster = SSEBroadcaster(kafka_config=kafka_config)
     return _broadcaster
 
 
-async def create_sse_response(request: Request, connection_id: str, filters: dict[str, Any] | None = None) -> StreamingResponse:
+def initialize_broadcaster_with_kafka(kafka_config: dict[str, Any]) -> SSEBroadcaster:
+    """Initialize broadcaster with Kafka configuration."""
+    global _broadcaster
+    if _broadcaster is not None:
+        logger.warning("Broadcaster already initialized, ignoring Kafka config")
+        return _broadcaster
+
+    _broadcaster = SSEBroadcaster(kafka_config=kafka_config)
+    return _broadcaster
+
+
+async def shutdown_broadcaster():
+    """Shutdown the global broadcaster and cleanup resources."""
+    global _broadcaster
+    if _broadcaster and _broadcaster.kafka_consumer:
+        try:
+            await _broadcaster.kafka_consumer.stop()
+            logger.info("SSE broadcaster Kafka integration stopped")
+        except Exception as e:
+            logger.error("Error stopping broadcaster Kafka integration", error=str(e))
+
+    _broadcaster = None
+
+
+async def create_sse_response(
+    request: Request, connection_id: str, filters: dict[str, Any] | None = None
+) -> StreamingResponse:
     """Create SSE streaming response for a client."""
     broadcaster = get_broadcaster()
 
@@ -378,5 +594,5 @@ async def create_sse_response(request: Request, connection_id: str, filters: dic
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Cache-Control",
-        }
+        },
     )

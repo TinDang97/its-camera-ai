@@ -5,6 +5,7 @@ traffic predictions with confidence scoring and multiple prediction horizons.
 """
 
 import asyncio
+import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,227 +21,7 @@ from .cache import CacheService
 logger = get_logger(__name__)
 
 
-class PredictionService:
-    """Traffic Prediction Service (BE-ANA-003).
-    
-    Integrates with ML models to provide real-time and forecasted
-    traffic predictions with confidence scoring and feature engineering.
-    """
-
-    def __init__(
-        self,
-        cache_service: CacheService,
-        settings: Settings = None
-    ):
-        self.cache = cache_service
-        self.settings = settings or Settings()
-        self.feature_engineer = FeatureEngineer()
-
-        # Mock models - in production would load actual ML models
-        self.models = {
-            "yolo11-v1.2.3": {
-                "accuracy": 0.89,
-                "last_trained": "2024-01-15",
-                "features": ["historical_traffic", "time_of_day", "weather"],
-            },
-            "ensemble-v2.1.0": {
-                "accuracy": 0.93,
-                "last_trained": "2024-02-01",
-                "features": ["historical_traffic", "time_of_day", "weather", "events"],
-            }
-        }
-
-        self.current_model = "yolo11-v1.2.3"
-
-    async def predict_single(
-        self,
-        camera_id: str,
-        horizon_minutes: int,
-        historical_data: list[dict[str, Any]] | None = None,
-        model_version: str | None = None,
-        confidence_level: float = 0.95
-    ) -> dict[str, Any]:
-        """Generate prediction for single camera.
-        
-        Args:
-            camera_id: Camera identifier
-            horizon_minutes: Prediction horizon in minutes
-            historical_data: Historical data for context
-            model_version: Specific model version to use
-            confidence_level: Confidence level for intervals
-            
-        Returns:
-            Prediction data with confidence intervals
-        """
-        start_time = datetime.now(UTC)
-        model_version = model_version or self.current_model
-
-        try:
-            # Engineer features from historical data
-            current_time = datetime.now(UTC)
-            features = await self.feature_engineer.engineer_features(
-                historical_data or [], current_time
-            )
-
-            # Generate prediction using mock model
-            # In production, this would call actual ML model
-            base_prediction = await self._generate_model_prediction(
-                features, horizon_minutes, model_version
-            )
-
-            # Calculate confidence intervals
-            confidence = PredictionConfidence(
-                np.array([base_prediction]), confidence_level
-            )
-            confidence_interval = confidence.get_interval()
-
-            # Create prediction result
-            target_time = current_time + timedelta(minutes=horizon_minutes)
-
-            result = {
-                "camera_id": camera_id,
-                "prediction_time": current_time,
-                "target_time": target_time,
-                "horizon_minutes": horizon_minutes,
-                "predicted_vehicle_count": base_prediction,
-                "confidence_interval": confidence_interval,
-                "model_version": model_version,
-                "model_accuracy": self.models[model_version]["accuracy"],
-                "processing_time_ms": (datetime.now(UTC) - start_time).total_seconds() * 1000,
-                "features_used": self.models[model_version]["features"],
-            }
-
-            logger.debug(
-                "Prediction generated",
-                camera_id=camera_id,
-                horizon_minutes=horizon_minutes,
-                predicted_count=base_prediction,
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Prediction failed: {e}", camera_id=camera_id)
-            raise
-
-    async def predict_batch(
-        self,
-        camera_ids: list[str],
-        horizon_minutes: int,
-        historical_data: dict[str, list[dict[str, Any]]] | None = None,
-        model_version: str | None = None,
-        confidence_level: float = 0.95
-    ) -> list[dict[str, Any]]:
-        """Generate batch predictions for multiple cameras.
-        
-        Args:
-            camera_ids: List of camera identifiers
-            horizon_minutes: Prediction horizon in minutes
-            historical_data: Historical data per camera
-            model_version: Specific model version to use
-            confidence_level: Confidence level for intervals
-            
-        Returns:
-            List of prediction results
-        """
-        predictions = []
-
-        for camera_id in camera_ids:
-            try:
-                camera_history = historical_data.get(camera_id, []) if historical_data else []
-                prediction = await self.predict_single(
-                    camera_id=camera_id,
-                    horizon_minutes=horizon_minutes,
-                    historical_data=camera_history,
-                    model_version=model_version,
-                    confidence_level=confidence_level,
-                )
-                predictions.append(prediction)
-            except Exception as e:
-                logger.warning(f"Batch prediction failed for camera {camera_id}: {e}")
-                continue
-
-        logger.info(
-            "Batch predictions completed",
-            cameras_requested=len(camera_ids),
-            predictions_generated=len(predictions),
-        )
-
-        return predictions
-
-    async def get_model_performance(
-        self,
-        model_version: str | None = None
-    ) -> dict[str, float]:
-        """Get model performance metrics.
-        
-        Args:
-            model_version: Specific model version
-            
-        Returns:
-            Performance metrics dictionary
-        """
-        model_version = model_version or self.current_model
-
-        if model_version not in self.models:
-            raise ValueError(f"Unknown model version: {model_version}")
-
-        # Mock performance metrics - in production would calculate from validation data
-        return {
-            "accuracy": self.models[model_version]["accuracy"],
-            "mae": random.uniform(2.0, 6.0),  # Mean Absolute Error
-            "rmse": random.uniform(3.0, 8.0),  # Root Mean Square Error
-            "r2_score": random.uniform(0.75, 0.95),  # R-squared
-            "mape": random.uniform(8.0, 15.0),  # Mean Absolute Percentage Error
-        }
-
-    async def _generate_model_prediction(
-        self,
-        features: np.ndarray,
-        horizon_minutes: int,
-        model_version: str
-    ) -> float:
-        """Generate prediction using ML model.
-        
-        In production, this would interface with actual ML models.
-        """
-        # Mock prediction logic
-        base_count = 30.0  # Base traffic count
-
-        # Time-based adjustments
-        current_hour = datetime.now(UTC).hour
-        if 7 <= current_hour <= 9 or 17 <= current_hour <= 19:  # Rush hours
-            base_count *= 1.5
-        elif current_hour >= 22 or current_hour <= 6:  # Night hours
-            base_count *= 0.3
-
-        # Horizon adjustments (further predictions less certain)
-        horizon_factor = 1.0 - (horizon_minutes / 1440) * 0.2  # Decrease for longer horizons
-
-        # Model-specific adjustments
-        model_accuracy = self.models[model_version]["accuracy"]
-        accuracy_factor = 0.8 + (model_accuracy - 0.5) * 0.4
-
-        # Add some randomness
-        noise = random.uniform(-5, 5)
-
-        prediction = base_count * horizon_factor * accuracy_factor + noise
-        return max(0.0, prediction)  # Ensure non-negative
-
-    def get_available_models(self) -> list[str]:
-        """Get list of available model versions."""
-        return list(self.models.keys())
-
-    def set_current_model(self, model_version: str) -> None:
-        """Set the current active model version."""
-        if model_version not in self.models:
-            raise ValueError(f"Unknown model version: {model_version}")
-        self.current_model = model_version
-        logger.info(f"Model version changed to {model_version}")
-
-
-# Export the service class at module level for dependency injection
-__all__ = ["PredictionService", "PredictionHorizon", "PredictionConfidence", "FeatureEngineer"]
+# Removed duplicate simple implementation - using comprehensive one below
 
 
 class PredictionHorizon:
@@ -441,6 +222,234 @@ class MLModelRegistry:
             "active_models": self.active_models,
         }
 
+
+
+class PredictiveCacheManager:
+    """ML-based predictive caching for traffic predictions."""
+
+    def __init__(self, cache_service: CacheService):
+        self.cache_service = cache_service
+        self.access_patterns = {}
+        self.prediction_accuracy = {}
+
+    def record_access(self, cache_key: str, camera_id: str, timestamp: datetime):
+        """Record cache access pattern for ML-based prediction."""
+        pattern_key = f"{camera_id}:{timestamp.hour}"
+        if pattern_key not in self.access_patterns:
+            self.access_patterns[pattern_key] = []
+
+        self.access_patterns[pattern_key].append({
+            "cache_key": cache_key,
+            "timestamp": timestamp,
+            "hour": timestamp.hour,
+            "day_of_week": timestamp.weekday()
+        })
+
+    async def warm_cache_predictively(self, camera_id: str, current_time: datetime):
+        """Predictively warm cache based on historical access patterns."""
+        try:
+            # Predict which caches will be needed in next 15 minutes
+            predicted_keys = self._predict_cache_needs(camera_id, current_time)
+
+            # Pre-warm high probability cache entries
+            for key_info in predicted_keys:
+                if key_info["probability"] > 0.7:  # 70% probability threshold
+                    await self._pre_warm_cache(key_info["cache_key"], camera_id)
+
+        except Exception as e:
+            logger.error(f"Predictive cache warming failed: {e}")
+
+    def _predict_cache_needs(self, camera_id: str, current_time: datetime) -> list[dict]:
+        """Predict cache needs using simple pattern matching."""
+        pattern_key = f"{camera_id}:{current_time.hour}"
+
+        if pattern_key not in self.access_patterns:
+            return []
+
+        # Simple frequency-based prediction
+        cache_frequency = {}
+        patterns = self.access_patterns[pattern_key]
+
+        for pattern in patterns[-50:]:  # Last 50 accesses for this hour
+            cache_key = pattern["cache_key"]
+            cache_frequency[cache_key] = cache_frequency.get(cache_key, 0) + 1
+
+        # Calculate probability based on frequency
+        total_accesses = sum(cache_frequency.values())
+        predictions = []
+
+        for cache_key, frequency in cache_frequency.items():
+            probability = frequency / total_accesses if total_accesses > 0 else 0
+            predictions.append({
+                "cache_key": cache_key,
+                "probability": probability,
+                "frequency": frequency
+            })
+
+        return sorted(predictions, key=lambda x: x["probability"], reverse=True)
+
+    async def _pre_warm_cache(self, cache_key: str, camera_id: str):
+        """Pre-warm specific cache entry."""
+        try:
+            # Generate prediction data for this cache key
+            # This is a simplified version - in production, this would trigger
+            # actual prediction generation for the specific key
+            warm_data = {
+                "camera_id": camera_id,
+                "warmed_at": datetime.now(UTC).isoformat(),
+                "prediction_type": "pre_warmed",
+                "status": "ready"
+            }
+
+            await self.cache_service.set_json(
+                cache_key,
+                warm_data,
+                ttl=900  # 15 minutes
+            )
+
+            logger.debug(f"Pre-warmed cache key: {cache_key}")
+
+        except Exception as e:
+            logger.error(f"Failed to pre-warm cache key {cache_key}: {e}")
+
+
+class ModelPerformanceTracker:
+    """Advanced performance tracking with circuit breaker integration."""
+
+    def __init__(self):
+        self.model_metrics = {}
+        self.performance_thresholds = {
+            "accuracy": 0.85,      # 85% minimum accuracy
+            "latency_ms": 50.0,    # 50ms maximum latency
+            "error_rate": 0.05     # 5% maximum error rate
+        }
+        self.circuit_breaker_status = {}
+
+    def record_prediction_performance(self, model_name: str,
+                                    actual_value: float,
+                                    predicted_value: float,
+                                    prediction_time_ms: float):
+        """Record individual prediction performance."""
+        if model_name not in self.model_metrics:
+            self.model_metrics[model_name] = {
+                "predictions": [],
+                "latencies": [],
+                "errors": [],
+                "circuit_breaker_opens": 0
+            }
+
+        # Calculate accuracy metrics
+        error = abs(actual_value - predicted_value)
+        relative_error = error / max(abs(actual_value), 1.0)
+
+        # Store metrics
+        metrics = self.model_metrics[model_name]
+        metrics["predictions"].append({
+            "timestamp": datetime.now(UTC),
+            "actual": actual_value,
+            "predicted": predicted_value,
+            "error": error,
+            "relative_error": relative_error
+        })
+
+        metrics["latencies"].append(prediction_time_ms)
+
+        # Keep only last 1000 predictions for memory management
+        if len(metrics["predictions"]) > 1000:
+            metrics["predictions"] = metrics["predictions"][-1000:]
+            metrics["latencies"] = metrics["latencies"][-1000:]
+
+    def get_model_health(self, model_name: str) -> dict:
+        """Get comprehensive model health metrics."""
+        if model_name not in self.model_metrics:
+            return {"status": "no_data", "health_score": 0.0}
+
+        metrics = self.model_metrics[model_name]
+        recent_predictions = metrics["predictions"][-100:]  # Last 100 predictions
+        recent_latencies = metrics["latencies"][-100:]
+
+        if not recent_predictions:
+            return {"status": "insufficient_data", "health_score": 0.0}
+
+        # Calculate health metrics
+        avg_relative_error = np.mean([p["relative_error"] for p in recent_predictions])
+        accuracy = max(0.0, 1.0 - avg_relative_error)  # Simple accuracy metric
+        avg_latency = np.mean(recent_latencies)
+
+        # Determine health status
+        health_score = 0.0
+        status = "healthy"
+
+        # Accuracy component (40% weight)
+        if accuracy >= self.performance_thresholds["accuracy"]:
+            health_score += 0.4
+        else:
+            health_score += 0.4 * (accuracy / self.performance_thresholds["accuracy"])
+            if accuracy < 0.7:
+                status = "degraded"
+
+        # Latency component (30% weight)
+        if avg_latency <= self.performance_thresholds["latency_ms"]:
+            health_score += 0.3
+        else:
+            health_score += 0.3 * (self.performance_thresholds["latency_ms"] / avg_latency)
+            if avg_latency > self.performance_thresholds["latency_ms"] * 2:
+                status = "degraded"
+
+        # Error rate component (30% weight)
+        error_rate = len([p for p in recent_predictions if p["relative_error"] > 0.2]) / len(recent_predictions)
+        if error_rate <= self.performance_thresholds["error_rate"]:
+            health_score += 0.3
+        else:
+            health_score += 0.3 * (1.0 - min(1.0, error_rate))
+            if error_rate > 0.15:
+                status = "degraded"
+
+        # Determine final status
+        if health_score < 0.5:
+            status = "unhealthy"
+        elif health_score < 0.8:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "health_score": round(health_score, 3),
+            "accuracy": round(accuracy, 3),
+            "avg_latency_ms": round(avg_latency, 2),
+            "error_rate": round(error_rate, 3),
+            "sample_size": len(recent_predictions),
+            "circuit_breaker_opens": metrics.get("circuit_breaker_opens", 0)
+        }
+
+    def should_circuit_break(self, model_name: str) -> bool:
+        """Determine if model should be circuit-broken based on performance."""
+        health = self.get_model_health(model_name)
+
+        # Circuit break if health score is too low or status is unhealthy
+        should_break = (
+            health["health_score"] < 0.3 or
+            health["status"] == "unhealthy" or
+            health["error_rate"] > 0.25  # 25% error rate
+        )
+
+        if should_break and model_name not in self.circuit_breaker_status:
+            self.circuit_breaker_status[model_name] = {
+                "opened_at": datetime.now(UTC),
+                "failure_count": 0
+            }
+
+            if model_name in self.model_metrics:
+                self.model_metrics[model_name]["circuit_breaker_opens"] += 1
+
+            logger.warning(f"Circuit breaker opened for model {model_name}: {health}")
+
+        return should_break
+
+    def reset_circuit_breaker(self, model_name: str):
+        """Reset circuit breaker for model after recovery."""
+        if model_name in self.circuit_breaker_status:
+            del self.circuit_breaker_status[model_name]
+            logger.info(f"Circuit breaker reset for model {model_name}")
 
 class PredictionService:
     """Traffic prediction service with ML pipeline integration."""
@@ -658,7 +667,6 @@ class PredictionService:
         self, camera_id: str, start_time: datetime, end_time: datetime
     ) -> list[dict[str, Any]]:
         """Generate mock historical data for demonstration."""
-        import random
 
         data = []
         current_time = start_time

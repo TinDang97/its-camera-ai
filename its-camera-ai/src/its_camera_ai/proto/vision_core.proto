@@ -1,0 +1,700 @@
+// Unified Vision Core gRPC Service Definition
+// 
+// This service provides a unified interface combining ML inference (YOLO11) 
+// with real-time analytics processing for high-performance computer vision
+// applications.
+//
+// Features:
+// - Single RPC call for inference + analytics
+// - Bidirectional streaming for real-time camera feeds
+// - Batch processing for optimal GPU utilization
+// - Metadata-rich responses with quality scores
+// - Support for 1000+ concurrent camera streams
+
+syntax = "proto3";
+
+package its_camera_ai.vision_core;
+
+import "google/protobuf/timestamp.proto";
+
+// Unified Vision Core Service
+service VisionCoreService {
+    // Process single frame with unified inference and analytics
+    rpc ProcessFrame(FrameRequest) returns (VisionResult);
+    
+    // Process batch of frames for optimal GPU utilization
+    rpc ProcessFrameBatch(FrameBatchRequest) returns (VisionBatchResult);
+    
+    // Bidirectional streaming for real-time camera processing
+    rpc ProcessCameraStream(stream CameraStreamRequest) returns (stream CameraStreamResult);
+    
+    // Get engine health and performance metrics
+    rpc GetEngineHealth(HealthRequest) returns (HealthResponse);
+    
+    // Get comprehensive performance metrics
+    rpc GetEngineMetrics(MetricsRequest) returns (MetricsResponse);
+}
+
+// Frame processing request
+message FrameRequest {
+    // Frame data (encoded as JPEG/PNG or raw bytes)
+    bytes frame_data = 1;
+    
+    // Frame metadata
+    string camera_id = 2;
+    string frame_id = 3;
+    google.protobuf.Timestamp timestamp = 4;
+    
+    // Processing options
+    ProcessingOptions options = 5;
+    
+    // Request priority (0=normal, 1=high, 2=emergency)
+    int32 priority = 6;
+    
+    // Frame format info
+    FrameFormat format = 7;
+}
+
+// Batch frame processing request
+message FrameBatchRequest {
+    // Multiple frames to process
+    repeated FrameRequest frames = 1;
+    
+    // Batch processing options
+    ProcessingOptions options = 2;
+    
+    // Maximum processing time in milliseconds
+    int32 max_processing_time_ms = 3;
+}
+
+// Camera stream request (for bidirectional streaming)
+message CameraStreamRequest {
+    oneof request_type {
+        // Initialize camera stream
+        CameraStreamInit init = 1;
+        
+        // Frame data for processing
+        FrameRequest frame = 2;
+        
+        // Stream control message
+        StreamControl control = 3;
+    }
+}
+
+// Camera stream initialization
+message CameraStreamInit {
+    string camera_id = 1;
+    string stream_id = 2;
+    ProcessingOptions options = 3;
+    FrameFormat format = 4;
+}
+
+// Stream control messages
+message StreamControl {
+    enum ControlType {
+        PAUSE = 0;
+        RESUME = 1;
+        STOP = 2;
+        UPDATE_OPTIONS = 3;
+    }
+    
+    ControlType type = 1;
+    ProcessingOptions updated_options = 2;
+}
+
+// Processing options
+message ProcessingOptions {
+    // Include full analytics processing
+    bool include_analytics = 1;
+    
+    // Include quality score calculation
+    bool include_quality_score = 2;
+    
+    // Include frame annotation overlay
+    bool include_frame_annotation = 3;
+    
+    // Include metadata track for MP4 encoding
+    bool include_metadata_track = 4;
+    
+    // Model version to use (optional, uses active if not specified)
+    string model_version = 5;
+    
+    // Confidence threshold for detections
+    float confidence_threshold = 6;
+    
+    // Maximum number of detections to return
+    int32 max_detections = 7;
+    
+    // Analytics configuration
+    AnalyticsConfig analytics_config = 8;
+}
+
+// Analytics processing configuration
+message AnalyticsConfig {
+    bool enable_anomaly_detection = 1;
+    bool enable_incident_detection = 2;
+    bool enable_rule_evaluation = 3;
+    bool enable_speed_calculation = 4;
+    bool enable_tracking = 5;
+    
+    // Speed calculation parameters
+    SpeedCalcConfig speed_config = 6;
+}
+
+// Speed calculation configuration
+message SpeedCalcConfig {
+    // Camera calibration data
+    CameraCalibration calibration = 1;
+    
+    // Speed calculation method
+    enum SpeedMethod {
+        OPTICAL_FLOW = 0;
+        FEATURE_TRACKING = 1;
+        REGRESSION = 2;
+    }
+    SpeedMethod method = 2;
+    
+    // Smoothing window size
+    int32 smoothing_window = 3;
+}
+
+// Camera calibration data
+message CameraCalibration {
+    // Camera intrinsic parameters
+    repeated double camera_matrix = 1;  // 3x3 matrix
+    repeated double distortion_coeffs = 2;  // 5 coefficients
+    
+    // Perspective transformation
+    repeated double perspective_matrix = 3;  // 3x3 matrix
+    
+    // Real-world scale (pixels per meter)
+    double pixels_per_meter = 4;
+    
+    // Camera height above ground (meters)
+    double camera_height_m = 5;
+}
+
+// Frame format information
+message FrameFormat {
+    enum ImageFormat {
+        JPEG = 0;
+        PNG = 1;
+        RAW_RGB = 2;
+        RAW_BGR = 3;
+    }
+    
+    ImageFormat format = 1;
+    int32 width = 2;
+    int32 height = 3;
+    int32 channels = 4;
+}
+
+// Unified vision processing result
+message VisionResult {
+    // Processing metadata
+    string frame_id = 1;
+    string camera_id = 2;
+    google.protobuf.Timestamp timestamp = 3;
+    
+    // Timing information
+    ProcessingTiming timing = 4;
+    
+    // ML inference results
+    InferenceResult inference = 5;
+    
+    // Analytics results
+    AnalyticsResult analytics = 6;
+    
+    // Quality assessment
+    QualityScore quality = 7;
+    
+    // Optional annotated frame
+    bytes annotated_frame = 8;
+    
+    // Metadata track for MP4 encoding
+    MetadataTrack metadata_track = 9;
+    
+    // Processing status
+    ProcessingStatus status = 10;
+}
+
+// Batch processing result
+message VisionBatchResult {
+    // Individual results
+    repeated VisionResult results = 1;
+    
+    // Batch processing statistics
+    BatchStats batch_stats = 2;
+}
+
+// Camera stream processing result
+message CameraStreamResult {
+    oneof result_type {
+        // Processing result
+        VisionResult vision_result = 1;
+        
+        // Stream status update
+        StreamStatus status = 2;
+        
+        // Error message
+        StreamError error = 3;
+    }
+}
+
+// Processing timing information
+message ProcessingTiming {
+    // Inference time in milliseconds
+    double inference_time_ms = 1;
+    
+    // Analytics processing time
+    double analytics_time_ms = 2;
+    
+    // Queue waiting time
+    double queue_time_ms = 3;
+    
+    // Total processing time
+    double total_time_ms = 4;
+    
+    // Batch size used
+    int32 batch_size = 5;
+}
+
+// ML inference result
+message InferenceResult {
+    // Model information
+    string model_name = 1;
+    string model_version = 2;
+    
+    // Detected objects
+    repeated Detection detections = 3;
+    
+    // Overall confidence score
+    double overall_confidence = 4;
+    
+    // Inference statistics
+    InferenceStats stats = 5;
+}
+
+// Object detection
+message Detection {
+    // Bounding box coordinates (normalized 0-1)
+    BoundingBox bbox = 1;
+    
+    // Object classification
+    string class_name = 2;
+    int32 class_id = 3;
+    double confidence = 4;
+    
+    // Object tracking
+    int32 tracking_id = 5;
+    TrackingState tracking_state = 6;
+    
+    // Object attributes
+    ObjectAttributes attributes = 7;
+}
+
+// Bounding box
+message BoundingBox {
+    double x_min = 1;
+    double y_min = 2;
+    double x_max = 3;
+    double y_max = 4;
+    
+    // Confidence in bounding box accuracy
+    double bbox_confidence = 5;
+}
+
+// Object tracking state
+enum TrackingState {
+    NEW = 0;
+    TRACKED = 1;
+    LOST = 2;
+    REMOVED = 3;
+}
+
+// Object attributes
+message ObjectAttributes {
+    // Vehicle attributes
+    VehicleAttributes vehicle = 1;
+    
+    // Speed information
+    SpeedInfo speed = 2;
+    
+    // Color information
+    string color = 3;
+    
+    // Size category
+    string size_category = 4;
+}
+
+// Vehicle-specific attributes
+message VehicleAttributes {
+    string vehicle_type = 1;  // car, truck, motorcycle, bus, etc.
+    string make = 2;
+    string model = 3;
+    string license_plate = 4;
+    
+    // Vehicle state
+    bool is_parked = 5;
+    bool is_moving = 6;
+}
+
+// Speed information
+message SpeedInfo {
+    double speed_kmh = 1;
+    double speed_confidence = 2;
+    
+    // Direction vector (normalized)
+    double direction_x = 3;
+    double direction_y = 4;
+    
+    // Speed calculation method used
+    string calculation_method = 5;
+}
+
+// Analytics processing result
+message AnalyticsResult {
+    // Traffic metrics
+    TrafficMetrics traffic = 1;
+    
+    // Violations detected
+    repeated Violation violations = 2;
+    
+    // Anomalies detected
+    repeated Anomaly anomalies = 3;
+    
+    // Incidents detected
+    repeated Incident incidents = 4;
+    
+    // Rule evaluation results
+    repeated RuleResult rule_results = 5;
+}
+
+// Traffic metrics
+message TrafficMetrics {
+    // Count metrics
+    int32 total_vehicle_count = 1;
+    int32 vehicle_count_by_type = 2;  // TODO: Make this a map
+    
+    // Speed metrics
+    double average_speed_kmh = 3;
+    double speed_variance = 4;
+    
+    // Flow metrics
+    double flow_rate_vehicles_per_minute = 5;
+    double occupancy_rate_percent = 6;
+    
+    // Congestion metrics
+    string congestion_level = 7;  // light, moderate, heavy, severe
+    double congestion_score = 8;
+}
+
+// Traffic violation
+message Violation {
+    string violation_type = 1;  // speeding, wrong_lane, etc.
+    string description = 2;
+    double severity = 3;
+    
+    // Associated detection
+    int32 detection_id = 4;
+    
+    // Violation location
+    BoundingBox location = 5;
+    
+    // Evidence
+    bytes evidence_frame = 6;
+    string evidence_metadata = 7;
+}
+
+// Traffic anomaly
+message Anomaly {
+    string anomaly_type = 1;
+    string description = 2;
+    double anomaly_score = 3;
+    
+    // Anomaly location
+    BoundingBox location = 4;
+    
+    // Time series data leading to anomaly
+    repeated double time_series = 5;
+}
+
+// Traffic incident
+message Incident {
+    string incident_type = 1;  // accident, breakdown, congestion
+    string description = 2;
+    double severity = 3;
+    
+    // Incident location
+    BoundingBox location = 4;
+    
+    // Involved objects
+    repeated int32 involved_detection_ids = 5;
+    
+    // Confidence in incident detection
+    double confidence = 6;
+}
+
+// Rule evaluation result
+message RuleResult {
+    string rule_name = 1;
+    string rule_type = 2;
+    bool triggered = 3;
+    double confidence = 4;
+    
+    // Rule parameters
+    map<string, string> parameters = 5;
+    
+    // Associated detections
+    repeated int32 detection_ids = 6;
+}
+
+// Quality score assessment
+message QualityScore {
+    // Overall quality score (0-1)
+    double overall_score = 1;
+    
+    // Component scores
+    QualityComponents components = 2;
+    
+    // Quality factors
+    repeated QualityFactor factors = 3;
+}
+
+// Quality score components
+message QualityComponents {
+    double sharpness_score = 1;
+    double brightness_score = 2;
+    double contrast_score = 3;
+    double noise_score = 4;
+    double motion_blur_score = 5;
+    double lighting_score = 6;
+    double occlusion_score = 7;
+    double resolution_score = 8;
+}
+
+// Quality factor
+message QualityFactor {
+    string factor_name = 1;
+    double score = 2;
+    string description = 3;
+}
+
+// Metadata track for MP4 encoding
+message MetadataTrack {
+    // JSON-encoded metadata
+    string metadata_json = 1;
+    
+    // Binary metadata (if needed)
+    bytes metadata_binary = 2;
+    
+    // Timestamp for this metadata
+    google.protobuf.Timestamp timestamp = 3;
+    
+    // Metadata type
+    string metadata_type = 4;
+}
+
+// Processing status
+message ProcessingStatus {
+    enum StatusCode {
+        SUCCESS = 0;
+        PARTIAL_SUCCESS = 1;
+        FAILED = 2;
+        TIMEOUT = 3;
+        OVERLOADED = 4;
+    }
+    
+    StatusCode code = 1;
+    string message = 2;
+    
+    // Warnings or additional info
+    repeated string warnings = 3;
+}
+
+// Batch processing statistics
+message BatchStats {
+    int32 total_frames = 1;
+    int32 successful_frames = 2;
+    int32 failed_frames = 3;
+    
+    double total_processing_time_ms = 4;
+    double average_processing_time_ms = 5;
+    
+    // GPU utilization during batch
+    double gpu_utilization_percent = 6;
+    
+    // Memory usage
+    double memory_usage_mb = 7;
+}
+
+// Inference statistics
+message InferenceStats {
+    double preprocessing_time_ms = 1;
+    double inference_time_ms = 2;
+    double postprocessing_time_ms = 3;
+    
+    int32 total_detections = 4;
+    int32 filtered_detections = 5;
+    
+    // GPU information
+    string gpu_device = 6;
+    double gpu_memory_used_mb = 7;
+}
+
+// Stream status
+message StreamStatus {
+    string stream_id = 1;
+    string camera_id = 2;
+    
+    enum StreamState {
+        INITIALIZED = 0;
+        RUNNING = 1;
+        PAUSED = 2;
+        STOPPED = 3;
+        ERROR = 4;
+    }
+    
+    StreamState state = 3;
+    string message = 4;
+    
+    // Stream statistics
+    StreamStats stats = 5;
+}
+
+// Stream statistics
+message StreamStats {
+    int64 frames_processed = 1;
+    int64 frames_dropped = 2;
+    
+    double average_fps = 3;
+    double current_fps = 4;
+    
+    double average_latency_ms = 5;
+    double p95_latency_ms = 6;
+}
+
+// Stream error
+message StreamError {
+    string stream_id = 1;
+    string camera_id = 2;
+    
+    enum ErrorCode {
+        UNKNOWN_ERROR = 0;
+        PROCESSING_ERROR = 1;
+        TIMEOUT_ERROR = 2;
+        RESOURCE_ERROR = 3;
+        FORMAT_ERROR = 4;
+    }
+    
+    ErrorCode code = 3;
+    string message = 4;
+    
+    // Whether the stream can recover
+    bool recoverable = 5;
+}
+
+// Health check request
+message HealthRequest {
+    // Optional: specific component to check
+    string component = 1;
+}
+
+// Health check response
+message HealthResponse {
+    enum HealthStatus {
+        HEALTHY = 0;
+        DEGRADED = 1;
+        UNHEALTHY = 2;
+        ERROR = 3;
+    }
+    
+    HealthStatus status = 1;
+    string message = 2;
+    
+    // Component health details
+    map<string, ComponentHealth> components = 3;
+    
+    // System metrics
+    SystemMetrics system_metrics = 4;
+}
+
+// Component health
+message ComponentHealth {
+    HealthResponse.HealthStatus status = 1;
+    string message = 2;
+    
+    // Component-specific metrics
+    map<string, double> metrics = 3;
+}
+
+// System metrics
+message SystemMetrics {
+    // Processing metrics
+    double avg_processing_time_ms = 1;
+    double p95_processing_time_ms = 2;
+    double p99_processing_time_ms = 3;
+    
+    // Throughput metrics
+    double requests_per_second = 4;
+    double frames_per_second = 5;
+    
+    // Queue metrics
+    int32 total_queue_depth = 6;
+    double avg_queue_time_ms = 7;
+    
+    // Resource metrics
+    double cpu_usage_percent = 8;
+    double memory_usage_mb = 9;
+    double gpu_usage_percent = 10;
+    double gpu_memory_usage_mb = 11;
+    
+    // Error rates
+    double error_rate_percent = 12;
+    int64 total_requests = 13;
+    int64 failed_requests = 14;
+}
+
+// Metrics request
+message MetricsRequest {
+    // Time range for metrics (optional)
+    google.protobuf.Timestamp start_time = 1;
+    google.protobuf.Timestamp end_time = 2;
+    
+    // Specific metrics to include
+    repeated string metric_names = 3;
+    
+    // Granularity for time-series metrics
+    string granularity = 4;  // minute, hour, day
+}
+
+// Metrics response
+message MetricsResponse {
+    // Current metrics snapshot
+    SystemMetrics current_metrics = 1;
+    
+    // Historical time-series data
+    repeated MetricDataPoint time_series = 2;
+    
+    // Engine-specific metrics
+    map<string, EngineMetrics> engine_metrics = 3;
+}
+
+// Time-series metric data point
+message MetricDataPoint {
+    google.protobuf.Timestamp timestamp = 1;
+    map<string, double> values = 2;
+}
+
+// Engine-specific metrics
+message EngineMetrics {
+    string engine_name = 1;
+    string engine_version = 2;
+    
+    // Engine performance
+    double utilization_percent = 3;
+    int64 processed_requests = 4;
+    
+    // Engine-specific data
+    map<string, double> custom_metrics = 5;
+}

@@ -1,0 +1,203 @@
+# Kafka SSE Integration Configuration
+# Copy to kafka_sse_config.yaml and customize for your environment
+
+# Kafka Producer Configuration
+kafka_producer:
+  bootstrap_servers: 
+    - "localhost:9092"
+    # - "kafka-broker-1:9092"
+    # - "kafka-broker-2:9092"
+  topic_prefix: "its-camera-ai"
+  partition_count: 12
+  batch_size: 16384
+  linger_ms: 5
+  compression_type: "snappy"  # none, gzip, snappy, lz4, zstd
+  acks: 1  # 0=no ack, 1=leader ack, -1=all replicas ack
+  retries: 3
+  enable_idempotence: true
+
+# Kafka Consumer Configuration for SSE Streaming
+kafka_consumer:
+  bootstrap_servers:
+    - "localhost:9092"
+  topic_prefix: "its-camera-ai"
+  consumer_group_id: "sse-streaming"
+  auto_offset_reset: "latest"  # earliest, latest
+  enable_auto_commit: true
+  auto_commit_interval_ms: 5000
+  max_poll_records: 500
+  session_timeout_ms: 30000
+  heartbeat_interval_ms: 3000
+  max_events_per_second: 50  # Per connection rate limit
+
+# Event Filters for Kafka Analytics Connector
+kafka_event_filters:
+  min_confidence: 0.5  # Minimum confidence for detection events
+  min_fps: 10  # Minimum FPS for health alerts
+  max_event_age_seconds: 300  # Drop events older than 5 minutes
+
+# Real-time Streaming Service Configuration
+realtime_streaming:
+  health_check_interval: 30.0  # Health check every 30 seconds
+  auto_restart_on_failure: true
+  max_restart_attempts: 3
+  
+  # Connection management
+  max_concurrent_connections: 200
+  connection_timeout_seconds: 60
+  
+  # Performance tuning
+  event_batch_size: 100
+  processing_timeout_ms: 5000
+  
+  # Monitoring
+  metrics_collection_interval: 60.0  # Collect metrics every minute
+  log_performance_stats: true
+
+# SSE Broadcaster Configuration
+sse_streaming:
+  max_connections: 200
+  max_global_events_per_second: 500
+  connection_cleanup_interval: 30.0
+  max_history_size: 1000
+  
+  # Rate limiting per connection
+  default_events_per_second: 10
+  detection_events_per_second: 15
+  system_events_per_second: 20
+  analytics_events_per_second: 25
+  
+  # Connection management
+  ping_interval: 30.0  # Send ping every 30 seconds
+  connection_timeout: 60.0  # Close stale connections after 60 seconds
+  queue_size_limit: 1000  # Max events queued per connection
+
+# Topic Configuration
+topics:
+  # Detection topics
+  detections:
+    vehicles: "its-camera-ai.detections.vehicles"
+    violations: "its-camera-ai.violations.traffic"
+    incidents: "its-camera-ai.incidents"
+  
+  # Camera topics  
+  cameras:
+    status: "its-camera-ai.cameras.status"
+    health: "its-camera-ai.cameras.health"
+    config: "its-camera-ai.cameras.config"
+  
+  # System topics
+  system:
+    alerts: "its-camera-ai.system.alerts"
+    metrics: "its-camera-ai.system.metrics"
+    deployments: "its-camera-ai.system.deployments"
+  
+  # Analytics topics
+  analytics:
+    traffic_flow: "its-camera-ai.analytics.traffic-flow"
+    zones: "its-camera-ai.analytics.zones"  
+    speed: "its-camera-ai.analytics.speed"
+
+# Environment-specific overrides
+environments:
+  development:
+    kafka_producer:
+      bootstrap_servers: ["localhost:9092"]
+      topic_prefix: "dev-its-camera-ai"
+    kafka_consumer:
+      bootstrap_servers: ["localhost:9092"]
+      topic_prefix: "dev-its-camera-ai"
+      auto_offset_reset: "earliest"
+    realtime_streaming:
+      health_check_interval: 10.0
+      auto_restart_on_failure: true
+    sse_streaming:
+      max_connections: 50
+      
+  staging:
+    kafka_producer:
+      bootstrap_servers: ["kafka-staging:9092"]
+      topic_prefix: "staging-its-camera-ai" 
+      acks: -1  # Wait for all replicas
+    kafka_consumer:
+      bootstrap_servers: ["kafka-staging:9092"]
+      topic_prefix: "staging-its-camera-ai"
+    realtime_streaming:
+      max_restart_attempts: 5
+    sse_streaming:
+      max_connections: 100
+      
+  production:
+    kafka_producer:
+      bootstrap_servers: 
+        - "kafka-prod-1:9092"
+        - "kafka-prod-2:9092"
+        - "kafka-prod-3:9092"
+      topic_prefix: "its-camera-ai"
+      acks: -1  # Wait for all replicas
+      retries: 5
+      compression_type: "zstd"
+    kafka_consumer:
+      bootstrap_servers:
+        - "kafka-prod-1:9092"
+        - "kafka-prod-2:9092" 
+        - "kafka-prod-3:9092"
+      topic_prefix: "its-camera-ai"
+      session_timeout_ms: 60000
+    realtime_streaming:
+      health_check_interval: 60.0
+      max_restart_attempts: 10
+    sse_streaming:
+      max_connections: 500
+      max_global_events_per_second: 1000
+
+# Security Configuration (for production)
+security:
+  kafka:
+    # SSL Configuration
+    security_protocol: "SSL"  # PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
+    ssl_ca_location: "/path/to/ca-cert"
+    ssl_certificate_location: "/path/to/client-cert" 
+    ssl_key_location: "/path/to/client-key"
+    
+    # SASL Configuration
+    sasl_mechanism: "PLAIN"  # PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+    sasl_username: "your-username"
+    sasl_password: "your-password"
+  
+  sse:
+    # CORS Configuration
+    allow_origins: ["*"]  # Restrict in production
+    allow_credentials: true
+    
+    # Rate limiting
+    enable_rate_limiting: true
+    rate_limit_storage: "redis"  # memory, redis
+    
+    # Authentication
+    require_authentication: true
+    jwt_secret: "your-jwt-secret"
+
+# Monitoring and Observability
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+    format: "json"  # text, json
+    kafka_events: true  # Log Kafka events
+    sse_events: false  # Log SSE events (verbose)
+    
+  tracing:
+    enabled: true
+    service_name: "its-camera-ai-streaming"
+    jaeger_endpoint: "http://jaeger:14268/api/traces"
+    
+  health_checks:
+    enabled: true
+    endpoint: "/health"
+    detailed_checks: true
+    timeout_seconds: 5

@@ -1,0 +1,123 @@
+@startuml ITS_Camera_AI_Analytics_Service
+!include <c4/C4_Component>
+
+title ITS Camera AI Analytics Service - Component Architecture (Level 3)
+
+System_Boundary(its_system, "ITS Camera AI System") {
+
+    Container_Boundary(ml_pipeline, "ML Processing Pipeline", "PyTorch/YOLO11/CUDA") {
+        Component(batch_processor, "SmartBatchProcessor", "PyTorch/AsyncIO", "Intelligent batch processing with adaptive sizing\n• Dynamic batch: 1-32 frames\n• GPU memory optimization: >95%\n• Timeout cascade: <80ms ML budget\n• Backpressure control with 1000 queue")
+        
+        Component(quality_calc, "QualityScoreCalculator", "OpenCV/NumPy/CuPy", "Multi-factor quality assessment\n• Detection confidence: 40%\n• Image quality: 30% (blur, brightness)\n• Model uncertainty: 20%\n• Temporal consistency: 10%\n• <5ms processing time")
+        
+        Component(model_metrics, "ModelMetricsService", "Prometheus/StatTracker", "ML model performance tracking\n• Drift detection (KL divergence)\n• Real-time performance monitoring\n• Memory usage optimization\n• A/B testing metrics")
+    }
+
+    Container_Boundary(analytics_core, "Analytics Core Engine", "FastAPI/AsyncIO/Redis") {
+        Component(ml_connector, "MLAnalyticsConnector", "AsyncIO/Redis/DI", "Critical high-performance data pipeline\n• <100ms end-to-end latency guarantee\n• Async batch processing with backpressure\n• Camera-based grouping for parallel processing\n• Real-time Redis pub/sub integration\n• 1000-item queue with timeout management")
+        
+        Component(unified_analytics, "UnifiedAnalyticsService", "AsyncIO/Comprehensive", "Central analytics orchestrator\n• Real-time analytics processing\n• Incident detection and classification\n• Traffic rule evaluation engine\n• Speed calculation and tracking\n• Anomaly detection (isolation forest)")
+        
+        Component(aggregation_service, "AnalyticsAggregationService", "TimescaleDB/Stats", "Time-series data aggregation\n• Multi-level statistical analysis\n• Data quality assessment\n• Performance benchmarking\n• Historical trend analysis")
+        
+        Component(prediction_service, "PredictionService", "ML/scikit-learn", "Traffic prediction ML pipeline\n• Multiple horizons: 15min, 1hr, 4hr, 24hr\n• Feature engineering (temporal/traffic/lag)\n• A/B testing with model registry\n• Confidence intervals with statistical analysis\n• Fallback mechanisms for reliability")
+    }
+
+    Container_Boundary(data_layer, "Data & Cache Layer", "Repository Pattern/Redis/PostgreSQL") {
+        Component(analytics_repo, "AnalyticsRepository", "SQLAlchemy/AsyncPG", "Data persistence and retrieval\n• Async database operations\n• Query optimization\n• Connection pooling\n• Transaction management")
+        
+        Component(cache_service, "CacheService", "Redis/Multi-level", "High-performance caching system\n• L1: In-memory caching\n• L2: Redis distributed cache\n• TTL management (5min-24hr)\n• Cache warming and precomputation")
+    }
+
+    Container_Boundary(infrastructure, "External Infrastructure", "Managed Services") {
+        ComponentDb(timescale_db, "TimescaleDB", "Time-series Database", "High-performance time-series storage\n• Hypertables for analytics data\n• Continuous aggregates\n• Data retention policies\n• Query optimization")
+        
+        ComponentDb(postgres_db, "PostgreSQL", "Primary Database", "Relational data storage\n• Camera configurations\n• User management\n• System metadata\n• ACID transactions")
+        
+        ComponentDb(redis_db, "Redis Cluster", "Cache & Pub/Sub", "In-memory data structure store\n• Real-time pub/sub channels\n• Distributed caching\n• Session storage\n• Rate limiting")
+        
+        Component(prometheus, "Prometheus", "Metrics Collection", "Time-series metrics database\n• System performance monitoring\n• Custom business metrics\n• Alert rule evaluation\n• Dashboard data source")
+    }
+}
+
+' Data Flow Relationships with Performance Annotations
+Rel(batch_processor, quality_calc, "Frame quality assessment", "<5ms per detection")
+Rel(batch_processor, ml_connector, "ML detection outputs", "<80ms ML processing budget")
+Rel(ml_connector, unified_analytics, "DetectionResultDTO conversion", "<20ms analytics budget")
+Rel(unified_analytics, aggregation_service, "Metrics aggregation request", "async processing")
+Rel(unified_analytics, prediction_service, "Historical data request", "cached responses")
+
+' Infrastructure Integration
+Rel(ml_connector, redis_db, "Real-time pub/sub channels", "ml:detections:{camera_id}")
+Rel(aggregation_service, timescale_db, "Time-series analytics queries", "<50ms query response")
+Rel(analytics_repo, postgres_db, "Data persistence operations", "async with connection pool")
+Rel(cache_service, redis_db, "Multi-level caching operations", "<1ms cache hits")
+Rel(model_metrics, prometheus, "Performance metrics export", "push gateway integration")
+
+' Performance Optimization Flows
+Rel(quality_calc, cache_service, "Quality score caching", "5min TTL")
+Rel(model_metrics, batch_processor, "Performance feedback loop", "<1ms overhead")
+Rel(prediction_service, cache_service, "Prediction result caching", "30min-2hr variable TTL")
+
+' Internal Queue and Backpressure Management
+Rel(ml_connector, ml_connector, "Internal queue management", "1000 max capacity\nBackpressure control\nTimeout cascade")
+
+' Performance and Reliability Annotations
+note top of ml_connector
+  **Critical Performance SLA:**
+  • Total latency: <100ms (99th percentile)
+  • ML processing: <80ms allocation
+  • Analytics: <20ms allocation
+  • Throughput: 30+ FPS per camera
+  • Queue depth: <1000 items
+  • GPU utilization: >95%
+  • Error rate: <0.1%
+end note
+
+note top of batch_processor
+  **Adaptive GPU Optimization:**
+  • Dynamic batch sizing (1-32 frames)
+  • Multi-GPU load balancing
+  • Memory pool management
+  • Priority queuing system
+  • Zero-copy tensor operations
+  • Device affinity optimization
+end note
+
+note top of prediction_service
+  **ML Prediction Capabilities:**
+  • Short-term: RandomForest (15min-4hr)
+  • Long-term: LinearRegression (24hr)
+  • Feature engineering: 20+ dimensions
+  • Model registry with versioning
+  • A/B testing framework
+  • Fallback statistical models
+end note
+
+note top of cache_service
+  **Multi-Level Cache Strategy:**
+  • L1: In-memory (microsecond access)
+  • L2: Redis cluster (millisecond access)
+  • TTL optimization by data type:
+    - Quality scores: 5min
+    - Predictions: 30min-2hr
+    - Analytics: 5min
+    - Model baselines: 24hr
+end note
+
+' System Boundaries and Scaling Notes
+note right of infrastructure
+  **Horizontal Scaling Strategy:**
+  • TimescaleDB: Sharding by camera_id
+  • Redis: Cluster mode with consistent hashing
+  • PostgreSQL: Read replicas for analytics
+  • Prometheus: Federation for multi-region
+  
+  **Reliability Patterns:**
+  • Circuit breakers for external dependencies
+  • Graceful degradation under load
+  • Health checks with automatic recovery
+  • Backup processing pipelines
+end note
+
+@enduml

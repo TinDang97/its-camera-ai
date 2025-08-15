@@ -272,9 +272,22 @@ class ServiceContainer(containers.DeclarativeContainer):
         settings=config,
     )
 
+    # Prediction Service - Factory for ML predictions
+    prediction_service = providers.Factory(
+        "its_camera_ai.services.prediction_service.PredictionService",
+        cache_service=cache_service,
+        settings=config,
+    )
+
     # Unified Analytics Service - Factory for comprehensive analytics
     unified_analytics_service = providers.Factory(
         "its_camera_ai.services.unified_analytics_service.UnifiedAnalyticsService",
+        aggregation_service=analytics_aggregation_service,
+        incident_detection_service=incident_detection_service,
+        traffic_rule_service=traffic_rule_service,
+        speed_calculation_service=speed_calculation_service,
+        anomaly_detection_service=anomaly_detection_service,
+        prediction_service=prediction_service,
         analytics_repository=repositories.analytics_repository,
         cache_service=cache_service,
         settings=config,
@@ -288,18 +301,86 @@ class ServiceContainer(containers.DeclarativeContainer):
         settings=config,
     )
 
-    # Prediction Service - Factory for ML predictions
-    prediction_service = providers.Factory(
-        "its_camera_ai.services.prediction_service.PredictionService",
-        cache_service=cache_service,
-        settings=config,
-    )
-
     # Alert Service - Factory for per-request instances
     alert_service = providers.Factory(
         "its_camera_ai.services.alert_service.AlertService",
         alert_repository=repositories.alert_repository,
         settings=config,
+    )
+
+    # ML Pipeline Integration Services
+
+    # ML Analytics Connector - Singleton for shared processing state
+    ml_analytics_connector = providers.Singleton(
+        "its_camera_ai.services.ml_analytics_connector.MLAnalyticsConnector",
+        # Note: batch_processor would be injected when ML module is available
+        unified_analytics=unified_analytics_service,
+        redis_client=infrastructure.redis_client,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Quality Score Calculator - Singleton for shared caching
+    quality_score_calculator = providers.Singleton(
+        "its_camera_ai.ml.quality_score_calculator.QualityScoreCalculator",
+        cache_service=cache_service,
+    )
+
+    # Model Metrics Service - Singleton for metrics tracking
+    model_metrics_service = providers.Singleton(
+        "its_camera_ai.services.model_metrics_service.ModelMetricsService",
+        analytics_repository=repositories.analytics_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Kafka Event Producer - Singleton for shared Kafka connection
+    kafka_event_producer = providers.Singleton(
+        "its_camera_ai.services.kafka_event_producer.KafkaEventProducer",
+        config=config.kafka_producer,
+    )
+
+    # SSE Broadcaster - Singleton for managing SSE connections
+    sse_broadcaster = providers.Singleton(
+        "its_camera_ai.api.sse_broadcaster.get_broadcaster",
+        kafka_config=config.kafka_consumer,
+    )
+
+    # Kafka SSE Consumer - Singleton for consuming events for SSE streaming
+    kafka_sse_consumer = providers.Singleton(
+        "its_camera_ai.services.kafka_sse_consumer.KafkaSSEConsumer",
+        config=config.kafka_consumer,
+        sse_broadcaster=sse_broadcaster,
+    )
+
+    # Kafka Analytics Connector - Enhanced with SSE integration
+    kafka_analytics_connector = providers.Singleton(
+        "its_camera_ai.integrations.kafka_analytics_connector.KafkaAnalyticsConnector",
+        kafka_config=config.kafka_producer,
+        event_filters=config.kafka_event_filters,
+    )
+
+    # MP4 Streaming Components
+
+    # Fragmented MP4 Encoder Factory - Creates encoders for individual cameras
+    fragmented_mp4_encoder_factory = providers.Factory(
+        "its_camera_ai.services.fragmented_mp4_encoder.create_fragmented_mp4_encoder",
+    )
+
+    # Metadata Track Manager Factory - Creates metadata managers with default config
+    metadata_track_manager_factory = providers.Factory(
+        "its_camera_ai.services.metadata_track_manager.create_metadata_track_manager",
+    )
+
+    # DASH Fragment Generator Factory - Creates DASH generators for cameras
+    dash_fragment_generator_factory = providers.Factory(
+        "its_camera_ai.services.dash_fragment_generator.create_dash_fragment_generator",
+    )
+
+    # MP4 Streaming Service - Singleton for coordinating all MP4 streaming
+    mp4_streaming_service = providers.Singleton(
+        "its_camera_ai.services.mp4_streaming_service.create_mp4_streaming_service",
+        base_config=config.mp4_streaming,
     )
 
 
@@ -340,4 +421,20 @@ class ApplicationContainer(containers.DeclarativeContainer):
         analytics_service=services.unified_analytics_service,  # Use unified analytics
         alert_service=services.alert_service,
         config=config.service_mesh,
+    )
+
+    # Real-time Event Streaming Service - Coordinates Kafka and SSE
+    realtime_streaming_service = providers.Singleton(
+        "its_camera_ai.services.realtime_streaming_service.RealtimeStreamingService",
+        kafka_producer=services.kafka_event_producer,
+        kafka_consumer=services.kafka_sse_consumer,
+        sse_broadcaster=services.sse_broadcaster,
+        analytics_connector=services.kafka_analytics_connector,
+        config=config.realtime_streaming,
+    )
+
+    # MP4 Streaming Service - Coordinates fragmented MP4 encoding and DASH streaming
+    mp4_streaming_service = providers.Singleton(
+        "its_camera_ai.services.mp4_streaming_service.MP4StreamingService",
+        base_config=config.mp4_streaming,
     )

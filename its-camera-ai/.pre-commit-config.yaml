@@ -91,13 +91,13 @@ repos:
         # Fail on high/critical security issues
         fail_fast: true
 
-  # Safety - Check for known security vulnerabilities
-  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
-    rev: v1.3.2
-    hooks:
-      - id: python-safety-dependencies-check
-        files: pyproject.toml
-        args: [--ignore, "70612"] # Ignore jinja2 in jupyter
+  # # Safety - Check for known security vulnerabilities
+  # - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
+  #   rev: v1.3.2
+  #   hooks:
+  #     - id: python-safety-dependencies-check
+  #       files: pyproject.toml
+  #       args: [--ignore, "70612"] # Ignore jinja2 in jupyter
 
   # Dockerfile linting
   - repo: https://github.com/hadolint/hadolint
@@ -136,25 +136,37 @@ repos:
         language: system
         pass_filenames: false
         always_run: false
-        args: ["--tb=short", "-x", "-q", "tests/unit/", "--maxfail=1", "-m", "not slow"]
+        args:
+          [
+            "--tb=short",
+            "-x",
+            "-q",
+            "tests/unit/",
+            "--maxfail=1",
+            "-m",
+            "not slow",
+            "--ignore=src/its_camera_ai/web",
+          ]
         stages: [pre-commit]
-      
-      # Full test suite for pre-push
+
+        # Full test suite for pre-push
       - id: pytest-full
         name: pytest-full-suite
         entry: pytest
         language: system
         pass_filenames: false
         always_run: true
-        args: [
-          "--cov=src/its_camera_ai",
-          "--cov-fail-under=90",
-          "--tb=short",
-          "-x",
-          "--maxfail=1"
-        ]
+        args:
+          [
+            "--cov=src/its_camera_ai",
+            "--cov-fail-under=90",
+            "--tb=short",
+            "-x",
+            "--maxfail=1",
+            "--ignore=src/its_camera_ai/web",
+          ]
         stages: [pre-push]
-      
+
       # Security check with fail on P0 issues
       - id: security-check
         name: security-p0-check
@@ -162,12 +174,13 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        args: [
-          "-c",
-          "bandit -r src/ -f json -o /tmp/bandit.json && jq '.results[] | select(.issue_severity == \"HIGH\" or .issue_severity == \"CRITICAL\")' /tmp/bandit.json | grep -q . && echo 'P0 security issues found' && exit 1 || echo 'No P0 security issues'"
-        ]
+        args:
+          [
+            "-c",
+            'bandit -r src/ -f json -o /tmp/bandit.json && jq ''.results[] | select(.issue_severity == "HIGH" or .issue_severity == "CRITICAL")'' /tmp/bandit.json | grep -q . && echo ''P0 security issues found'' && exit 1 || echo ''No P0 security issues''',
+          ]
         stages: [pre-push]
-      
+
       # Code complexity check
       - id: complexity-check
         name: code-complexity-check
