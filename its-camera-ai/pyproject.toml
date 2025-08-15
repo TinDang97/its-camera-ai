@@ -213,6 +213,17 @@ inference = [
     "ray[serve]>=2.38.0",
     "torchserve>=0.12.0",
 ]
+test = [
+    "anyio>=4.10.0",
+    "factory-boy>=3.3.3",
+    "freezegun>=1.5.5",
+    "httpx>=0.28.1",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.2.1",
+    "pytest-mock>=3.14.1",
+    "testcontainers>=4.12.0",
+]
 
 [project.scripts]
 its-camera-ai = "its_camera_ai.cli.main:app"
