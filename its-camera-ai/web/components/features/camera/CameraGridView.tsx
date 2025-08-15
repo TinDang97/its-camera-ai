@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Maximize2, Grid, Grid3x3, Square, Activity, WifiOff, Wifi } from 'lucide-react'
+import { IconMaximize, IconGrid3x3, IconGridDots, IconSquare, IconActivity, IconWifiOff, IconWifi } from '@tabler/icons-react'
 
 export interface Camera {
   id: string
@@ -162,25 +162,25 @@ export function CameraGridView({
               <SelectContent>
                 <SelectItem value="1x1">
                   <div className="flex items-center space-x-2">
-                    <Square className="h-4 w-4" />
+                    <IconSquare className="h-4 w-4" />
                     <span>1×1</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="2x2">
                   <div className="flex items-center space-x-2">
-                    <Grid className="h-4 w-4" />
+                    <IconGridDots className="h-4 w-4" />
                     <span>2×2</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="3x3">
                   <div className="flex items-center space-x-2">
-                    <Grid3x3 className="h-4 w-4" />
+                    <IconGrid3x3 className="h-4 w-4" />
                     <span>3×3</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="4x4">
                   <div className="flex items-center space-x-2">
-                    <Grid3x3 className="h-4 w-4" />
+                    <IconGrid3x3 className="h-4 w-4" />
                     <span>4×4</span>
                   </div>
                 </SelectItem>
@@ -211,18 +211,18 @@ export function CameraGridView({
                   </div>
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
-                    <WifiOff className="h-12 w-12 text-gray-500" />
+                    <IconWifiOff className="h-12 w-12 text-gray-500" />
                   </div>
                 )}
-                
+
                 {/* Camera Info Overlay */}
                 <div className="absolute top-2 left-2 right-2 flex justify-between">
                   <div className="flex items-center space-x-2">
                     <Badge variant={getStatusColor(camera.status)}>
                       {camera.status === 'online' ? (
-                        <Wifi className="h-3 w-3 mr-1" />
+                        <IconWifi className="h-3 w-3 mr-1" />
                       ) : (
-                        <WifiOff className="h-3 w-3 mr-1" />
+                        <IconWifiOff className="h-3 w-3 mr-1" />
                       )}
                       {camera.status}
                     </Badge>
@@ -241,10 +241,10 @@ export function CameraGridView({
                       // Handle fullscreen
                     }}
                   >
-                    <Maximize2 className="h-3 w-3" />
+                    <IconMaximize className="h-3 w-3" />
                   </Button>
                 </div>
-                
+
                 {/* Bottom Info Bar */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
                   <div className="text-white">
@@ -253,7 +253,7 @@ export function CameraGridView({
                     {camera.status === 'online' && (
                       <div className="flex items-center justify-between mt-1">
                         <div className="flex items-center space-x-2 text-xs">
-                          <Activity className={`h-3 w-3 ${getHealthColor(camera.health)}`} />
+                          <IconActivity className={`h-3 w-3 ${getHealthColor(camera.health)}`} />
                           <span className={getHealthColor(camera.health)}>
                             {camera.health}
                           </span>

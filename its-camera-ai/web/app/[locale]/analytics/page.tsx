@@ -4,12 +4,12 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { 
-  TrendingUp, 
-  BarChart3, 
-  Activity, 
-  Clock, 
-  MapPin, 
+import {
+  TrendingUp,
+  BarChart3,
+  Activity,
+  Clock,
+  MapPin,
   AlertTriangle,
   Download,
   Calendar,
@@ -31,7 +31,7 @@ export default function AnalyticsPage() {
     const data = []
     const now = new Date()
     const points = timeRange === '1h' ? 12 : timeRange === '4h' ? 48 : timeRange === '24h' ? 24 : 168
-    
+
     for (let i = points - 1; i >= 0; i--) {
       const timestamp = new Date(now)
       if (timeRange === '1h') {
@@ -43,11 +43,11 @@ export default function AnalyticsPage() {
       } else {
         timestamp.setHours(timestamp.getHours() - i)
       }
-      
+
       const hour = timestamp.getHours()
       const isRushHour = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19)
       const baseCount = isRushHour ? 45 : hour >= 22 || hour <= 6 ? 10 : 25
-      
+
       data.push({
         timestamp: timestamp.toISOString(),
         vehicleCount: Math.floor(baseCount + Math.random() * 15 - 7),
@@ -56,7 +56,7 @@ export default function AnalyticsPage() {
         occupancy: Math.min(100, baseCount * 2 + Math.random() * 20)
       })
     }
-    
+
     return data
   }
 
@@ -68,19 +68,19 @@ export default function AnalyticsPage() {
       { id: 'CAM004', name: 'Park Ave & Elm St', lat: 40.7180, lng: -74.0080, intersection: 'Park Ave & Elm St' },
       { id: 'CAM005', name: 'Highway 101 North', lat: 40.7250, lng: -74.0120, intersection: 'Highway 101 North' }
     ]
-    
+
     const data = []
     const now = new Date()
     const hours = timeRange === '1h' ? 4 : timeRange === '4h' ? 8 : 24
-    
+
     cameras.forEach(camera => {
       for (let i = 0; i < hours; i++) {
         const timestamp = new Date(now)
         timestamp.setHours(timestamp.getHours() - i)
-        
+
         const hour = timestamp.getHours()
         const isRushHour = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19)
-        
+
         data.push({
           cameraId: camera.id,
           cameraName: camera.name,
@@ -97,7 +97,7 @@ export default function AnalyticsPage() {
         })
       }
     })
-    
+
     return data
   }
 
@@ -105,7 +105,7 @@ export default function AnalyticsPage() {
     const types = ['accident', 'congestion', 'road_closure', 'weather', 'construction']
     const severities = ['low', 'medium', 'high', 'critical']
     const statuses = ['active', 'monitoring', 'resolved']
-    
+
     return Array.from({ length: 8 }, (_, i) => ({
       id: `INC00${i + 1}`,
       type: types[Math.floor(Math.random() * types.length)],
@@ -146,8 +146,8 @@ export default function AnalyticsPage() {
   }
 
   const handleIncidentResolve = (incidentId: string) => {
-    setIncidentData(prev => 
-      prev.map(inc => 
+    setIncidentData(prev =>
+      prev.map(inc =>
         inc.id === incidentId ? { ...inc, status: 'resolved' } : inc
       )
     )
@@ -202,7 +202,7 @@ export default function AnalyticsPage() {
             showPredictions={false}
             onTimeRangeChange={handleTimeRangeChange}
           />
-          
+
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
@@ -242,7 +242,7 @@ export default function AnalyticsPage() {
                 </div>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader>
                 <CardTitle>Data Summary</CardTitle>
@@ -305,7 +305,7 @@ export default function AnalyticsPage() {
             ]}
             onTimeRangeChange={handleTimeRangeChange}
           />
-          
+
           <Card>
             <CardHeader>
               <CardTitle>Prediction Accuracy</CardTitle>
@@ -362,7 +362,7 @@ export default function AnalyticsPage() {
                 </div>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader>
                 <CardTitle>Recent Reports</CardTitle>

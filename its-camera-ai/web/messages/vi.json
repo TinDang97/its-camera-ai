@@ -1,0 +1,198 @@
+{
+  "Navigation": {
+    "dashboard": "Bảng Điều Khiển",
+    "alerts": "Cảnh Báo",
+    "cameras": "Camera",
+    "analytics": "Phân Tích",
+    "settings": "Cài Đặt"
+  },
+  "Dashboard": {
+    "title": "Bảng Điều Khiển Giám Sát Giao Thông",
+    "subtitle": "Phân tích giao thông theo thời gian thực và giám sát camera",
+    "lastUpdated": "Cập nhật lần cuối",
+    "totalVehicles": "Tổng Xe Cộ",
+    "activeCameras": "Camera Hoạt Động",
+    "activeAlerts": "Cảnh Báo Đang Hoạt Động",
+    "avgSpeed": "Tốc Độ Trung Bình",
+    "overview": "Tổng Quan",
+    "liveCameras": "Camera Trực Tiếp",
+    "alerts": "Cảnh Báo",
+    "analytics": "Phân Tích",
+    "onlineStatus": "trực tuyến",
+    "fromLastHour": "từ giờ trước",
+    "critical": "nghiêm trọng",
+    "warnings": "cảnh báo",
+    "fromAverage": "so với trung bình"
+  },
+  "Alerts": {
+    "title": "Chi Tiết Cảnh Báo",
+    "subtitle": "Xem toàn diện cảnh báo với phân tích chi tiết",
+    "recentAlerts": "Cảnh Báo Gần Đây",
+    "active": "Đang Hoạt Động",
+    "resolved": "Đã Giải Quyết",
+    "investigating": "Đang Điều Tra",
+    "priority": {
+      "low": "Thấp",
+      "medium": "Trung Bình",
+      "high": "Cao",
+      "critical": "Nghiêm Trọng"
+    },
+    "status": {
+      "active": "Đang Hoạt Động",
+      "resolved": "Đã Giải Quyết",
+      "investigating": "Đang Điều Tra"
+    },
+    "category": {
+      "traffic_violation": "Vi Phạm Giao Thông",
+      "accident": "Tai Nạn",
+      "congestion": "Tắc Nghẽn",
+      "system": "Hệ Thống",
+      "security": "An Ninh"
+    },
+    "details": {
+      "created": "Thời Gian Tạo",
+      "location": "Vị Trí",
+      "camera": "Camera",
+      "confidence": "Độ Tin Cậy",
+      "assignTo": "Phân Công",
+      "export": "Xuất",
+      "share": "Chia Sẻ",
+      "escalate": "Leo Thang",
+      "viewLive": "Xem Trực Tiếp"
+    },
+    "tabs": {
+      "overview": "Tổng Quan",
+      "detections": "Phát Hiện Đối Tượng",
+      "timeline": "Dòng Thời Gian",
+      "analysis": "Phân Tích"
+    },
+    "summary": {
+      "totalDetections": "Tổng Phát Hiện",
+      "avgConfidence": "Độ Tin Cậy Trung Bình",
+      "highConfidence": "Độ Tin Cậy Cao",
+      "objectClasses": "Loại Đối Tượng",
+      "duration": "Thời Lượng",
+      "falsePredictions": "Dự Đoán Sai"
+    },
+    "detectionSummary": "Tóm Tắt Phát Hiện",
+    "recentActivity": "Hoạt Động Gần Đây"
+  },
+  "ObjectDetection": {
+    "title": "Chi Tiết Phát Hiện Đối Tượng",
+    "detectionList": "Danh Sách Phát Hiện",
+    "visualization": "Trực Quan Hóa",
+    "searchPlaceholder": "Tìm kiếm phát hiện...",
+    "sortBy": {
+      "confidence": "Độ Tin Cậy",
+      "class": "Loại",
+      "time": "Thời Gian"
+    },
+    "filterBy": {
+      "all": "Tất Cả",
+      "high": "Cao (80%+)",
+      "medium": "Trung Bình (60-80%)",
+      "low": "Thấp (<60%)"
+    },
+    "withFeedback": "Có Phản Hồi",
+    "stats": {
+      "total": "Tổng Cộng",
+      "highConfidence": "Độ Tin Cậy Cao",
+      "avgConfidence": "Độ Tin Cậy Trung Bình",
+      "uniqueClasses": "Loại Duy Nhất"
+    },
+    "boundingBox": "Trực Quan Hóa Hộp Giới Hạn",
+    "trajectories": "Quỹ Đạo",
+    "selectedDetection": "Phát Hiện Được Chọn",
+    "subCategory": "Danh Mục Phụ",
+    "attributes": "Thuộc Tính",
+    "falsePosQuestion": "Dương tính giả?",
+    "yes": "Có",
+    "no": "Không",
+    "moreDetails": "Chi Tiết Hơn",
+    "lessDetails": "Ít Chi Tiết Hơn",
+    "noDetections": "Không tìm thấy phát hiện nào phù hợp với bộ lọc của bạn.",
+    "export": {
+      "json": "JSON",
+      "csv": "CSV"
+    }
+  },
+  "Timeline": {
+    "title": "Dòng Thời Gian Nâng Cao",
+    "timelineView": "Xem Dòng Thời Gian",
+    "correlations": "Tương Quan",
+    "playback": "Phát Lại",
+    "searchPlaceholder": "Tìm kiếm sự kiện...",
+    "scale": "Tỷ Lệ",
+    "minute": "phút",
+    "hour": "giờ",
+    "day": "ngày",
+    "filters": {
+      "allEvents": "Tất Cả Sự Kiện",
+      "highSeverity": "Mức Độ Nghiêm Trọng Cao",
+      "cameraEvents": "Sự Kiện Camera",
+      "correlated": "Có Tương Quan",
+      "predictions": "Dự Đoán"
+    },
+    "stats": {
+      "totalEvents": "Tổng Sự Kiện",
+      "clusters": "Cụm",
+      "critical": "Nghiêm Trọng",
+      "correlated": "Có Tương Quan",
+      "predicted": "Được Dự Đoán"
+    },
+    "eventDetails": "Chi Tiết Sự Kiện",
+    "type": "Loại",
+    "severity": "Mức Độ Nghiêm Trọng",
+    "time": "Thời Gian",
+    "description": "Mô Tả",
+    "correlatedEvents": "Sự Kiện Tương Quan",
+    "playbackInfo": "Thông Tin Phát Lại",
+    "currentEvent": "Sự Kiện Hiện Tại",
+    "speed": "Tốc Độ",
+    "timeScale": "Tỷ Lệ Thời Gian",
+    "zoomLevel": "Mức Độ Thu Phóng",
+    "currentEventLabel": "Sự Kiện Hiện Tại",
+    "noEvents": "Không tìm thấy sự kiện nào phù hợp với bộ lọc của bạn.",
+    "saveFilter": "Lưu Bộ Lọc",
+    "settings": "Cài Đặt"
+  },
+  "LanguageSwitcher": {
+    "selectLanguage": "Chọn Ngôn Ngữ",
+    "currentLanguage": "Ngôn Ngữ Hiện Tại"
+  },
+  "Common": {
+    "loading": "Đang tải...",
+    "error": "Lỗi",
+    "retry": "Thử lại",
+    "cancel": "Hủy",
+    "save": "Lưu",
+    "delete": "Xóa",
+    "edit": "Sửa",
+    "close": "Đóng",
+    "back": "Quay lại",
+    "next": "Tiếp theo",
+    "previous": "Trước đó",
+    "search": "Tìm kiếm",
+    "filter": "Bộ lọc",
+    "sort": "Sắp xếp",
+    "refresh": "Làm mới",
+    "expand": "Mở rộng",
+    "collapse": "Thu gọn",
+    "more": "Thêm",
+    "less": "Ít hơn"
+  },
+  "Time": {
+    "justNow": "Vừa xong",
+    "minutesAgo": "{count, plural, =1 {1 phút trước} other {# phút trước}}",
+    "hoursAgo": "{count, plural, =1 {1 giờ trước} other {# giờ trước}}",
+    "daysAgo": "{count, plural, =1 {1 ngày trước} other {# ngày trước}}",
+    "realTime": "Thời gian thực"
+  },
+  "Errors": {
+    "genericError": "Đã xảy ra lỗi. Vui lòng thử lại.",
+    "networkError": "Lỗi mạng. Vui lòng kiểm tra kết nối của bạn.",
+    "notFound": "Không tìm thấy tài nguyên được yêu cầu.",
+    "unauthorized": "Bạn không có quyền truy cập tài nguyên này.",
+    "validationError": "Vui lòng kiểm tra đầu vào và thử lại."
+  }
+}

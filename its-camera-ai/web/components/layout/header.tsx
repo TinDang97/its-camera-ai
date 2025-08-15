@@ -1,130 +1,101 @@
-'use client'
+'use client';
 
-import { useWebSocket } from '@/components/providers/websocket-provider'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { ConnectionStatus } from '@/components/ui/connection-status'
 import {
-  Bell, Search, User, Settings, LogOut,
-  Activity, Moon, Sun
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+  IconCamera,
+  IconBell,
+  IconSettings,
+  IconUser,
+  IconActivity
+} from '@tabler/icons-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 export function Header() {
-  const { lastMessage } = useWebSocket()
-
   return (
-    <header className="fixed top-0 right-0 left-64 h-16 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border z-50">
-      <div className="flex h-16 items-center justify-between px-6">
-        {/* Left Section */}
-        <div className="flex items-center space-x-4">
-          {/* Connection Status */}
-          <ConnectionStatus />
-
-          {/* Live Data Indicator */}
-          {lastMessage && (
-            <div className="flex items-center space-x-1 text-muted-foreground">
-              <Activity className="h-3 w-3 animate-pulse" />
-              <span className="text-xs">
-                Last update: {lastMessage.timestamp.toLocaleTimeString()}
-              </span>
+    <>
+      {/* Skip Navigation Link */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-white focus:rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-foreground"
+      >
+        Skip to main content
+      </a>
+      <header className="bg-card border-b border-border/50 shadow-soft sticky top-0 z-50 backdrop-blur-sm" role="banner">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center py-4">
+          {/* Brand Section */}
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-2 sm:p-2.5 rounded-xl bg-primary/10 border border-primary/20">
+                <IconCamera className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl font-bold text-foreground tracking-tight truncate">
+                  ITS Camera AI
+                </h1>
+                <p className="hidden sm:block text-sm text-muted-foreground font-medium">
+                  Real-time Traffic Monitoring System
+                </p>
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* Right Section */}
-        <div className="flex items-center space-x-4">
-          {/* Search */}
-          <Button variant="ghost" size="sm">
-            <Search className="h-4 w-4" />
-          </Button>
+            {/* System Status */}
+            <div className="hidden md:flex items-center gap-2 ml-6" role="status" aria-label="System status">
+              <div className="status-indicator">
+                <div className="status-dot status-dot-online" aria-hidden="true" />
+                <span className="text-online font-medium">System Online</span>
+              </div>
+            </div>
+          </div>
 
-          {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="relative">
-                <Bell className="h-4 w-4" />
-                <Badge
-                  variant="destructive"
-                  className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs flex items-center justify-center"
-                >
-                  3
-                </Badge>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Recent Alerts</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <div className="flex flex-col space-y-1">
-                  <span className="font-medium">Vehicle Collision Detected</span>
-                  <span className="text-xs text-muted-foreground">
-                    Main St & 5th Ave - 2 minutes ago
-                  </span>
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <div className="flex flex-col space-y-1">
-                  <span className="font-medium">Heavy Traffic Congestion</span>
-                  <span className="text-xs text-muted-foreground">
-                    Highway I-95 North - 5 minutes ago
-                  </span>
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <div className="flex flex-col space-y-1">
-                  <span className="font-medium">Camera Feed Degraded</span>
-                  <span className="text-xs text-muted-foreground">
-                    CAM-022 - 10 minutes ago
-                  </span>
-                </div>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Actions Section */}
+          <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+            {/* Notifications */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="relative hover:bg-muted"
+              aria-label="Notifications, 3 unread"
+            >
+              <IconBell className="h-4 w-4" aria-hidden="true" />
+              <Badge className="absolute -top-1 -right-1 h-4 w-4 sm:h-5 sm:w-5 text-2xs p-0 bg-primary border-2 border-card flex items-center justify-center" aria-label="3 unread notifications">
+                3
+              </Badge>
+            </Button>
 
-          {/* Theme Toggle */}
-          <Button variant="ghost" size="sm">
-            <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-            <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-          </Button>
+            {/* Settings */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="hover:bg-muted"
+              aria-label="Open settings"
+            >
+              <IconSettings className="h-4 w-4" aria-hidden="true" />
+            </Button>
 
-          {/* User Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="flex items-center space-x-2">
-                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
-                  <User className="h-4 w-4" />
+            {/* Performance Indicator */}
+            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-secondary-light rounded-lg border border-secondary/20" role="status" aria-label="System performance">
+              <IconActivity className="h-4 w-4 text-secondary" aria-hidden="true" />
+              <span className="text-sm font-medium text-secondary-foreground">98.5% Uptime</span>
+            </div>
+
+            {/* User Profile */}
+            <div className="flex items-center gap-2 sm:gap-3 pl-2 sm:pl-3 border-l border-border">
+              <div className="hidden md:block text-right">
+                <p className="text-sm font-medium text-foreground">Admin User</p>
+                <p className="text-2xs text-muted-foreground">System Administrator</p>
+              </div>
+              <div className="relative">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-gradient-to-br from-primary to-secondary rounded-xl flex items-center justify-center text-white text-sm font-semibold shadow-soft">
+                  A
                 </div>
-                <span className="hidden md:inline-block">Admin User</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <User className="mr-2 h-4 w-4" />
-                Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-red-600">
-                <LogOut className="mr-2 h-4 w-4" />
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 bg-online border-2 border-card rounded-full" />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </header>
-  )
+    </>
+  );
 }

@@ -5,7 +5,7 @@ import { AlertPanel } from '@/components/features/dashboard/AlertPanel'
 import { CameraGridView } from '@/components/features/camera/CameraGridView'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Activity, Camera, AlertTriangle, TrendingUp } from 'lucide-react'
+import { IconActivity, IconCamera, IconAlertTriangle, IconTrendingUp } from '@tabler/icons-react'
 
 export default function DashboardPage() {
   return (
@@ -27,7 +27,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Vehicles</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
+            <IconActivity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">12,543</div>
@@ -37,7 +37,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Active Cameras</CardTitle>
-            <Camera className="h-4 w-4 text-muted-foreground" />
+            <IconCamera className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">48/52</div>
@@ -47,7 +47,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Active Alerts</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            <IconAlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">7</div>
@@ -57,7 +57,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Avg Speed</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <IconTrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">45 km/h</div>
