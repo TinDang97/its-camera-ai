@@ -26,7 +26,6 @@ from ..dependencies import (
     get_cache_service,
     get_current_user,
     get_database_session,
-    rate_limit_strict,
 )
 from ..schemas.auth import (
     LoginRequest,
@@ -770,7 +769,6 @@ async def update_profile(
     profile_data: UserProfile,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_database_session),
-    _rate_limit: None = Depends(rate_limit_strict),
 ) -> UserResponse:
     """Update current user profile.
 
@@ -848,7 +846,6 @@ async def change_password(
     password_data: PasswordChangeRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_database_session),
-    _rate_limit: None = Depends(rate_limit_strict),
 ) -> SuccessResponse:
     """Change user password.
 
@@ -904,7 +901,6 @@ async def setup_mfa(
     db: AsyncSession = Depends(get_database_session),
     cache: CacheService = Depends(get_cache_service),
     settings: Settings = Depends(get_settings),
-    _rate_limit: None = Depends(rate_limit_strict),
 ) -> MFASetupResponse:
     """Setup multi-factor authentication.
 

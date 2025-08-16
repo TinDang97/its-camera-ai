@@ -1,32 +1,30 @@
-"""FastAPI dependencies using dependency injection containers.
+"""FastAPI dependencies using dependency injection with proper wiring.
 
 This module provides FastAPI-compatible dependencies that use the
-dependency injection container system for clean architecture and
-proper resource management.
+dependency injection container system with consistent @inject wiring
+for clean architecture and proper resource management.
 
-The dependencies follow these patterns:
-- Infrastructure dependencies (database, cache) use Resource providers
-- Service dependencies use Factory or Singleton providers
-- Authentication dependencies use the container's services
-- Rate limiting and validation use container-managed services
+All dependencies use the @inject decorator with Provide[] pattern for
+consistent dependency injection throughout the application.
 """
 
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import Depends, HTTPException, Request, UploadFile, status
+from fastapi import HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..containers import ApplicationContainer
-from ..core.config import Settings, get_settings
+from ..core.config import Settings
 from ..core.exceptions import AuthenticationError
 from ..core.logging import get_logger
+from ..models.database import DatabaseManager
 from ..models.user import User
 from ..services.auth_service import AuthenticationService as AuthService
 from ..services.cache import CacheService
@@ -39,17 +37,107 @@ security = HTTPBearer(auto_error=False)
 
 
 # ============================
+# Service Protocol Interfaces
+# ============================
+
+
+class RealtimeAnalyticsServiceProtocol(Protocol):
+    """Protocol for real-time analytics service."""
+
+    async def get_realtime_analytics(self, camera_id: str) -> Any:
+        """Get real-time analytics for a camera."""
+        ...
+
+
+class HistoricalAnalyticsServiceProtocol(Protocol):
+    """Protocol for historical analytics service."""
+
+    async def query_historical_data(self, query: Any) -> Any:
+        """Query historical analytics data."""
+        ...
+
+
+class IncidentManagementServiceProtocol(Protocol):
+    """Protocol for incident management service."""
+
+    async def list_incidents(self, **kwargs: Any) -> Any:
+        """List incidents with filtering."""
+        ...
+
+    async def get_incident_by_id(self, incident_id: str) -> Any:
+        """Get incident by ID."""
+        ...
+
+
+class AnalyticsServiceProtocol(Protocol):
+    """Protocol for analytics service."""
+
+    async def get_analytics(self, **kwargs: Any) -> Any:
+        """Get analytics data."""
+        ...
+
+
+class StreamingServiceProtocol(Protocol):
+    """Protocol for streaming service."""
+
+    async def start_stream(self, **kwargs: Any) -> Any:
+        """Start video stream."""
+        ...
+
+
+class PredictionServiceProtocol(Protocol):
+    """Protocol for prediction service."""
+
+    async def get_predictions(self, **kwargs: Any) -> Any:
+        """Get predictions."""
+        ...
+
+
+class AlertServiceProtocol(Protocol):
+    """Protocol for alert service."""
+
+    async def create_alert(self, **kwargs: Any) -> Any:
+        """Create an alert."""
+        ...
+
+
+class TokenServiceProtocol(Protocol):
+    """Protocol for token service."""
+
+    async def create_token(self, **kwargs: Any) -> Any:
+        """Create a token."""
+        ...
+
+
+class MFAServiceProtocol(Protocol):
+    """Protocol for MFA service."""
+
+    async def verify_mfa(self, **kwargs: Any) -> Any:
+        """Verify MFA token."""
+        ...
+
+
+class EmailServiceProtocol(Protocol):
+    """Protocol for email service."""
+
+    async def send_email(self, **kwargs: Any) -> Any:
+        """Send an email."""
+        ...
+
+
+# ============================
 # Core Infrastructure Dependencies
 # ============================
 
 
+@inject
 async def get_database_session(
-    request: Request,
+    database: DatabaseManager = Provide[ApplicationContainer.infrastructure.database],
 ) -> AsyncGenerator[AsyncSession, None]:
-    """Get database session from app-bound container.
+    """Get database session from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        database: Database manager from DI container
 
     Yields:
         AsyncSession: Database session with proper lifecycle management
@@ -57,46 +145,72 @@ async def get_database_session(
     Raises:
         DatabaseError: If session creation fails
     """
-    container = request.app.state.container
-    session_factory = container.infrastructure.session_factory()
-
-    async with session_factory() as session:
+    async with database.get_session() as session:
         try:
             yield session
         except Exception as e:
-            await session.rollback()
             logger.error("Database session error in DI", error=str(e))
             raise
-        finally:
-            await session.close()
 
 
-def get_cache_service(
-    request: Request,
-) -> CacheService:
-    """Get cache service from app-bound container.
+@inject
+async def get_database_manager(
+    database: DatabaseManager = Provide[ApplicationContainer.infrastructure.database],
+) -> DatabaseManager:
+    """Get database manager from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        database: Database manager from DI container
+
+    Returns:
+        DatabaseManager: Database manager instance
+    """
+    return database
+
+
+@inject
+def get_cache_service(
+    cache_service: CacheService = Provide[ApplicationContainer.services.cache_service],
+) -> CacheService:
+    """Get cache service from dependency injection container.
+
+    Args:
+        cache_service: Cache service from DI container
 
     Returns:
         CacheService: Configured cache service instance
     """
-    container = request.app.state.container
-    return container.services.cache_service()
+    return cache_service
 
 
-def get_redis_client(request: Request):
-    """Get Redis client from app-bound container.
+@inject
+def get_redis_client(
+    redis_client: Any = Provide[ApplicationContainer.infrastructure.redis_client],
+) -> Any:
+    """Get Redis client from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        redis_client: Redis client from DI container
 
     Returns:
         Redis client instance
     """
-    container = request.app.state.container
-    return container.infrastructure.redis_client()
+    return redis_client
+
+
+@inject
+def get_settings(
+    settings: Settings = Provide[ApplicationContainer.infrastructure.settings],
+) -> Settings:
+    """Get application settings from dependency injection container.
+
+    Args:
+        settings: Settings from DI container
+
+    Returns:
+        Settings: Application settings instance
+    """
+    return settings
 
 
 # ============================
@@ -104,54 +218,63 @@ def get_redis_client(request: Request):
 # ============================
 
 
+@inject
 def get_auth_service(
-    request: Request,
+    auth_service: AuthService = Provide[ApplicationContainer.services.auth_service],
 ) -> AuthService:
-    """Get authentication service from app-bound container.
+    """Get authentication service from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        auth_service: Authentication service from DI container
 
     Returns:
         AuthService: Configured authentication service instance
     """
-    container = request.app.state.container
-    return container.services.auth_service()
+    return auth_service
 
 
+@inject
 def get_camera_service(
-    request: Request,
+    camera_service: CameraService = Provide[
+        ApplicationContainer.services.camera_service
+    ],
 ) -> CameraService:
-    """Get camera service from app-bound container.
+    """Get camera service from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        camera_service: Camera service from DI container
 
     Returns:
         CameraService: Camera service instance
     """
-    container = request.app.state.container
-    return container.services.camera_service()
+    return camera_service
 
 
-def get_frame_service(request: Request) -> FrameService:
-    """Get frame service from app-bound container.
+@inject
+def get_frame_service(
+    frame_service: FrameService = Provide[ApplicationContainer.services.frame_service],
+) -> FrameService:
+    """Get frame service from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        frame_service: Frame service from DI container
 
     Returns:
         FrameService: Frame service instance
     """
-    container = request.app.state.container
-    return container.services.frame_service()
+    return frame_service
 
 
 @inject
 def get_detection_service(
-    detection_service=Provide[ApplicationContainer.services.detection_service],
+    detection_service: DetectionService = Provide[
+        ApplicationContainer.services.detection_service
+    ],
 ) -> DetectionService:
     """Get detection service from dependency injection container.
+
+    Args:
+        detection_service: Detection service from DI container
 
     Returns:
         DetectionService: Detection service instance
@@ -159,99 +282,169 @@ def get_detection_service(
     return detection_service
 
 
-def get_metrics_service(request: Request) -> MetricsService:
-    """Get metrics service from app-bound container.
+@inject
+def get_metrics_service(
+    metrics_service: MetricsService = Provide[
+        ApplicationContainer.services.metrics_service
+    ],
+) -> MetricsService:
+    """Get metrics service from dependency injection container.
 
     Args:
-        request: FastAPI request object (contains app state)
+        metrics_service: Metrics service from DI container
 
     Returns:
         MetricsService: Metrics service instance
     """
-    container = request.app.state.container
-    return container.services.metrics_service()
+    return metrics_service
 
 
 @inject
 def get_streaming_service(
-    streaming_service=Provide[ApplicationContainer.services.streaming_service],
-):
+    streaming_service: StreamingServiceProtocol = Provide[ApplicationContainer.services.streaming_service],
+) -> StreamingServiceProtocol:
     """Get streaming service from dependency injection container.
 
+    Args:
+        streaming_service: Streaming service from DI container
+
     Returns:
-        StreamingService: Streaming service instance
+        StreamingServiceProtocol: Streaming service instance
     """
     return streaming_service
 
 
 @inject
 def get_analytics_service(
-    analytics_service=Provide[ApplicationContainer.services.analytics_service],
-):
+    analytics_service: AnalyticsServiceProtocol = Provide[ApplicationContainer.services.analytics_service],
+) -> AnalyticsServiceProtocol:
     """Get analytics service from dependency injection container.
 
+    Args:
+        analytics_service: Analytics service from DI container
+
     Returns:
-        AnalyticsService: Analytics service instance
+        AnalyticsServiceProtocol: Analytics service instance
     """
     return analytics_service
 
 
 @inject
-def get_prediction_service(
-    prediction_service=Provide[ApplicationContainer.services.prediction_service],
-):
-    """Get prediction service from dependency injection container.
+def get_realtime_analytics_service(
+    realtime_analytics_service: RealtimeAnalyticsServiceProtocol = Provide[ApplicationContainer.services.realtime_analytics_service],
+) -> RealtimeAnalyticsServiceProtocol:
+    """Get real-time analytics service from dependency injection container.
+
+    Args:
+        realtime_analytics_service: Real-time analytics service from DI container
 
     Returns:
-        PredictionService: Prediction service instance
+        RealtimeAnalyticsServiceProtocol: Real-time analytics service instance
+    """
+    return realtime_analytics_service
+
+
+@inject
+def get_historical_analytics_service(
+    historical_analytics_service: HistoricalAnalyticsServiceProtocol = Provide[ApplicationContainer.services.historical_analytics_service],
+) -> HistoricalAnalyticsServiceProtocol:
+    """Get historical analytics service from dependency injection container.
+
+    Args:
+        historical_analytics_service: Historical analytics service from DI container
+
+    Returns:
+        HistoricalAnalyticsServiceProtocol: Historical analytics service instance
+    """
+    return historical_analytics_service
+
+
+@inject
+def get_incident_management_service(
+    incident_management_service: IncidentManagementServiceProtocol = Provide[ApplicationContainer.services.incident_management_service],
+) -> IncidentManagementServiceProtocol:
+    """Get incident management service from dependency injection container.
+
+    Args:
+        incident_management_service: Incident management service from DI container
+
+    Returns:
+        IncidentManagementServiceProtocol: Incident management service instance
+    """
+    return incident_management_service
+
+
+@inject
+def get_prediction_service(
+    prediction_service: PredictionServiceProtocol = Provide[ApplicationContainer.services.prediction_service],
+) -> PredictionServiceProtocol:
+    """Get prediction service from dependency injection container.
+
+    Args:
+        prediction_service: Prediction service from DI container
+
+    Returns:
+        PredictionServiceProtocol: Prediction service instance
     """
     return prediction_service
 
 
 @inject
 def get_alert_service(
-    alert_service=Provide[ApplicationContainer.services.alert_service],
-):
+    alert_service: AlertServiceProtocol = Provide[ApplicationContainer.services.alert_service],
+) -> AlertServiceProtocol:
     """Get alert service from dependency injection container.
 
+    Args:
+        alert_service: Alert service from DI container
+
     Returns:
-        AlertService: Alert service instance
+        AlertServiceProtocol: Alert service instance
     """
     return alert_service
 
 
 @inject
 def get_token_service(
-    token_service=Provide[ApplicationContainer.services.token_service],
-):
+    token_service: TokenServiceProtocol = Provide[ApplicationContainer.services.token_service],
+) -> TokenServiceProtocol:
     """Get token service from dependency injection container.
 
+    Args:
+        token_service: Token service from DI container
+
     Returns:
-        TokenService: Token service instance
+        TokenServiceProtocol: Token service instance
     """
     return token_service
 
 
 @inject
 def get_mfa_service(
-    mfa_service=Provide[ApplicationContainer.services.mfa_service],
-):
+    mfa_service: MFAServiceProtocol = Provide[ApplicationContainer.services.mfa_service],
+) -> MFAServiceProtocol:
     """Get MFA service from dependency injection container.
 
+    Args:
+        mfa_service: MFA service from DI container
+
     Returns:
-        MFAService: MFA service instance
+        MFAServiceProtocol: MFA service instance
     """
     return mfa_service
 
 
 @inject
 def get_email_service(
-    email_service=Provide[ApplicationContainer.services.email_service],
-):
+    email_service: EmailServiceProtocol = Provide[ApplicationContainer.services.email_service],
+) -> EmailServiceProtocol:
     """Get email service from dependency injection container.
 
+    Args:
+        email_service: Email service from DI container
+
     Returns:
-        EmailService: Email service instance
+        EmailServiceProtocol: Email service instance
     """
     return email_service
 
@@ -261,17 +454,18 @@ def get_email_service(
 # ============================
 
 
+@inject
 async def get_current_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    settings: Settings = Depends(get_settings),
+    credentials: HTTPAuthorizationCredentials | None,
+    auth_service: AuthService = Provide[ApplicationContainer.services.auth_service],
+    settings: Settings = Provide[ApplicationContainer.infrastructure.settings],
 ) -> User:
-    """Get current authenticated user using app-bound container.
+    """Get current authenticated user using dependency injection.
 
     Args:
-        request: FastAPI request object (contains app state)
         credentials: HTTP bearer token credentials
-        settings: Application settings
+        auth_service: Authentication service from DI container
+        settings: Application settings from DI container
 
     Returns:
         User: Authenticated user
@@ -294,7 +488,7 @@ async def get_current_user(
             algorithms=[settings.security.algorithm],
         )
 
-        user_id: str = payload.get("sub")
+        user_id = payload.get("sub")
         if user_id is None:
             raise AuthenticationError("Invalid token payload")
 
@@ -307,11 +501,8 @@ async def get_current_user(
         ) from e
 
     try:
-        # Get auth service from container and get user
-        container = request.app.state.container
-        auth_service = container.services.auth_service()
-
-        user = await auth_service.get_user_by_id(user_id)
+        # Get user from auth service using internal method
+        user = await auth_service._get_user_with_roles(str(user_id))
         if user is None:
             raise AuthenticationError("User not found")
 
@@ -325,17 +516,32 @@ async def get_current_user(
         ) from e
 
 
+async def get_current_user_dependency(
+    credentials: HTTPAuthorizationCredentials | None = None,
+) -> User:
+    """FastAPI dependency wrapper for get_current_user.
+
+    Args:
+        credentials: HTTP bearer token credentials
+
+    Returns:
+        User: Authenticated user
+    """
+    return await get_current_user(credentials)
+
+
+@inject
 async def get_optional_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    auth_service: AuthService = Depends(get_auth_service),
-    settings: Settings = Depends(get_settings),
+    credentials: HTTPAuthorizationCredentials | None,
+    auth_service: AuthService = Provide[ApplicationContainer.services.auth_service],
+    settings: Settings = Provide[ApplicationContainer.infrastructure.settings],
 ) -> User | None:
     """Get current user if authenticated, otherwise None.
 
     Args:
         credentials: HTTP bearer token credentials
         auth_service: Authentication service from DI container
-        settings: Application settings
+        settings: Application settings from DI container
 
     Returns:
         Optional[User]: Authenticated user or None
@@ -346,7 +552,21 @@ async def get_optional_user(
         return None
 
 
-def require_permissions(*permissions: str):
+async def get_optional_user_dependency(
+    credentials: HTTPAuthorizationCredentials | None = None,
+) -> User | None:
+    """FastAPI dependency wrapper for get_optional_user.
+
+    Args:
+        credentials: HTTP bearer token credentials
+
+    Returns:
+        Optional[User]: Authenticated user or None
+    """
+    return await get_optional_user(credentials)
+
+
+def require_permissions(*permissions: str) -> Any:
     """Dependency factory for permission-based access control using DI.
 
     Args:
@@ -356,12 +576,14 @@ def require_permissions(*permissions: str):
         Dependency function that checks user permissions
     """
 
+    @inject
     async def permission_dependency(
-        current_user: User = Depends(get_current_user),
-        auth_service: AuthService = Depends(get_auth_service),
+        current_user: User,
+        auth_service: AuthService = Provide[ApplicationContainer.services.auth_service],
     ) -> User:
         """Check if current user has required permissions."""
-        if not await auth_service.user_has_permissions(current_user, permissions):
+        user_permissions = await auth_service._get_user_permissions(current_user)
+        if not any(perm in user_permissions for perm in permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required: {', '.join(permissions)}",
@@ -371,7 +593,7 @@ def require_permissions(*permissions: str):
     return permission_dependency
 
 
-def require_roles(*roles: str):
+def require_roles(*roles: str) -> Any:
     """Dependency factory for role-based access control using DI.
 
     Args:
@@ -381,12 +603,16 @@ def require_roles(*roles: str):
         Dependency function that checks user roles
     """
 
+    @inject
     async def role_dependency(
-        current_user: User = Depends(get_current_user),
-        auth_service: AuthService = Depends(get_auth_service),
+        current_user: User,
+        auth_service: AuthService = Provide[
+            ApplicationContainer.services.auth_service
+        ],  # noqa: ARG001
     ) -> User:
         """Check if current user has required roles."""
-        if not await auth_service.user_has_roles(current_user, roles):
+        user_roles = [role.name for role in current_user.roles]
+        if not any(role in user_roles for role in roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required roles: {', '.join(roles)}",
@@ -394,159 +620,6 @@ def require_roles(*roles: str):
         return current_user
 
     return role_dependency
-
-
-# ============================
-# Rate Limiting with DI
-# ============================
-
-
-class RateLimiterDI:
-    """Rate limiting dependency using dependency injection."""
-
-    def __init__(self, calls: int, period: int) -> None:
-        self.calls = calls
-        self.period = period
-
-    async def __call__(self, request: Request) -> None:
-        """Check rate limit for the request using app-bound cache service."""
-        # Get cache service from app-bound container
-        container = request.app.state.container
-        cache_service = container.services.cache_service()
-
-        # Use client IP as identifier
-        client_ip = request.client.host if request.client else "unknown"
-        key = f"rate_limit:{client_ip}"
-
-        current_calls = await cache_service.get_counter(key, self.period)
-
-        if current_calls >= self.calls:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded",
-                headers={"Retry-After": str(self.period)},
-            )
-
-        await cache_service.increment_counter(key, self.period)
-
-
-# ============================
-# Service Factory with DI
-# ============================
-
-
-@inject
-class ServiceFactory:
-    """Factory for creating multiple services with DI container.
-
-    Provides a unified interface for accessing multiple services
-    while maintaining proper dependency injection patterns.
-    """
-
-    def __init__(
-        self,
-        camera_service=Provide[ApplicationContainer.services.camera_service],
-        frame_service=Provide[ApplicationContainer.services.frame_service],
-        detection_service=Provide[ApplicationContainer.services.detection_service],
-        metrics_service=Provide[ApplicationContainer.services.metrics_service],
-        streaming_service=Provide[ApplicationContainer.services.streaming_service],
-        analytics_service=Provide[ApplicationContainer.services.analytics_service],
-        alert_service=Provide[ApplicationContainer.services.alert_service],
-    ):
-        self._camera_service = camera_service
-        self._frame_service = frame_service
-        self._detection_service = detection_service
-        self._metrics_service = metrics_service
-        self._streaming_service = streaming_service
-        self._analytics_service = analytics_service
-        self._alert_service = alert_service
-
-    @property
-    def camera_service(self) -> CameraService:
-        """Get camera service instance."""
-        return self._camera_service
-
-    @property
-    def frame_service(self) -> FrameService:
-        """Get frame service instance."""
-        return self._frame_service
-
-    @property
-    def detection_service(self) -> DetectionService:
-        """Get detection service instance."""
-        return self._detection_service
-
-    @property
-    def metrics_service(self) -> MetricsService:
-        """Get metrics service instance."""
-        return self._metrics_service
-
-    @property
-    def streaming_service(self):
-        """Get streaming service instance."""
-        return self._streaming_service
-
-    @property
-    def analytics_service(self):
-        """Get analytics service instance."""
-        return self._analytics_service
-
-    @property
-    def alert_service(self):
-        """Get alert service instance."""
-        return self._alert_service
-
-
-def get_service_factory() -> ServiceFactory:
-    """Get service factory with dependency injection."""
-    return ServiceFactory()
-
-
-# ============================
-# Pagination and Utility Dependencies
-# ============================
-
-
-class PaginationParams:
-    """Pagination parameters for list endpoints."""
-
-    def __init__(
-        self,
-        page: int = 1,
-        size: int = 20,
-        order_by: str = "created_at",
-        order_desc: bool = True,
-    ):
-        if page < 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Page number must be >= 1",
-            )
-        if size < 1 or size > 100:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Page size must be between 1 and 100",
-            )
-
-        self.page = page
-        self.size = size
-        self.order_by = order_by
-        self.order_desc = order_desc
-
-    @property
-    def offset(self) -> int:
-        """Calculate offset from page and size."""
-        return (self.page - 1) * self.size
-
-
-def get_pagination_params(
-    page: int = 1,
-    size: int = 20,
-    order_by: str = "created_at",
-    order_desc: bool = True,
-) -> PaginationParams:
-    """Get pagination parameters dependency."""
-    return PaginationParams(page, size, order_by, order_desc)
 
 
 # ============================
@@ -559,7 +632,7 @@ async def validate_file_upload(
     max_size_mb: float = 500.0,
     allowed_extensions: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Validate uploaded file with DI support.
+    """Validate uploaded file with comprehensive checks.
 
     Args:
         file: Uploaded file
@@ -567,7 +640,7 @@ async def validate_file_upload(
         allowed_extensions: Set of allowed file extensions
 
     Returns:
-        dict: Validation results
+        dict: Validation results with file metadata
 
     Raises:
         HTTPException: If validation fails
@@ -629,14 +702,25 @@ class BackgroundTaskManager:
 
     def __init__(
         self,
-        cache_service=Provide[ApplicationContainer.services.cache_service],
+        cache_service: CacheService = Provide[
+            ApplicationContainer.services.cache_service
+        ],
     ):
         self.cache_service = cache_service
 
     async def create_task(
         self, task_type: str, task_data: dict[str, Any], user_id: str
     ) -> str:
-        """Create a new background task using cache service."""
+        """Create a new background task using cache service.
+
+        Args:
+            task_type: Type of task to create
+            task_data: Task-specific data
+            user_id: ID of user creating the task
+
+        Returns:
+            str: Task ID
+        """
         task_id = str(uuid4())
         task_info = {
             "task_id": task_id,
@@ -650,7 +734,7 @@ class BackgroundTaskManager:
             "error_message": None,
         }
 
-        await self.cache_service.set(
+        await self.cache_service.set_json(
             f"task:{task_id}", task_info, ttl=3600  # 1 hour TTL
         )
 
@@ -663,8 +747,18 @@ class BackgroundTaskManager:
         progress: float | None = None,
         error_message: str | None = None,
     ) -> bool:
-        """Update task status using cache service."""
-        task_info = await self.cache_service.get(f"task:{task_id}")
+        """Update task status using cache service.
+
+        Args:
+            task_id: Task ID to update
+            status: New task status
+            progress: Task progress percentage
+            error_message: Error message if task failed
+
+        Returns:
+            bool: True if task was updated, False if not found
+        """
+        task_info = await self.cache_service.get_json(f"task:{task_id}")
         if not task_info:
             return False
 
@@ -677,30 +771,42 @@ class BackgroundTaskManager:
 
         task_info["updated_at"] = datetime.now().isoformat()
 
-        await self.cache_service.set(f"task:{task_id}", task_info, ttl=3600)
+        await self.cache_service.set_json(f"task:{task_id}", task_info, ttl=3600)
         return True
 
     async def get_task(self, task_id: str) -> dict[str, Any] | None:
-        """Get task by ID using cache service."""
-        return await self.cache_service.get(f"task:{task_id}")
+        """Get task by ID using cache service.
+
+        Args:
+            task_id: Task ID to retrieve
+
+        Returns:
+            Task information or None if not found
+        """
+        return await self.cache_service.get_json(f"task:{task_id}")
 
     async def cleanup_task(self, task_id: str) -> bool:
-        """Clean up completed task using cache service."""
+        """Clean up completed task using cache service.
+
+        Args:
+            task_id: Task ID to clean up
+
+        Returns:
+            bool: True if task was deleted, False if not found
+        """
         return await self.cache_service.delete(f"task:{task_id}")
 
 
-def get_background_task_manager() -> BackgroundTaskManager:
-    """Get background task manager with dependency injection."""
-    return BackgroundTaskManager()
+@inject
+def get_background_task_manager(
+    cache_service: CacheService = Provide[ApplicationContainer.services.cache_service],
+) -> BackgroundTaskManager:
+    """Get background task manager with dependency injection.
 
+    Args:
+        cache_service: Cache service from DI container
 
-# ============================
-# Rate Limiter Instances
-# ============================
-
-# Pre-configured rate limiters using DI
-rate_limit_strict = RateLimiterDI(calls=10, period=60)  # 10 calls per minute
-rate_limit_normal = RateLimiterDI(calls=100, period=60)  # 100 calls per minute
-rate_limit_relaxed = RateLimiterDI(calls=1000, period=60)  # 1000 calls per minute
-rate_limit_upload = RateLimiterDI(calls=5, period=3600)  # 5 uploads per hour
-rate_limit_batch = RateLimiterDI(calls=50, period=60)  # 50 batch operations per minute
+    Returns:
+        BackgroundTaskManager: Task manager instance
+    """
+    return BackgroundTaskManager(cache_service=cache_service)

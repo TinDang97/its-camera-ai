@@ -16,10 +16,10 @@ and provide proper resource management with cleanup.
 
 import redis.asyncio as redis
 from dependency_injector import containers, providers
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
+from .core.config import get_settings
 from .core.logging import get_logger
+from .models.database import DatabaseManager
 
 logger = get_logger(__name__)
 
@@ -29,35 +29,34 @@ class InfrastructureContainer(containers.DeclarativeContainer):
 
     Manages database connections, Redis, external APIs, and other
     infrastructure components using Resource providers for proper
-    lifecycle management.
+    lifecycle management with the unified DatabaseManager pattern.
     """
 
     # Configuration
     config = providers.Configuration()
 
-    # Database Engine - Singleton for connection pooling
-    database_engine = providers.Resource(
-        providers.Factory(
-            create_async_engine,
-            config.database.url,
-            echo=config.database.echo,
-            pool_size=config.database.pool_size,
-            max_overflow=config.database.max_overflow,
-            pool_pre_ping=True,
-            pool_recycle=3600,
-        )
+    # Settings provider
+    settings = providers.Singleton(
+        get_settings,
     )
 
-    # Session Factory - Factory for creating sessions
+    # Database Manager - Unified database resource with production optimizations
+    database = providers.Singleton(
+        DatabaseManager,
+        settings=settings,
+    )
+
+    # Session Factory - Convenience provider for accessing session factory
     session_factory = providers.Factory(
-        sessionmaker,
-        bind=database_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
+        lambda db: db.session_factory,
+        db=database,
     )
 
-    # Database Session - Factory for individual sessions
-    database_session = providers.Resource(providers.Factory(session_factory))
+    # Database Session - Convenience provider for database sessions
+    database_session = providers.Factory(
+        lambda db: db.get_session(),
+        db=database,
+    )
 
     # Redis Connection - Singleton with connection pooling
     redis_client = providers.Resource(
@@ -232,6 +231,22 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # Refactored Analytics Components with DI
 
+    # Real-time Analytics Service - Factory for real-time analytics generation
+    realtime_analytics_service = providers.Factory(
+        "its_camera_ai.services.realtime_analytics_service.RealtimeAnalyticsService",
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Historical Analytics Service - Factory for historical data queries
+    historical_analytics_service = providers.Factory(
+        "its_camera_ai.services.historical_analytics_service.HistoricalAnalyticsService",
+        analytics_repository=repositories.analytics_repository,
+        database_manager=infrastructure.database,
+        cache_service=cache_service,
+        settings=config,
+    )
+
     # Analytics Aggregation Service - Factory for time-series aggregation
     analytics_aggregation_service = providers.Factory(
         "its_camera_ai.services.analytics_aggregation_service.AnalyticsAggregationService",
@@ -244,6 +259,15 @@ class ServiceContainer(containers.DeclarativeContainer):
     incident_detection_service = providers.Factory(
         "its_camera_ai.services.incident_detection_service.IncidentDetectionService",
         alert_repository=repositories.alert_repository,
+        cache_service=cache_service,
+        settings=config,
+    )
+
+    # Incident Management Service - Factory for incident CRUD operations
+    incident_management_service = providers.Factory(
+        "its_camera_ai.services.incident_management_service.IncidentManagementService",
+        alert_repository=repositories.alert_repository,
+        database_manager=infrastructure.database,
         cache_service=cache_service,
         settings=config,
     )
