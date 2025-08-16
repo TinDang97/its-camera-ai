@@ -1,0 +1,340 @@
+services:
+  # PostgreSQL Primary
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: its-postgres-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: its_camera_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_REPLICATION_MODE: master
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: replication_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./infrastructure/database/postgresql-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # TimescaleDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: its-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: its_metrics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: timescale_password
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./infrastructure/database/timescale-init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d its_metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Master
+  redis-master:
+    image: redis:7-alpine
+    container_name: its-redis-master
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_master_data:/data
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Replica
+  redis-replica:
+    image: redis:7-alpine
+    container_name: its-redis-replica
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redis_password --replicaof redis-master 6379 --masterauth redis_password
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_replica_data:/data
+    networks:
+      - its-network
+    depends_on:
+      - redis-master
+
+  # Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: its-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 10
+      ZOOKEEPER_SYNC_LIMIT: 5
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: its-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_COMPRESSION_TYPE: snappy
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # MinIO
+  minio:
+    image: minio/minio:latest
+    container_name: its-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+      MINIO_COMPRESSION_ENABLE: "on"
+      MINIO_COMPRESSION_EXTENSIONS: ".txt,.log,.csv,.json,.tar,.xml,.bin"
+      MINIO_COMPRESSION_MIME_TYPES: "text/*,application/json,application/xml"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO Client - Create buckets
+  minio-init:
+    image: minio/mc:latest
+    container_name: its-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set minio http://minio:9000 minioadmin minioadmin123;
+      mc mb minio/its-video --ignore-existing;
+      mc mb minio/its-models --ignore-existing;
+      mc mb minio/its-logs --ignore-existing;
+      mc mb minio/its-backups --ignore-existing;
+      mc anonymous set download minio/its-models;
+      mc version enable minio/its-models;
+      mc version enable minio/its-backups;
+      exit 0;
+      "
+    networks:
+      - its-network
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: its-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./infrastructure/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/monitoring/prometheus/rules:/etc/prometheus/rules:ro
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: its-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: grafana_password
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel
+      GF_SERVER_ROOT_URL: http://localhost:3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    networks:
+      - its-network
+    depends_on:
+      - prometheus
+      - timescaledb
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Loki (Logging)
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: its-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./infrastructure/monitoring/loki/loki.yml:/etc/loki/local-config.yaml:ro
+    networks:
+      - its-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Node Exporter
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: its-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/pods/.+)($|/)'
+    networks:
+      - its-network
+
+  # PostgreSQL Exporter
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.13.0
+    container_name: its-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres_password@postgres-primary:5432/its_camera_ai?sslmode=disable"
+    ports:
+      - "9187:9187"
+    networks:
+      - its-network
+    depends_on:
+      - postgres-primary
+
+  # Redis Exporter
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.52.0
+    container_name: its-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis-master:6379
+      REDIS_PASSWORD: redis_password
+    ports:
+      - "9121:9121"
+    networks:
+      - its-network
+    depends_on:
+      - redis-master
+
+volumes:
+  postgres_primary_data:
+    driver: local
+  postgres_replica_data:
+    driver: local
+  timescaledb_data:
+    driver: local
+  redis_master_data:
+    driver: local
+  redis_replica_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  kafka_data:
+    driver: local
+  minio_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+
+networks:
+  its-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

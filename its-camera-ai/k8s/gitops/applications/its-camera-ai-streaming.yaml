@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: its-camera-ai-streaming
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: its-camera-ai
+    its-camera-ai.io/component: streaming-services
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: its-camera-ai
+  
+  source:
+    repoURL: https://github.com/its-camera-ai/infrastructure
+    targetRevision: main
+    path: k8s/applications/streaming
+    
+    helm:
+      valueFiles:
+      - values.yaml
+      - values-production.yaml
+      
+      parameters:
+      - name: grpcServer.replicas
+        value: "10"
+      - name: streaming.concurrentStreams
+        value: "1000"
+      - name: mp4Encoder.enabled
+        value: "true"
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: its-camera-ai-streaming
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  revisionHistoryLimit: 10

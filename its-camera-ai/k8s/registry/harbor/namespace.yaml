@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: harbor
+  labels:
+    name: harbor
+    app.kubernetes.io/managed-by: helm
+    its-camera-ai.io/component: registry
+    its-camera-ai.io/tier: infrastructure

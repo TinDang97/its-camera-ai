@@ -1,0 +1,338 @@
+# Harbor Configuration for ITS Camera AI Production
+# Enterprise container registry with security scanning and replication
+
+expose:
+  type: ingress
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      secretName: harbor-tls
+      notarySecretName: notary-tls
+  
+  ingress:
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: '443'
+      alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:ACCOUNT_ID:certificate/CERT_ID
+      alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true,idle_timeout.timeout_seconds=120
+    
+    hosts:
+      core: harbor.its-camera-ai.com
+      notary: notary.its-camera-ai.com
+    
+    className: alb
+
+# External URL configuration
+externalURL: https://harbor.its-camera-ai.com
+
+# Persistence configuration using AWS EBS
+persistence:
+  enabled: true
+  resourcePolicy: "keep"
+  persistentVolumeClaim:
+    registry:
+      existingClaim: ""
+      storageClass: gp3
+      subPath: ""
+      accessMode: ReadWriteOnce
+      size: 1Ti
+      annotations: {}
+    
+    chartmuseum:
+      existingClaim: ""
+      storageClass: gp3
+      subPath: ""
+      accessMode: ReadWriteOnce
+      size: 10Gi
+    
+    jobservice:
+      existingClaim: ""
+      storageClass: gp3
+      subPath: ""
+      accessMode: ReadWriteOnce
+      size: 5Gi
+    
+    database:
+      existingClaim: ""
+      storageClass: gp3
+      subPath: ""
+      accessMode: ReadWriteOnce
+      size: 5Gi
+    
+    redis:
+      existingClaim: ""
+      storageClass: gp3
+      subPath: ""
+      accessMode: ReadWriteOnce
+      size: 5Gi
+    
+    trivy:
+      existingClaim: ""
+      storageClass: gp3
+      subPath: ""
+      accessMode: ReadWriteOnce
+      size: 10Gi
+
+# Image pull policy
+imagePullPolicy: IfNotPresent
+
+# Log level
+logLevel: info
+
+# Harbor admin password
+harborAdminPassword: "Harbor12345"
+
+# Internal TLS
+internalTLS:
+  enabled: false
+
+# IPv6 support
+ipFamily:
+  ipv6:
+    enabled: false
+
+# Core service configuration
+core:
+  replicas: 3
+  revisionHistoryLimit: 10
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: general
+    its-camera-ai/node-type: general-workload
+  
+  tolerations: []
+  
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - harbor-core
+          topologyKey: kubernetes.io/hostname
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # Auto-scaling configuration
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+
+# Job service configuration
+jobservice:
+  replicas: 3
+  revisionHistoryLimit: 10
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: general
+    its-camera-ai/node-type: general-workload
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # Job service specific configurations
+  jobLoggers:
+  - file
+  - database
+  
+  # Replication job configurations
+  replication:
+    max_job_workers: 10
+
+# Registry configuration
+registry:
+  replicas: 3
+  revisionHistoryLimit: 10
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: memory-optimized
+    its-camera-ai/node-type: memory-workload
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 8Gi
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+  
+  # Registry middleware for caching
+  middleware:
+    enabled: true
+    type: cloudfront
+    cloudfront:
+      baseurl: https://d123456789.cloudfront.net
+      keypairid: KEYPAIRID
+      duration: 3000s
+      ipfilteredby: none
+
+# Chart Museum (Helm repository)
+chartmuseum:
+  enabled: true
+  replicas: 2
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: general
+    its-camera-ai/node-type: general-workload
+  
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# Trivy (Security scanner)
+trivy:
+  enabled: true
+  replicas: 2
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: general
+    its-camera-ai/node-type: general-workload
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # Trivy DB update frequency
+  dbUpdateFrequency: 24h
+
+# Notary (Image signing)
+notary:
+  enabled: true
+  
+  server:
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  
+  signer:
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+# PostgreSQL database
+database:
+  type: external
+  external:
+    host: "postgres-primary.its-camera-ai.com"
+    port: "5432"
+    username: "harbor"
+    password: "harbor-db-password"
+    coreDatabase: "harbor_core"
+    notaryServerDatabase: "harbor_notary_server"
+    notarySignerDatabase: "harbor_notary_signer"
+    
+    # SSL configuration
+    sslmode: "require"
+
+# Redis cache
+redis:
+  type: external
+  external:
+    sentinelMasterSet: ""
+    addr: "redis.its-camera-ai.com:6379"
+    password: "redis-password"
+    db: "0"
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  core:
+    path: /metrics
+    port: 8001
+  registry:
+    path: /metrics
+    port: 8001
+  jobservice:
+    path: /metrics
+    port: 8001
+  
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      app: harbor
+
+# Cache configuration
+cache:
+  enabled: true
+  expireHours: 24
+
+# Update strategy
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 25%
+    maxSurge: 25%
+
+# Security configurations
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10000
+  fsGroup: 10000
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingressRules:
+    denyAll: false
+
+# Service configuration
+service:
+  tls:
+    enabled: true
+    existingSecret: ""
+    commonName: harbor.its-camera-ai.com
+
+# Portal (Harbor UI)
+portal:
+  replicas: 2
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: general
+    its-camera-ai/node-type: general-workload
+  
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi

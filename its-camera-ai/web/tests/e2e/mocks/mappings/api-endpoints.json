@@ -1,0 +1,172 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/api/cameras"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "cameras": [
+            {
+              "id": "CAM001",
+              "name": "Main St & 1st Ave",
+              "location": "Downtown Intersection",
+              "status": "online",
+              "latitude": 40.7128,
+              "longitude": -74.0060,
+              "model": "HIKVISION DS-2CD2083G2",
+              "ipAddress": "192.168.1.101",
+              "uptime": 86400,
+              "frameRate": 30
+            },
+            {
+              "id": "CAM002",
+              "name": "2nd Ave & Oak Dr",
+              "location": "Residential Area",
+              "status": "offline",
+              "latitude": 40.7200,
+              "longitude": -74.0100,
+              "model": "AXIS P3375-LV",
+              "ipAddress": "192.168.1.102",
+              "uptime": 0,
+              "frameRate": 0
+            }
+          ],
+          "total": 2,
+          "page": 1,
+          "limit": 10
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/api/incidents"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "incidents": [
+            {
+              "id": "INC001",
+              "title": "Traffic Accident on Main St",
+              "type": "accident",
+              "severity": "high",
+              "status": "open",
+              "cameraId": "CAM001",
+              "location": "Main St & 1st Ave",
+              "description": "Multi-vehicle collision blocking two lanes",
+              "timestamp": "2023-12-01T10:30:00Z"
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "limit": 10
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/api/metrics/dashboard"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "totalCameras": 2,
+          "onlineCameras": 1,
+          "offlineCameras": 1,
+          "maintenanceCameras": 0,
+          "totalIncidents": 1,
+          "activeIncidents": 1,
+          "avgResponseTime": "1.2s",
+          "systemHealth": {
+            "status": "healthy",
+            "cpuUsage": 45,
+            "memoryUsage": 67,
+            "diskUsage": 23
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/api/analytics/traffic"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "data": [
+            {
+              "timestamp": "2023-12-01T09:00:00Z",
+              "vehicleCount": 45,
+              "averageSpeed": 35.5,
+              "congestionLevel": "moderate",
+              "occupancy": 78
+            },
+            {
+              "timestamp": "2023-12-01T10:00:00Z",
+              "vehicleCount": 52,
+              "averageSpeed": 32.1,
+              "congestionLevel": "high",
+              "occupancy": 85
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPathPattern": "/api/auth/login"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "token": "mock-jwt-token",
+          "user": {
+            "id": "user-1",
+            "email": "admin@test.com",
+            "role": "admin",
+            "name": "Test Admin"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/api/health"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "status": "healthy",
+          "timestamp": "{{now format='yyyy-MM-dd HH:mm:ss'}}",
+          "version": "1.0.0"
+        }
+      }
+    }
+  ]
+}

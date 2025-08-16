@@ -1,0 +1,140 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: its-camera-ai
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: its-camera-ai
+    its-camera-ai.io/component: project
+spec:
+  description: ITS Camera AI Production Project
+  
+  # Source repositories
+  sourceRepos:
+  - 'https://github.com/its-camera-ai/*'
+  - 'https://charts.helm.sh/*'
+  - 'https://harbor.its-camera-ai.com/chartrepo/*'
+  
+  # Destination clusters and namespaces
+  destinations:
+  - namespace: 'its-camera-ai-*'
+    server: https://kubernetes.default.svc
+  - namespace: 'ml-*'
+    server: https://kubernetes.default.svc
+  - namespace: 'monitoring'
+    server: https://kubernetes.default.svc
+  - namespace: 'logging'
+    server: https://kubernetes.default.svc
+  
+  # Cluster resource whitelist
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRole
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRoleBinding
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+  - group: admissionregistration.k8s.io
+    kind: MutatingWebhookConfiguration
+  - group: admissionregistration.k8s.io
+    kind: ValidatingWebhookConfiguration
+  - group: networking.k8s.io
+    kind: NetworkPolicy
+  - group: storage.k8s.io
+    kind: StorageClass
+  - group: scheduling.k8s.io
+    kind: PriorityClass
+  
+  # Namespace resource whitelist
+  namespaceResourceWhitelist:
+  - group: ''
+    kind: Service
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: ConfigMap
+  - group: ''
+    kind: Secret
+  - group: ''
+    kind: PersistentVolumeClaim
+  - group: ''
+    kind: Pod
+  - group: apps
+    kind: Deployment
+  - group: apps
+    kind: StatefulSet
+  - group: apps
+    kind: DaemonSet
+  - group: apps
+    kind: ReplicaSet
+  - group: batch
+    kind: Job
+  - group: batch
+    kind: CronJob
+  - group: extensions
+    kind: Ingress
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+  - group: policy
+    kind: PodDisruptionBudget
+  - group: rbac.authorization.k8s.io
+    kind: Role
+  - group: rbac.authorization.k8s.io
+    kind: RoleBinding
+  - group: monitoring.coreos.com
+    kind: ServiceMonitor
+  - group: monitoring.coreos.com
+    kind: PrometheusRule
+  
+  # Roles for team access
+  roles:
+  - name: platform-admin
+    description: Platform team admin access
+    policies:
+    - p, proj:its-camera-ai:platform-admin, applications, *, its-camera-ai/*, allow
+    - p, proj:its-camera-ai:platform-admin, repositories, *, *, allow
+    - p, proj:its-camera-ai:platform-admin, clusters, *, *, allow
+    groups:
+    - platform-team
+  
+  - name: ml-engineer
+    description: ML engineers access to ML services
+    policies:
+    - p, proj:its-camera-ai:ml-engineer, applications, get, its-camera-ai/its-camera-ai-ml, allow
+    - p, proj:its-camera-ai:ml-engineer, applications, sync, its-camera-ai/its-camera-ai-ml, allow
+    - p, proj:its-camera-ai:ml-engineer, applications, update, its-camera-ai/its-camera-ai-ml, allow
+    - p, proj:its-camera-ai:ml-engineer, logs, get, its-camera-ai/its-camera-ai-ml, allow
+    groups:
+    - ml-engineers
+  
+  - name: devops-engineer
+    description: DevOps engineers deployment access
+    policies:
+    - p, proj:its-camera-ai:devops-engineer, applications, *, its-camera-ai/*, allow
+    - p, proj:its-camera-ai:devops-engineer, logs, get, its-camera-ai/*, allow
+    groups:
+    - devops-engineers
+  
+  # Sync windows for controlled deployments
+  syncWindows:
+  - kind: allow
+    schedule: '0 8-18 * * 1-5'  # Business hours on weekdays
+    duration: 10h
+    applications:
+    - '*'
+    manualSync: true
+  
+  - kind: deny
+    schedule: '0 22 * * 5'  # Friday night maintenance window
+    duration: 8h
+    applications:
+    - '*'
+    manualSync: false
+  
+  # Signature keys for verification
+  signatureKeys:
+  - keyID: 4AEE18F83AFDEB23

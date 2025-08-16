@@ -1,0 +1,58 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: its-camera-ai-core
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: its-camera-ai
+    its-camera-ai.io/component: core-services
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: its-camera-ai
+  
+  source:
+    repoURL: https://github.com/its-camera-ai/infrastructure
+    targetRevision: main
+    path: k8s/applications/core
+    
+    helm:
+      valueFiles:
+      - values.yaml
+      - values-production.yaml
+      
+      parameters:
+      - name: image.tag
+        value: "latest"
+      - name: environment
+        value: "production"
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: its-camera-ai-core
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  revisionHistoryLimit: 10
+  
+  ignoreDifferences:
+  - group: apps
+    kind: Deployment
+    managedFieldsManagers:
+    - kube-controller-manager

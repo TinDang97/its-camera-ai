@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: its-camera-ai-ml
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: its-camera-ai
+    its-camera-ai.io/component: ml-services
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: its-camera-ai
+  
+  source:
+    repoURL: https://github.com/its-camera-ai/infrastructure
+    targetRevision: main
+    path: k8s/applications/ml
+    
+    helm:
+      valueFiles:
+      - values.yaml
+      - values-production.yaml
+      
+      parameters:
+      - name: inference.gpu.enabled
+        value: "true"
+      - name: inference.replicas
+        value: "6"
+      - name: modelRegistry.enabled
+        value: "true"
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: its-camera-ai-ml
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  revisionHistoryLimit: 10
+  
+  ignoreDifferences:
+  - group: apps
+    kind: Deployment
+    managedFieldsManagers:
+    - kube-controller-manager
+  - group: v1
+    kind: Secret
+    name: model-registry-secrets
+    jsonPointers:
+    - /data

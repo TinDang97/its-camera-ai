@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-server
+spec:
+  replicas: 3
+  template:
+    spec:
+      nodeSelector:
+        node.kubernetes.io/instance-type: general
+        its-camera-ai/node-type: general-workload
+      containers:
+      - name: argocd-server
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+        env:
+        - name: ARGOCD_SERVER_INSECURE
+          value: "false"
+        - name: ARGOCD_SERVER_ROOTPATH
+          value: "/"
+        - name: ARGOCD_SERVER_GRPC_WEB
+          value: "true"

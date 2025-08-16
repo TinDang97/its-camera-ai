@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-application-controller
+spec:
+  replicas: 3
+  template:
+    spec:
+      nodeSelector:
+        node.kubernetes.io/instance-type: general
+        its-camera-ai/node-type: general-workload
+      containers:
+      - name: argocd-application-controller
+        resources:
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+          requests:
+            cpu: 2000m
+            memory: 4Gi
+        env:
+        - name: ARGOCD_CONTROLLER_REPLICAS
+          value: "3"
+        - name: ARGOCD_CONTROLLER_HEARTBEAT_TIME
+          value: "10"
+        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_TIMEOUT_SECONDS
+          value: "120"
+        - name: ARGOCD_RECONCILIATION_TIMEOUT
+          value: "180s"

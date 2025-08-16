@@ -1,0 +1,283 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: its-database
+data:
+  redis.conf: |
+    # Network
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    tcp-keepalive 300
+    
+    # General
+    daemonize no
+    supervised no
+    loglevel notice
+    databases 16
+    
+    # Persistence
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+    
+    # Replication
+    replica-read-only yes
+    repl-diskless-sync no
+    repl-diskless-sync-delay 5
+    
+    # Memory Management
+    maxmemory 4gb
+    maxmemory-policy allkeys-lru
+    
+    # Append Only File
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    
+    # Cluster
+    cluster-enabled no
+    
+    # Security
+    requirepass redis_password_change_in_production
+    
+  sentinel.conf: |
+    port 26379
+    bind 0.0.0.0
+    protected-mode yes
+    dir /tmp
+    sentinel monitor mymaster redis-0.redis-headless.its-database.svc.cluster.local 6379 2
+    sentinel auth-pass mymaster redis_password_change_in_production
+    sentinel down-after-milliseconds mymaster 5000
+    sentinel parallel-syncs mymaster 1
+    sentinel failover-timeout mymaster 10000
+    sentinel deny-scripts-reconfig yes
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-secret
+  namespace: its-database
+type: Opaque
+stringData:
+  redis-password: "redis_password_change_in_production"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: its-database
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: redis
+  selector:
+    app: redis
+    role: master
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: its-database
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: redis
+  selector:
+    app: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel
+  namespace: its-database
+  labels:
+    app: redis-sentinel
+spec:
+  type: ClusterIP
+  ports:
+    - port: 26379
+      targetPort: 26379
+      protocol: TCP
+      name: sentinel
+  selector:
+    app: redis-sentinel
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: its-database
+spec:
+  serviceName: redis-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      initContainers:
+        - name: config
+          image: redis:7-alpine
+          command: ['sh', '-c']
+          args:
+            - |
+              cp /tmp/redis.conf /etc/redis/redis.conf
+              if [ "$(hostname)" = "redis-0" ]; then
+                echo "role master" >> /etc/redis/redis.conf
+              else
+                echo "replicaof redis-0.redis-headless.its-database.svc.cluster.local 6379" >> /etc/redis/redis.conf
+                echo "masterauth redis_password_change_in_production" >> /etc/redis/redis.conf
+              fi
+          volumeMounts:
+            - name: redis-config
+              mountPath: /tmp/redis.conf
+              subPath: redis.conf
+            - name: config
+              mountPath: /etc/redis
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["redis-server", "/etc/redis/redis.conf"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: redis-password
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/redis
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "1000m"
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+        - name: config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-sentinel
+  namespace: its-database
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis-sentinel
+  template:
+    metadata:
+      labels:
+        app: redis-sentinel
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: sentinel
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["redis-sentinel", "/etc/redis/sentinel.conf"]
+          ports:
+            - containerPort: 26379
+              name: sentinel
+          volumeMounts:
+            - name: sentinel-config
+              mountPath: /etc/redis/sentinel.conf
+              subPath: sentinel.conf
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "200m"
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -p
+                - "26379"
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: sentinel-config
+          configMap:
+            name: redis-config

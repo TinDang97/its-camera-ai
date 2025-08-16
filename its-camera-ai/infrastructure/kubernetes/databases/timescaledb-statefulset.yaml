@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: timescaledb-secret
+  namespace: its-database
+type: Opaque
+stringData:
+  postgres-password: "timescale_admin_password_change_in_production"
+  timescale-user-password: "timescale_user_password_change_in_production"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  namespace: its-database
+  labels:
+    app: timescaledb
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5433
+      targetPort: 5432
+      protocol: TCP
+      name: postgresql
+  selector:
+    app: timescaledb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb-headless
+  namespace: its-database
+  labels:
+    app: timescaledb
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 5433
+      targetPort: 5432
+      protocol: TCP
+      name: postgresql
+  selector:
+    app: timescaledb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  namespace: its-database
+spec:
+  serviceName: timescaledb-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: timescaledb
+  template:
+    metadata:
+      labels:
+        app: timescaledb
+    spec:
+      securityContext:
+        fsGroup: 70
+        runAsUser: 70
+        runAsNonRoot: true
+      containers:
+        - name: timescaledb
+          image: timescale/timescaledb:latest-pg15
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgresql
+          env:
+            - name: POSTGRES_DB
+              value: "its_metrics"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-secret
+                  key: postgres-password
+            - name: TIMESCALEDB_TELEMETRY
+              value: "off"
+            - name: TS_TUNE_MAX_CONNS
+              value: "200"
+            - name: TS_TUNE_MAX_BG_WORKERS
+              value: "16"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: timescaledb-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - its_metrics
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - its_metrics
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: timescaledb-init-scripts
+  volumeClaimTemplates:
+    - metadata:
+        name: timescaledb-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 200Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: timescaledb-init-scripts
+  namespace: its-database
+data:
+  01-init-timescale.sql: |
+    -- Already created in the previous step via infrastructure/database/timescale-init.sql
+    -- This references the existing file
+    
+    -- Enable TimescaleDB extension
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+    
+    -- Create metrics schema
+    CREATE SCHEMA IF NOT EXISTS metrics;
+    
+    -- Create application user
+    CREATE USER IF NOT EXISTS its_metrics_user WITH PASSWORD 'its_metrics_password';
+    GRANT USAGE ON SCHEMA metrics TO its_metrics_user;
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA metrics TO its_metrics_user;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA metrics TO its_metrics_user;
+    
+    -- Set default privileges
+    ALTER DEFAULT PRIVILEGES IN SCHEMA metrics 
+        GRANT ALL PRIVILEGES ON TABLES TO its_metrics_user;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA metrics 
+        GRANT ALL PRIVILEGES ON SEQUENCES TO its_metrics_user;

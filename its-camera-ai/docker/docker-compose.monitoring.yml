@@ -1,0 +1,300 @@
+# Docker Compose for ITS Camera AI Monitoring Stack
+# Provides local development and testing environment for monitoring infrastructure
+
+version: '3.8'
+
+networks:
+  its-monitoring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+
+services:
+  # Prometheus - Metrics collection and storage
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: its-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules.yaml:/etc/prometheus/rules.yaml:ro
+      - ./monitoring/prometheus/slo-rules.yaml:/etc/prometheus/slo-rules.yaml:ro
+      - prometheus-data:/prometheus
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.10
+    depends_on:
+      - node-exporter
+      - cadvisor
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Grafana - Metrics visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: its-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel
+      - GF_ALERTING_ENABLED=true
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_FEATURE_TOGGLES_ENABLE=ngalert
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.11
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Alertmanager - Alert routing and notification
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: its-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.advertise-address=0.0.0.0:9093'
+      - '--log.level=info'
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.12
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Node Exporter - Host metrics collection
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: its-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.systemd'
+      - '--collector.processes'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.13
+    pid: host
+
+  # cAdvisor - Container metrics collection
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: its-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    command:
+      - '--housekeeping_interval=30s'
+      - '--max_housekeeping_interval=35s'
+      - '--event_storage_event_limit=default=0'
+      - '--event_storage_age_limit=default=0'
+      - '--disable_metrics=percpu,sched,tcp,udp'
+      - '--docker_only'
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.14
+    privileged: true
+    devices:
+      - /dev/kmsg
+
+  # Redis Exporter - Redis metrics for caching layer
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.52.0
+    container_name: its-redis-exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.15
+    depends_on:
+      - redis
+
+  # PostgreSQL Exporter - Database metrics
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.13.0
+    container_name: its-postgres-exporter
+    restart: unless-stopped
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://its_user:its_password@postgres:5432/its_camera_ai?sslmode=disable
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.16
+    depends_on:
+      - postgres
+
+  # Redis for caching (dependency for redis-exporter)
+  redis:
+    image: redis:7-alpine
+    container_name: its-redis-monitoring
+    restart: unless-stopped
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.20
+
+  # PostgreSQL for database (dependency for postgres-exporter)
+  postgres:
+    image: postgres:15-alpine
+    container_name: its-postgres-monitoring
+    restart: unless-stopped
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    environment:
+      - POSTGRES_DB=its_camera_ai
+      - POSTGRES_USER=its_user
+      - POSTGRES_PASSWORD=its_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.21
+
+  # DCGM Exporter - GPU metrics (only on GPU-enabled hosts)
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.2.5-3.2.0-ubuntu20.04
+    container_name: its-dcgm-exporter
+    restart: unless-stopped
+    ports:
+      - "9400:9400"
+    environment:
+      - DCGM_EXPORTER_LISTEN=0.0.0.0:9400
+      - DCGM_EXPORTER_KUBERNETES=false
+    volumes:
+      - /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:ro
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.17
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - gpu  # Only start with --profile gpu
+
+  # Blackbox Exporter - External service monitoring
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.24.0
+    container_name: its-blackbox-exporter
+    restart: unless-stopped
+    ports:
+      - "9115:9115"
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+    volumes:
+      - ./monitoring/blackbox/config.yml:/etc/blackbox_exporter/config.yml:ro
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.18
+
+  # Loki - Log aggregation
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: its-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.19
+
+  # Promtail - Log shipping agent
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: its-promtail
+    restart: unless-stopped
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./monitoring/promtail/config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      its-monitoring:
+        ipv4_address: 172.20.0.22
+    depends_on:
+      - loki
+
+volumes:
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+  loki-data:
+    driver: local

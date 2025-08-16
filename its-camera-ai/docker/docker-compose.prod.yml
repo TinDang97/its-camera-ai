@@ -1,0 +1,449 @@
+# Production Environment Configuration for ITS Camera AI
+# Optimized for production deployment with high availability, security, and performance
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up
+
+version: '3.8'
+
+services:
+  # Production Application Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-$(git rev-parse HEAD)}
+        VERSION: ${VERSION:-latest}
+    container_name: its-camera-ai-prod
+    restart: always
+    environment:
+      # Production environment settings
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Production security settings
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      # Database connection pooling for production
+      - DATABASE_POOL_SIZE=${DATABASE_POOL_SIZE:-20}
+      - DATABASE_MAX_OVERFLOW=${DATABASE_MAX_OVERFLOW:-40}
+      - DATABASE_POOL_TIMEOUT=${DATABASE_POOL_TIMEOUT:-30}
+      - DATABASE_POOL_RECYCLE=${DATABASE_POOL_RECYCLE:-3600}
+      # Redis connection pooling
+      - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-20}
+      - REDIS_MAX_CONNECTIONS=${REDIS_MAX_CONNECTIONS:-50}
+      # Production performance settings
+      - WORKERS=${WORKERS:-4}
+      - WORKER_CLASS=uvicorn.workers.UvicornWorker
+      - WORKER_CONNECTIONS=${WORKER_CONNECTIONS:-1000}
+      - KEEP_ALIVE=${KEEP_ALIVE:-2}
+      - MAX_REQUESTS=${MAX_REQUESTS:-10000}
+      - MAX_REQUESTS_JITTER=${MAX_REQUESTS_JITTER:-1000}
+      # ML inference optimization
+      - BATCH_SIZE=${BATCH_SIZE:-16}
+      - MAX_BATCH_DELAY=${MAX_BATCH_DELAY:-50}
+      - MODEL_CACHE_SIZE=${MODEL_CACHE_SIZE:-1024}
+      # Security headers and CORS
+      - SECURE_HEADERS=true
+      - CORS_ORIGINS=${CORS_ORIGINS:-[]}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-[]}
+      # Monitoring and observability
+      - SENTRY_DSN=${SENTRY_DSN}
+      - PROMETHEUS_METRICS=true
+      - JAEGER_ENABLED=true
+      - JAEGER_AGENT_HOST=jaeger
+    ports:
+      - "${APP_PORT:-8000}:8000"
+      - "${METRICS_PORT:-8001}:8001"
+    volumes:
+      # Production data persistence (read-only where possible)
+      - prod_data:/app/data:rw
+      - prod_logs:/app/logs:rw
+      - prod_models:/app/models:ro
+      - prod_temp:/app/temp:rw
+      - prod_cache:/app/cache:rw
+      # Configuration files (read-only)
+      - ${PWD}/production_config.json:/app/config.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health", "-H", "Accept: application/json", "--max-time", "10"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: ${APP_MEMORY_LIMIT:-8G}
+          cpus: ${APP_CPU_LIMIT:-4.0}
+        reservations:
+          memory: ${APP_MEMORY_RESERVATION:-4G}
+          cpus: ${APP_CPU_RESERVATION:-2.0}
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - its-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=its-camera-ai,environment=production"
+
+  # Production Database with High Availability
+  postgres:
+    image: postgres:15-alpine
+    container_name: its-camera-ai-postgres-prod
+    restart: always
+    environment:
+      # Production database settings
+      - POSTGRES_DB=${POSTGRES_DB:-its_camera_ai}
+      - POSTGRES_USER=${POSTGRES_USER:-its_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --locale=en_US.UTF-8
+      # Performance optimizations
+      - POSTGRES_SHARED_PRELOAD_LIBRARIES=pg_stat_statements
+      - POSTGRES_MAX_CONNECTIONS=${POSTGRES_MAX_CONNECTIONS:-200}
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+      - POSTGRES_SHARED_BUFFERS=${POSTGRES_SHARED_BUFFERS:-1GB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - prod_postgres_data:/var/lib/postgresql/data
+      - ${PWD}/infrastructure/database/init/prod:/docker-entrypoint-initdb.d:ro
+      - prod_postgres_backups:/backups
+    command: >
+      postgres
+        -c max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+        -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+        -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+        -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-256MB}
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c default_statistics_target=100
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c work_mem=4MB
+        -c min_wal_size=1GB
+        -c max_wal_size=4GB
+        -c max_worker_processes=8
+        -c max_parallel_workers_per_gather=4
+        -c max_parallel_workers=8
+        -c max_parallel_maintenance_workers=4
+        -c log_min_duration_statement=1000
+        -c log_line_prefix='%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+        -c log_checkpoints=on
+        -c log_connections=on
+        -c log_disconnections=on
+        -c log_lock_waits=on
+        -c log_temp_files=0
+        -c track_activities=on
+        -c track_counts=on
+        -c track_io_timing=on
+        -c track_functions=pl
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-its_user} -d ${POSTGRES_DB:-its_camera_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-4G}
+          cpus: ${POSTGRES_CPU_LIMIT:-2.0}
+        reservations:
+          memory: ${POSTGRES_MEMORY_RESERVATION:-2G}
+          cpus: ${POSTGRES_CPU_RESERVATION:-1.0}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # Production Redis with Persistence and Clustering
+  redis:
+    image: redis:7-alpine
+    container_name: its-camera-ai-redis-prod
+    restart: always
+    command: >
+      redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --auto-aof-rewrite-percentage 100
+        --auto-aof-rewrite-min-size 64mb
+        --save 900 1
+        --save 300 10
+        --save 60 10000
+        --maxmemory ${REDIS_MAXMEMORY:-2gb}
+        --maxmemory-policy allkeys-lru
+        --timeout ${REDIS_TIMEOUT:-300}
+        --tcp-keepalive 60
+        --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - prod_redis_data:/data
+      - ${PWD}/infrastructure/redis/redis-prod.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEMORY_LIMIT:-3G}
+          cpus: ${REDIS_CPU_LIMIT:-1.0}
+        reservations:
+          memory: ${REDIS_MEMORY_RESERVATION:-1G}
+          cpus: ${REDIS_CPU_RESERVATION:-0.5}
+
+  # Production InfluxDB with Enhanced Configuration
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: its-camera-ai-influxdb-prod
+    restart: always
+    environment:
+      # Production InfluxDB settings
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-its-camera-ai}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-metrics}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_ADMIN_TOKEN}
+      - INFLUXDB_DATA_MAX_INDEX_LOG_FILE_SIZE=${INFLUXDB_MAX_INDEX_LOG_FILE_SIZE:-1m}
+      - INFLUXDB_DATA_CACHE_MAX_MEMORY_SIZE=${INFLUXDB_CACHE_MAX_MEMORY_SIZE:-1g}
+    ports:
+      - "${INFLUXDB_PORT:-8086}:8086"
+    volumes:
+      - prod_influxdb_data:/var/lib/influxdb2
+      - prod_influxdb_config:/etc/influxdb2
+      - prod_influxdb_backups:/backups
+    deploy:
+      resources:
+        limits:
+          memory: ${INFLUXDB_MEMORY_LIMIT:-2G}
+          cpus: ${INFLUXDB_CPU_LIMIT:-1.0}
+        reservations:
+          memory: ${INFLUXDB_MEMORY_RESERVATION:-1G}
+          cpus: ${INFLUXDB_CPU_RESERVATION:-0.5}
+
+  # Production MinIO with High Availability
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-08-17T01-24-54Z
+    container_name: its-camera-ai-minio-prod
+    restart: always
+    environment:
+      # Production MinIO credentials
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      # Production performance settings
+      - MINIO_STORAGE_CLASS_STANDARD=EC:2
+      - MINIO_CACHE_DRIVES="/mnt/cache1,/mnt/cache2"
+      - MINIO_CACHE_QUOTA=80
+      - MINIO_CACHE_AFTER=3
+      - MINIO_CACHE_WATERMARK_LOW=70
+      - MINIO_CACHE_WATERMARK_HIGH=90
+      # Security and compliance
+      - MINIO_BROWSER_REDIRECT_URL=${MINIO_BROWSER_REDIRECT_URL}
+      - MINIO_SERVER_URL=${MINIO_SERVER_URL}
+      - MINIO_AUDIT_WEBHOOK_ENABLE_target1=on
+      - MINIO_AUDIT_WEBHOOK_ENDPOINT_target1=http://app:8000/api/v1/audit/minio
+      # Logging and monitoring
+      - MINIO_PROMETHEUS_AUTH_TYPE=public
+      - MINIO_PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus:9090}
+    command: >
+      sh -c '
+        mkdir -p /data/camera-streams /data/ml-models /data/analytics /data/backups &&
+        minio server /data --console-address ":9001"
+      '
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - prod_minio_data:/data
+      - prod_minio_cache1:/mnt/cache1
+      - prod_minio_cache2:/mnt/cache2
+      - ${PWD}/infrastructure/minio/policies:/opt/minio/policies:ro
+    deploy:
+      resources:
+        limits:
+          memory: ${MINIO_MEMORY_LIMIT:-2G}
+          cpus: ${MINIO_CPU_LIMIT:-2.0}
+        reservations:
+          memory: ${MINIO_MEMORY_RESERVATION:-1G}
+          cpus: ${MINIO_CPU_RESERVATION:-1.0}
+
+  # Production Kafka with Optimized Settings
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: its-camera-ai-kafka-prod
+    restart: always
+    environment:
+      # Production Kafka configuration
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,PLAINTEXT_HOST://${KAFKA_EXTERNAL_HOST:-localhost}:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      # Performance optimizations
+      - KAFKA_NUM_NETWORK_THREADS=${KAFKA_NUM_NETWORK_THREADS:-8}
+      - KAFKA_NUM_IO_THREADS=${KAFKA_NUM_IO_THREADS:-8}
+      - KAFKA_SOCKET_SEND_BUFFER_BYTES=${KAFKA_SOCKET_SEND_BUFFER_BYTES:-102400}
+      - KAFKA_SOCKET_RECEIVE_BUFFER_BYTES=${KAFKA_SOCKET_RECEIVE_BUFFER_BYTES:-102400}
+      - KAFKA_SOCKET_REQUEST_MAX_BYTES=${KAFKA_SOCKET_REQUEST_MAX_BYTES:-104857600}
+      - KAFKA_NUM_PARTITIONS=${KAFKA_NUM_PARTITIONS:-8}
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=${KAFKA_DEFAULT_REPLICATION_FACTOR:-1}
+      - KAFKA_LOG_RETENTION_HOURS=${KAFKA_LOG_RETENTION_HOURS:-168}
+      - KAFKA_LOG_SEGMENT_BYTES=${KAFKA_LOG_SEGMENT_BYTES:-1073741824}
+      - KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS=${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-300000}
+      # Memory and JVM settings
+      - KAFKA_HEAP_OPTS=-Xmx${KAFKA_HEAP_SIZE:-2G} -Xms${KAFKA_HEAP_SIZE:-2G}
+      - KAFKA_JVM_PERFORMANCE_OPTS=-server -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35 -XX:+ExplicitGCInvokesConcurrent -Djava.awt.headless=true
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    volumes:
+      - prod_kafka_data:/var/lib/kafka/data
+    deploy:
+      resources:
+        limits:
+          memory: ${KAFKA_MEMORY_LIMIT:-4G}
+          cpus: ${KAFKA_CPU_LIMIT:-2.0}
+        reservations:
+          memory: ${KAFKA_MEMORY_RESERVATION:-2G}
+          cpus: ${KAFKA_CPU_RESERVATION:-1.0}
+
+  # Production Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: its-camera-ai-zookeeper-prod
+    restart: always
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+      - ZOOKEEPER_INIT_LIMIT=5
+      - ZOOKEEPER_SYNC_LIMIT=2
+      - ZOOKEEPER_MAX_CLIENT_CNXNS=60
+      - ZOOKEEPER_SNAP_COUNT=100000
+      - ZOOKEEPER_PURGE_INTERVAL=24
+      - ZOOKEEPER_HEAP_OPTS=-Xmx${ZOOKEEPER_HEAP_SIZE:-1G} -Xms${ZOOKEEPER_HEAP_SIZE:-1G}
+    volumes:
+      - prod_zk_data:/var/lib/zookeeper/data
+      - prod_zk_logs:/var/lib/zookeeper/log
+    deploy:
+      resources:
+        limits:
+          memory: ${ZOOKEEPER_MEMORY_LIMIT:-1G}
+          cpus: ${ZOOKEEPER_CPU_LIMIT:-1.0}
+
+  # Production Nginx with SSL and Load Balancing
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: its-camera-ai-nginx-prod
+    restart: always
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${PWD}/infrastructure/nginx/nginx-prod.conf:/etc/nginx/nginx.conf:ro
+      - ${PWD}/infrastructure/nginx/conf.d/prod:/etc/nginx/conf.d:ro
+      - ${PWD}/infrastructure/nginx/ssl:/etc/nginx/ssl:ro
+      - prod_nginx_logs:/var/log/nginx
+      - prod_nginx_cache:/var/cache/nginx
+    environment:
+      - NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d
+      - NGINX_WORKER_PROCESSES=${NGINX_WORKER_PROCESSES:-auto}
+      - NGINX_WORKER_CONNECTIONS=${NGINX_WORKER_CONNECTIONS:-1024}
+    depends_on:
+      app:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${NGINX_MEMORY_LIMIT:-512M}
+          cpus: ${NGINX_CPU_LIMIT:-1.0}
+
+# Production volumes with optimized configuration
+volumes:
+  prod_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/prod
+  prod_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/logs/prod
+  prod_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/models/prod
+  prod_temp:
+    driver: local
+  prod_cache:
+    driver: local
+  prod_postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/postgres/prod
+  prod_postgres_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/backups/postgres
+  prod_redis_data:
+    driver: local
+  prod_influxdb_data:
+    driver: local
+  prod_influxdb_config:
+    driver: local
+  prod_influxdb_backups:
+    driver: local
+  prod_minio_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/minio/prod
+  prod_minio_cache1:
+    driver: local
+  prod_minio_cache2:
+    driver: local
+  prod_kafka_data:
+    driver: local
+  prod_zk_data:
+    driver: local
+  prod_zk_logs:
+    driver: local
+  prod_nginx_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/logs/nginx
+  prod_nginx_cache:
+    driver: local

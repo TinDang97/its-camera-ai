@@ -1,0 +1,154 @@
+# Docker Compose Override Examples for ITS Camera AI
+# Copy this file to docker-compose.override.yml and customize as needed
+
+version: '3.8'
+
+# Example 1: Development Override
+# Use this for local development with hot reload and debugging
+services:
+  app:
+    build:
+      target: development
+    volumes:
+      # Enable hot reload for development
+      - ${PWD}/src:/app/src:delegated
+      - ${PWD}/tests:/app/tests:delegated
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
+    ports:
+      # Add debugger port
+      - "5678:5678"
+
+---
+
+# Example 2: GPU Development Override
+# Uncomment and use this for GPU-enabled development
+# services:
+#   app-gpu:
+#     build:
+#       target: gpu-development
+#     runtime: nvidia
+#     environment:
+#       - NVIDIA_VISIBLE_DEVICES=all
+#       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+#       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: 1
+#               capabilities: [gpu]
+
+---
+
+# Example 3: Production Override
+# Use this for production deployments with optimizations
+# services:
+#   app:
+#     build:
+#       target: production
+#     restart: always
+#     environment:
+#       - ENVIRONMENT=production
+#       - WORKERS=4
+#       - KEEP_ALIVE=2
+#       - MAX_REQUESTS=1000
+#       - MAX_REQUESTS_JITTER=100
+#     deploy:
+#       resources:
+#         limits:
+#           memory: 2G
+#           cpus: '2.0'
+#         reservations:
+#           memory: 1G
+#           cpus: '1.0'
+#     healthcheck:
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+#       start_period: 40s
+
+---
+
+# Example 4: Edge Deployment Override
+# Use this for resource-constrained edge devices
+# services:
+#   app:
+#     build:
+#       target: edge
+#     environment:
+#       - ENVIRONMENT=edge
+#       - WORKERS=1
+#       - OMP_NUM_THREADS=2
+#       - MALLOC_ARENA_MAX=1
+#     deploy:
+#       resources:
+#         limits:
+#           memory: 512M
+#           cpus: '1.0'
+#         reservations:
+#           memory: 256M
+#           cpus: '0.5'
+
+---
+
+# Example 5: Monitoring Override
+# Add this to enable comprehensive monitoring stack
+# services:
+#   # Application monitoring
+#   app:
+#     environment:
+#       - SENTRY_DSN=${SENTRY_DSN}
+#       - PROMETHEUS_METRICS=true
+#       - JAEGER_AGENT_HOST=jaeger
+#
+#   # Jaeger for distributed tracing
+#   jaeger:
+#     image: jaegertracing/all-in-one:1.50
+#     container_name: its-camera-ai-jaeger
+#     ports:
+#       - "16686:16686"
+#       - "14268:14268"
+#     environment:
+#       - COLLECTOR_OTLP_ENABLED=true
+#     networks:
+#       - its-network
+#
+#   # Node Exporter for system metrics
+#   node-exporter:
+#     image: prom/node-exporter:latest
+#     container_name: its-camera-ai-node-exporter
+#     ports:
+#       - "9100:9100"
+#     volumes:
+#       - /proc:/host/proc:ro
+#       - /sys:/host/sys:ro
+#       - /:/rootfs:ro
+#     command:
+#       - '--path.procfs=/host/proc'
+#       - '--path.sysfs=/host/sys'
+#       - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+#     networks:
+#       - its-network
+
+---
+
+# Example 6: Testing Override
+# Use this for running automated tests
+# services:
+#   app:
+#     build:
+#       target: testing
+#     command: |
+#       sh -c "
+#         pytest -v --cov=its_camera_ai --cov-report=html --cov-report=term-missing --cov-fail-under=90 &&
+#         mypy src/ &&
+#         bandit -r src/ &&
+#         safety check
+#       "
+#     volumes:
+#       - ${PWD}/test-results:/app/test-results
+#       - ${PWD}/coverage:/app/coverage

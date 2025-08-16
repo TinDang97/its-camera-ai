@@ -1,0 +1,319 @@
+# ArgoCD Configuration for ITS Camera AI Production
+# Optimized for high-performance GitOps with enterprise features
+
+global:
+  image:
+    repository: quay.io/argoproj/argocd
+    tag: v2.9.3
+  
+  nodeSelector:
+    node.kubernetes.io/instance-type: general
+    its-camera-ai/node-type: general-workload
+
+  tolerations: []
+  
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+              - argocd-server
+          topologyKey: kubernetes.io/hostname
+
+# ArgoCD Server Configuration
+server:
+  replicas: 3
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  
+  service:
+    type: ClusterIP
+    port: 80
+    portName: server
+  
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: '443'
+      alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:ACCOUNT_ID:certificate/CERT_ID
+    hosts:
+    - argocd.its-camera-ai.com
+    paths:
+    - /
+    tls:
+    - secretName: argocd-server-tls
+      hosts:
+      - argocd.its-camera-ai.com
+  
+  # RBAC Configuration
+  rbacConfig:
+    policy.default: role:readonly
+    policy.csv: |
+      # Platform team has admin access
+      p, role:platform-admin, applications, *, */*, allow
+      p, role:platform-admin, clusters, *, *, allow
+      p, role:platform-admin, repositories, *, *, allow
+      p, role:platform-admin, logs, get, *, allow
+      p, role:platform-admin, exec, create, */*, allow
+      
+      # ML team has access to ML applications
+      p, role:ml-team, applications, *, ml-*/*, allow
+      p, role:ml-team, applications, sync, ml-*/*, allow
+      p, role:ml-team, logs, get, ml-*/*, allow
+      
+      # DevOps team has full deployment access
+      p, role:devops-team, applications, *, */*, allow
+      p, role:devops-team, applications, sync, */*, allow
+      p, role:devops-team, logs, get, */*, allow
+      
+      # Groups mapping
+      g, platform-team, role:platform-admin
+      g, ml-engineers, role:ml-team
+      g, devops-engineers, role:devops-team
+
+  # Config Management
+  config:
+    # Git repositories
+    repositories: |
+      - url: https://github.com/its-camera-ai/infrastructure
+        type: git
+        name: infrastructure
+      - url: https://github.com/its-camera-ai/applications
+        type: git
+        name: applications
+      - url: https://github.com/its-camera-ai/ml-models
+        type: git
+        name: ml-models
+    
+    # Application settings
+    application.instanceLabelKey: argocd.argoproj.io/instance
+    server.rbac.log.enforce.enable: true
+    exec.enabled: true
+    admin.enabled: true
+    timeout.hard.reconciliation: 0
+    timeout.reconciliation: 180s
+    
+    # OIDC configuration for SSO
+    oidc.config: |
+      name: Okta
+      issuer: https://dev-123456.okta.com
+      clientId: your-client-id
+      clientSecret: $oidc.okta.clientSecret
+      requestedScopes: ["openid", "profile", "email", "groups"]
+      requestedIDTokenClaims: {"groups": {"essential": true}}
+
+# Application Controller Configuration
+controller:
+  replicas: 3
+  
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+  
+  # High-performance settings for large clusters
+  env:
+  - name: ARGOCD_CONTROLLER_REPLICAS
+    value: "3"
+  - name: ARGOCD_CONTROLLER_HEARTBEAT_TIME
+    value: "10"
+  - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_TIMEOUT_SECONDS
+    value: "120"
+  - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_STRICT_TLS
+    value: "false"
+  - name: ARGOCD_RECONCILIATION_TIMEOUT
+    value: "180s"
+
+# Repository Server Configuration
+repoServer:
+  replicas: 3
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # Volume for repository caching
+  volumes:
+  - name: repo-cache
+    emptyDir:
+      sizeLimit: 10Gi
+  
+  volumeMounts:
+  - name: repo-cache
+    mountPath: /tmp/cache
+
+# Redis Configuration for caching
+redis:
+  enabled: true
+  
+  auth:
+    enabled: true
+    password: "redis-super-secret-password"
+  
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: gp3
+    
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: gp3
+    
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+# ApplicationSet Controller
+applicationSet:
+  enabled: true
+  replicas: 2
+  
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# Notifications Controller
+notifications:
+  enabled: true
+  
+  notifiers:
+    service.slack: |
+      token: $slack-token
+    service.webhook: |
+      url: https://webhook.its-camera-ai.com/argocd
+      headers:
+      - name: Authorization
+        value: Bearer $webhook-token
+  
+  templates:
+    template.app-deployed: |
+      webhook:
+        method: POST
+        body: |
+          {
+            "attachments": [
+              {
+                "title": "{{.app.metadata.name}}",
+                "title_link": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}",
+                "color": "#18be52",
+                "fields": [
+                  {
+                    "title": "Sync Status",
+                    "value": "{{.app.status.sync.status}}",
+                    "short": true
+                  },
+                  {
+                    "title": "Repository",
+                    "value": "{{.app.spec.source.repoURL}}",
+                    "short": true
+                  }
+                ]
+              }
+            ]
+          }
+  
+  triggers:
+    trigger.on-deployed: |
+      - description: Application is synced and healthy
+        send:
+        - app-deployed
+        when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+
+# Dex (OIDC Provider) - Disabled, using external OIDC
+dex:
+  enabled: false
+
+# Monitoring and observability
+metrics:
+  enabled: true
+  service:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8082"
+      prometheus.io/path: "/metrics"
+  
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    additionalLabels:
+      app: argocd
+
+# Security configurations
+configs:
+  secret:
+    # Admin password (bcrypt hash of "admin123")
+    argocdServerAdminPassword: "$2a$10$rRyBsGSHK6.uc8fntPwVIuLVHgsAhAX7TcdrqW/RJHXG7LY9rJ2Qe"
+    argocdServerAdminPasswordMtime: "2024-01-01T00:00:00Z"
+  
+  credentialTemplates:
+    github-creds:
+      url: https://github.com/its-camera-ai
+      username: its-camera-ai-bot
+      password: $github-token
+    
+    harbor-creds:
+      url: harbor.its-camera-ai.com
+      username: argocd
+      password: $harbor-password
+
+# Cleanup and maintenance
+cleanup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  ttl: 24h

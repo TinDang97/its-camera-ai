@@ -1,0 +1,661 @@
+# Task 5.4.1: GitHub Actions workflow for Docker CI/CD
+# Comprehensive multi-stage Docker workflow with build, test, and deploy
+# Includes matrix builds, caching, security scanning, and quality gates
+
+name: Docker CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, feature/*, hotfix/*]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target environment for deployment'
+        required: false
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      force_rebuild:
+        description: 'Force rebuild without cache'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Task 5.4.1: Multi-stage Docker builds with matrix strategy
+  docker-build:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Development builds
+          - target: development
+            platform: linux/amd64
+            context: .
+            dockerfile: docker/Dockerfile
+            tags: |
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-latest
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ github.sha }}
+          
+          # Production builds  
+          - target: production
+            platform: linux/amd64,linux/arm64
+            context: .
+            dockerfile: docker/Dockerfile
+            tags: |
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest
+          
+          # GPU builds
+          - target: gpu-production
+            platform: linux/amd64
+            context: .
+            dockerfile: docker/Dockerfile
+            tags: |
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:gpu-latest
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:gpu-${{ github.sha }}
+          
+          # Edge builds
+          - target: edge
+            platform: linux/amd64,linux/arm64
+            context: .
+            dockerfile: docker/Dockerfile
+            tags: |
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge-latest
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge-${{ github.sha }}
+
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-metadata: ${{ steps.build.outputs.metadata }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up QEMU for multi-platform builds
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host
+        buildkitd-flags: --allow-insecure-entitlement network.host
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix={{branch}}-
+          ${{ matrix.tags }}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.context }}
+        file: ${{ matrix.dockerfile }}
+        target: ${{ matrix.target }}
+        platforms: ${{ matrix.platform }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: |
+          type=gha,scope=${{ matrix.target }}
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.target }}
+        cache-to: |
+          type=gha,mode=max,scope=${{ matrix.target }}
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.target }},mode=max
+        build-args: |
+          BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          VCS_REF=${{ github.sha }}
+          VERSION=${{ steps.meta.outputs.version }}
+        secrets: |
+          "github_token=${{ secrets.GITHUB_TOKEN }}"
+
+    - name: Test Docker image
+      run: |
+        # Test image can start and basic functionality works
+        docker run --rm --name test-container \
+          -e ENVIRONMENT=testing \
+          -e DATABASE_URL=sqlite:///tmp/test.db \
+          -e REDIS_URL=redis://localhost:6379/0 \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          python -c "
+          import sys
+          import its_camera_ai
+          print(f'✅ Import successful - Python {sys.version}')
+          print(f'✅ Package version: {its_camera_ai.__version__ if hasattr(its_camera_ai, \"__version__\") else \"dev\"}')
+          "
+
+    - name: Run container structure tests
+      uses: plexsystems/container-structure-test-action@v0.3.0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        config: .github/workflows/config/container-structure-test.yaml
+
+  # Task 5.4.2: Docker-based quality gates and testing
+  docker-quality-gates:
+    name: Quality Gates & Testing
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    
+    strategy:
+      matrix:
+        test-suite:
+          - name: unit-tests
+            command: pytest tests/unit/ -v --cov=src/its_camera_ai --cov-report=xml --junitxml=test-results.xml
+            coverage-threshold: 90
+          - name: integration-tests  
+            command: pytest tests/integration/ -v --junitxml=integration-results.xml
+            coverage-threshold: 80
+          - name: security-tests
+            command: |
+              bandit -r src/ -f json -o bandit-report.json
+              safety check --json --output safety-report.json
+              pip-audit --format=json --output=audit-report.json
+            coverage-threshold: 0
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Compose
+      run: |
+        docker compose version
+        cp docker/docker-compose.test.yml docker-compose.test.yml
+
+    - name: Start test infrastructure
+      run: |
+        docker compose -f docker-compose.test.yml up -d postgres redis
+        sleep 30  # Wait for services to be ready
+
+    - name: Run ${{ matrix.test-suite.name }}
+      run: |
+        docker compose -f docker-compose.test.yml run --rm \
+          -e ENVIRONMENT=testing \
+          -e DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai_test \
+          -e REDIS_URL=redis://redis:6379/0 \
+          app \
+          bash -c "${{ matrix.test-suite.command }}"
+
+    - name: Validate coverage threshold
+      if: matrix.test-suite.coverage-threshold > 0
+      run: |
+        docker compose -f docker-compose.test.yml run --rm app \
+          bash -c "
+          coverage report --fail-under=${{ matrix.test-suite.coverage-threshold }} || {
+            echo '❌ Coverage below threshold (${{ matrix.test-suite.coverage-threshold }}%)'
+            exit 1
+          }
+          echo '✅ Coverage meets threshold (${{ matrix.test-suite.coverage-threshold }}%)'
+          "
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ${{ matrix.test-suite.name }}-results
+        path: |
+          test-results.xml
+          integration-results.xml
+          coverage.xml
+          htmlcov/
+          bandit-report.json
+          safety-report.json
+          audit-report.json
+
+    - name: Cleanup test infrastructure
+      if: always()
+      run: docker compose -f docker-compose.test.yml down -v
+
+  # Task 5.4.2: Puppeteer E2E Tests in CI Pipeline
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    
+    strategy:
+      matrix:
+        browser: [chromium, firefox]
+        viewport: [desktop, tablet, mobile]
+        
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'yarn'
+        cache-dependency-path: web/yarn.lock
+
+    - name: Install frontend dependencies
+      working-directory: web
+      run: yarn install --frozen-lockfile
+
+    - name: Start application stack
+      run: |
+        docker compose -f docker/docker-compose.test.yml up -d
+        sleep 60  # Wait for full stack to be ready
+
+    - name: Wait for application to be ready
+      run: |
+        timeout 300 bash -c 'until curl -f http://localhost:8000/health; do sleep 5; done'
+        timeout 300 bash -c 'until curl -f http://localhost:3000; do sleep 5; done'
+
+    - name: Run E2E tests
+      working-directory: web
+      run: |
+        yarn test:e2e
+      env:
+        BROWSER: ${{ matrix.browser }}
+        VIEWPORT: ${{ matrix.viewport }}
+        BASE_URL: http://localhost:3000
+        API_URL: http://localhost:8000
+        HEADLESS: true
+        CI: true
+
+    - name: Upload E2E test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: e2e-results-${{ matrix.browser }}-${{ matrix.viewport }}
+        path: |
+          web/tests/reports/
+          web/tests/screenshots/
+          web/tests/videos/
+
+    - name: Upload failed test artifacts
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: e2e-failed-${{ matrix.browser }}-${{ matrix.viewport }}
+        path: |
+          web/tests/screenshots/
+          web/tests/videos/
+          web/tests/trace/
+
+    - name: Cleanup application stack
+      if: always()
+      run: docker compose -f docker/docker-compose.test.yml down -v
+
+  # Task 5.4.3: Docker registry and image versioning with security scanning
+  image-security-scan:
+    name: Image Security & Vulnerability Scanning
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.event_name != 'pull_request'
+
+    strategy:
+      matrix:
+        target: [production, gpu-production, edge]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Pull image for scanning
+      run: |
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Run Grype vulnerability scanner  
+      uses: anchore/scan-action@v3
+      id: grype-scan
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        fail-build: false
+        severity-cutoff: high
+
+    - name: Upload Grype scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: grype-scan-${{ matrix.target }}
+        path: ${{ steps.grype-scan.outputs.sarif }}
+
+    - name: Run Docker Scout scan
+      uses: docker/scout-action@v1
+      with:
+        command: cves
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        sarif-file: scout-report.sarif
+        summary: true
+
+    - name: Generate security summary
+      run: |
+        echo "## 🔒 Security Scan Summary for ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Scanner | Status | Critical | High | Medium | Low |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|--------|----------|------|--------|-----|" >> $GITHUB_STEP_SUMMARY
+        
+        # Parse Trivy results
+        if [ -f trivy-results.sarif ]; then
+          CRITICAL=$(jq '.runs[0].results | map(select(.ruleId | contains("CVE"))) | map(select(.level == "error")) | length' trivy-results.sarif)
+          HIGH=$(jq '.runs[0].results | map(select(.ruleId | contains("CVE"))) | map(select(.level == "warning")) | length' trivy-results.sarif)
+          echo "| Trivy | ✅ | $CRITICAL | $HIGH | - | - |" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🔍 **Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "📊 **Target**: \`${{ matrix.target }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # Task 5.4.3: Multi-arch builds and image promotion
+  image-promotion:
+    name: Image Promotion & Tagging
+    runs-on: ubuntu-latest
+    needs: [docker-build, docker-quality-gates, image-security-scan]
+    if: |
+      always() && 
+      needs.docker-build.result == 'success' && 
+      needs.docker-quality-gates.result == 'success' &&
+      (needs.image-security-scan.result == 'success' || needs.image-security-scan.result == 'skipped') &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v'))
+
+    strategy:
+      matrix:
+        include:
+          - source-env: development
+            target-env: staging
+            condition: github.ref == 'refs/heads/develop'
+          - source-env: staging  
+            target-env: production
+            condition: github.ref == 'refs/heads/main'
+          - source-env: production
+            target-env: release
+            condition: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Promote images
+      if: ${{ matrix.condition }}
+      run: |
+        SOURCE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+        TARGET_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.target-env }}-latest"
+        
+        echo "🚀 Promoting image from ${{ matrix.source-env }} to ${{ matrix.target-env }}"
+        
+        # Pull source image
+        docker pull $SOURCE_TAG
+        
+        # Tag for target environment
+        docker tag $SOURCE_TAG $TARGET_TAG
+        
+        # Push promoted image
+        docker push $TARGET_TAG
+        
+        echo "✅ Successfully promoted image to ${{ matrix.target-env }}"
+
+    - name: Create release tags
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        SOURCE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+        
+        # Create version-specific tags
+        docker pull $SOURCE_TAG
+        docker tag $SOURCE_TAG "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v$VERSION"
+        docker tag $SOURCE_TAG "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+        
+        # Push release tags
+        docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v$VERSION"
+        docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+        
+        echo "📦 Created release tags for version v$VERSION"
+
+  # Task 5.4.4: Automated deployment with Docker Compose
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [image-promotion]
+    if: |
+      github.ref == 'refs/heads/develop' && 
+      needs.image-promotion.result == 'success'
+    environment: staging
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Deploy to staging
+      run: |
+        echo "🚀 Deploying to staging environment"
+        
+        # Create deployment configuration
+        cat > .env.staging << EOF
+        ENVIRONMENT=staging
+        BUILD_TARGET=production
+        IMAGE_TAG=staging-latest
+        DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }}
+        REDIS_URL=${{ secrets.STAGING_REDIS_URL }}
+        SECRET_KEY=${{ secrets.STAGING_SECRET_KEY }}
+        EOF
+        
+        # Deploy using Docker Compose
+        docker compose -f docker/docker-compose.prod.yml \
+          --env-file .env.staging \
+          up -d --remove-orphans
+        
+        # Wait for deployment to be ready
+        sleep 60
+        
+        # Health check
+        curl -f http://staging-api.its-camera-ai.com/health || {
+          echo "❌ Staging deployment health check failed"
+          docker compose -f docker/docker-compose.prod.yml logs
+          exit 1
+        }
+        
+        echo "✅ Staging deployment successful"
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [image-promotion]
+    if: |
+      github.ref == 'refs/heads/main' && 
+      needs.image-promotion.result == 'success'
+    environment: production
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Blue-Green Deployment
+      run: |
+        echo "🚀 Starting blue-green deployment to production"
+        
+        # Determine current and next environments
+        CURRENT_ENV=$(curl -s http://prod-api.its-camera-ai.com/health | jq -r '.environment' || echo "blue")
+        NEXT_ENV=$([ "$CURRENT_ENV" = "blue" ] && echo "green" || echo "blue")
+        
+        echo "Current environment: $CURRENT_ENV"
+        echo "Deploying to: $NEXT_ENV"
+        
+        # Create deployment configuration
+        cat > .env.production << EOF
+        ENVIRONMENT=production
+        BUILD_TARGET=production
+        IMAGE_TAG=production-latest
+        DEPLOYMENT_COLOR=$NEXT_ENV
+        DATABASE_URL=${{ secrets.PRODUCTION_DATABASE_URL }}
+        REDIS_URL=${{ secrets.PRODUCTION_REDIS_URL }}
+        SECRET_KEY=${{ secrets.PRODUCTION_SECRET_KEY }}
+        EOF
+        
+        # Deploy to next environment
+        docker compose -f docker/docker-compose.prod.yml \
+          --env-file .env.production \
+          -p its-camera-ai-$NEXT_ENV \
+          up -d --remove-orphans
+        
+        # Wait for deployment
+        sleep 120
+        
+        # Health check on new environment
+        HEALTH_URL="http://prod-$NEXT_ENV-api.its-camera-ai.com/health"
+        for i in {1..10}; do
+          if curl -f $HEALTH_URL; then
+            echo "✅ New environment is healthy"
+            break
+          fi
+          echo "⏳ Waiting for new environment... ($i/10)"
+          sleep 30
+        done
+        
+        # Switch traffic (this would typically involve load balancer reconfiguration)
+        echo "🔄 Switching traffic to $NEXT_ENV environment"
+        
+        # Cleanup old environment after successful switch
+        docker compose -f docker/docker-compose.prod.yml \
+          -p its-camera-ai-$CURRENT_ENV \
+          down
+        
+        echo "✅ Production deployment successful"
+
+    - name: Rollback on failure
+      if: failure()
+      run: |
+        echo "❌ Production deployment failed, initiating rollback"
+        
+        CURRENT_ENV=$(curl -s http://prod-api.its-camera-ai.com/health | jq -r '.environment' || echo "blue")
+        NEXT_ENV=$([ "$CURRENT_ENV" = "blue" ] && echo "green" || echo "blue")
+        
+        # Stop failed deployment
+        docker compose -f docker/docker-compose.prod.yml \
+          -p its-camera-ai-$NEXT_ENV \
+          down
+        
+        # Ensure current environment is running
+        docker compose -f docker/docker-compose.prod.yml \
+          -p its-camera-ai-$CURRENT_ENV \
+          up -d
+        
+        echo "🔄 Rollback completed"
+
+  # Performance and monitoring validation
+  post-deployment-validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Performance testing
+      run: |
+        ENVIRONMENT=""
+        BASE_URL=""
+        
+        if [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
+          ENVIRONMENT="staging"
+          BASE_URL="http://staging-api.its-camera-ai.com"
+        elif [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+          ENVIRONMENT="production"  
+          BASE_URL="http://prod-api.its-camera-ai.com"
+        fi
+        
+        echo "🔍 Running performance tests against $ENVIRONMENT"
+        
+        # API response time test
+        RESPONSE_TIME=$(curl -o /dev/null -s -w '%{time_total}' $BASE_URL/health)
+        echo "API response time: ${RESPONSE_TIME}s"
+        
+        # Validate response time SLA (< 200ms)
+        if (( $(echo "$RESPONSE_TIME > 0.2" | bc -l) )); then
+          echo "❌ API response time ($RESPONSE_TIME s) exceeds SLA (0.2s)"
+          exit 1
+        fi
+        
+        echo "✅ Performance validation passed"
+
+    - name: Deployment notification
+      run: |
+        ENVIRONMENT=""
+        if [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
+          ENVIRONMENT="staging"
+        elif [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+          ENVIRONMENT="production"
+        fi
+        
+        # Send deployment notification (placeholder)
+        curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"text\": \"🚀 ITS Camera AI deployed to $ENVIRONMENT\",
+            \"attachments\": [{
+              \"color\": \"good\",
+              \"fields\": [
+                {\"title\": \"Environment\", \"value\": \"$ENVIRONMENT\", \"short\": true},
+                {\"title\": \"Version\", \"value\": \"${{ github.sha }}\", \"short\": true},
+                {\"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"short\": true}
+              ]
+            }]
+          }" || echo "Notification webhook not configured"

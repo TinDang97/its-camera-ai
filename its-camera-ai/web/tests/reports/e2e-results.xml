@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="82" failures="1" errors="0" time="15.244">
+  <testsuite name="Camera CRUD E2E Tests" errors="0" failures="0" skipped="33" timestamp="2025-08-16T09:27:37" time="0.187" tests="33">
+    <testcase classname="Camera CRUD E2E Tests Camera List Display should load and display cameras page" name="Camera CRUD E2E Tests Camera List Display should load and display cameras page" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera List Display should display camera list with proper data" name="Camera CRUD E2E Tests Camera List Display should display camera list with proper data" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera List Display should switch between grid and list views" name="Camera CRUD E2E Tests Camera List Display should switch between grid and list views" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera List Display should handle empty state gracefully" name="Camera CRUD E2E Tests Camera List Display should handle empty state gracefully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Search and Filtering should search cameras by name" name="Camera CRUD E2E Tests Camera Search and Filtering should search cameras by name" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Search and Filtering should filter cameras by status" name="Camera CRUD E2E Tests Camera Search and Filtering should filter cameras by status" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Search and Filtering should clear filters and show all cameras" name="Camera CRUD E2E Tests Camera Search and Filtering should clear filters and show all cameras" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Search and Filtering should handle search with no results" name="Camera CRUD E2E Tests Camera Search and Filtering should handle search with no results" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Creation (Create) should open camera creation form" name="Camera CRUD E2E Tests Camera Creation (Create) should open camera creation form" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Creation (Create) should create a new camera successfully" name="Camera CRUD E2E Tests Camera Creation (Create) should create a new camera successfully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Creation (Create) should validate required fields in camera form" name="Camera CRUD E2E Tests Camera Creation (Create) should validate required fields in camera form" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Creation (Create) should validate IP address format" name="Camera CRUD E2E Tests Camera Creation (Create) should validate IP address format" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Creation (Create) should cancel camera creation" name="Camera CRUD E2E Tests Camera Creation (Create) should cancel camera creation" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Reading (Read) should view camera details" name="Camera CRUD E2E Tests Camera Reading (Read) should view camera details" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Reading (Read) should navigate back from camera details" name="Camera CRUD E2E Tests Camera Reading (Read) should navigate back from camera details" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Reading (Read) should display camera status correctly" name="Camera CRUD E2E Tests Camera Reading (Read) should display camera status correctly" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Reading (Read) should test camera live preview if available" name="Camera CRUD E2E Tests Camera Reading (Read) should test camera live preview if available" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Updates (Update) should edit camera information" name="Camera CRUD E2E Tests Camera Updates (Update) should edit camera information" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Updates (Update) should validate updated camera data" name="Camera CRUD E2E Tests Camera Updates (Update) should validate updated camera data" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Updates (Update) should cancel camera edit" name="Camera CRUD E2E Tests Camera Updates (Update) should cancel camera edit" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Deletion (Delete) should delete a camera successfully" name="Camera CRUD E2E Tests Camera Deletion (Delete) should delete a camera successfully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Deletion (Delete) should cancel camera deletion" name="Camera CRUD E2E Tests Camera Deletion (Delete) should cancel camera deletion" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Camera Deletion (Delete) should show delete confirmation dialog" name="Camera CRUD E2E Tests Camera Deletion (Delete) should show delete confirmation dialog" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Bulk Operations should select multiple cameras" name="Camera CRUD E2E Tests Bulk Operations should select multiple cameras" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Bulk Operations should select all cameras" name="Camera CRUD E2E Tests Bulk Operations should select all cameras" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Bulk Operations should export cameras" name="Camera CRUD E2E Tests Bulk Operations should export cameras" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Form Validation and Error Handling should handle duplicate camera names" name="Camera CRUD E2E Tests Form Validation and Error Handling should handle duplicate camera names" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Form Validation and Error Handling should handle network errors gracefully" name="Camera CRUD E2E Tests Form Validation and Error Handling should handle network errors gracefully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Form Validation and Error Handling should validate coordinate ranges" name="Camera CRUD E2E Tests Form Validation and Error Handling should validate coordinate ranges" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Performance and Accessibility should load camera list within acceptable time" name="Camera CRUD E2E Tests Performance and Accessibility should load camera list within acceptable time" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Performance and Accessibility should support keyboard navigation" name="Camera CRUD E2E Tests Performance and Accessibility should support keyboard navigation" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Performance and Accessibility should have proper ARIA labels" name="Camera CRUD E2E Tests Performance and Accessibility should have proper ARIA labels" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Camera CRUD E2E Tests Performance and Accessibility should measure Web Vitals performance" name="Camera CRUD E2E Tests Performance and Accessibility should measure Web Vitals performance" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+  <testsuite name="Authentication E2E Tests" errors="0" failures="1" skipped="28" timestamp="2025-08-16T09:27:38" time="14.884" tests="29">
+    <testcase classname="Authentication E2E Tests Login Page UI should display all login form elements" name="Authentication E2E Tests Login Page UI should display all login form elements" time="12.141">
+      <failure>TimeoutError: Waiting for selector `[data-testid=&quot;login-form&quot;], form` failed
+    at Function.waitFor (/Users/tindang/workspaces/its/its-camera-ai/web/node_modules/puppeteer-core/src/common/QueryHandler.ts:213:36)
+    at CdpFrame.waitForSelector (/Users/tindang/workspaces/its/its-camera-ai/web/node_modules/puppeteer-core/src/api/Frame.ts:747:13)
+    at CdpPage.waitForSelector (/Users/tindang/workspaces/its/its-camera-ai/web/node_modules/puppeteer-core/src/api/Page.ts:3036:12)
+    at LoginPage.waitForElement (/Users/tindang/workspaces/its/its-camera-ai/web/tests/e2e/pages/BasePage.ts:38:12)
+    at LoginPage.waitForLoginFormToLoad (/Users/tindang/workspaces/its/its-camera-ai/web/tests/e2e/pages/LoginPage.ts:55:5)
+    at LoginPage.navigateToLogin (/Users/tindang/workspaces/its/its-camera-ai/web/tests/e2e/pages/LoginPage.ts:48:5)
+    at Object.&lt;anonymous&gt; (/Users/tindang/workspaces/its/its-camera-ai/web/tests/e2e/specs/auth.test.ts:29:5)</failure>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Login Page UI should have proper page title and branding" name="Authentication E2E Tests Login Page UI should have proper page title and branding" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Login Page UI should support keyboard navigation" name="Authentication E2E Tests Login Page UI should support keyboard navigation" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Login Page UI should toggle password visibility" name="Authentication E2E Tests Login Page UI should toggle password visibility" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Form Validation should show validation errors for empty fields" name="Authentication E2E Tests Form Validation should show validation errors for empty fields" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Form Validation should validate email format" name="Authentication E2E Tests Form Validation should validate email format" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Form Validation should handle form submission with Enter key" name="Authentication E2E Tests Form Validation should handle form submission with Enter key" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Form Validation should show loading state during login attempt" name="Authentication E2E Tests Form Validation should show loading state during login attempt" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Successful Authentication should login with valid admin credentials" name="Authentication E2E Tests Successful Authentication should login with valid admin credentials" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Successful Authentication should login with valid regular user credentials" name="Authentication E2E Tests Successful Authentication should login with valid regular user credentials" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Successful Authentication should handle remember me functionality" name="Authentication E2E Tests Successful Authentication should handle remember me functionality" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Successful Authentication should redirect to intended page after login" name="Authentication E2E Tests Successful Authentication should redirect to intended page after login" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Failed Authentication should show error for invalid credentials" name="Authentication E2E Tests Failed Authentication should show error for invalid credentials" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Failed Authentication should show error for non-existent user" name="Authentication E2E Tests Failed Authentication should show error for non-existent user" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Failed Authentication should show error for disabled user account" name="Authentication E2E Tests Failed Authentication should show error for disabled user account" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Failed Authentication should handle network errors gracefully" name="Authentication E2E Tests Failed Authentication should handle network errors gracefully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Multi-Factor Authentication (MFA) should handle MFA flow for enabled users" name="Authentication E2E Tests Multi-Factor Authentication (MFA) should handle MFA flow for enabled users" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Multi-Factor Authentication (MFA) should show error for invalid MFA code" name="Authentication E2E Tests Multi-Factor Authentication (MFA) should show error for invalid MFA code" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Multi-Factor Authentication (MFA) should allow MFA code resend" name="Authentication E2E Tests Multi-Factor Authentication (MFA) should allow MFA code resend" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Navigation and Links should navigate to forgot password page" name="Authentication E2E Tests Navigation and Links should navigate to forgot password page" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Navigation and Links should navigate to sign up page" name="Authentication E2E Tests Navigation and Links should navigate to sign up page" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Internationalization should support language switching" name="Authentication E2E Tests Internationalization should support language switching" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Security and Performance should not expose sensitive information in DOM" name="Authentication E2E Tests Security and Performance should not expose sensitive information in DOM" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Security and Performance should measure and validate Web Vitals" name="Authentication E2E Tests Security and Performance should measure and validate Web Vitals" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Security and Performance should prevent multiple rapid form submissions" name="Authentication E2E Tests Security and Performance should prevent multiple rapid form submissions" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Security and Performance should handle CSP and security headers" name="Authentication E2E Tests Security and Performance should handle CSP and security headers" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Accessibility should have proper ARIA labels and roles" name="Authentication E2E Tests Accessibility should have proper ARIA labels and roles" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Accessibility should support screen reader navigation" name="Authentication E2E Tests Accessibility should support screen reader navigation" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Authentication E2E Tests Accessibility should have proper focus management" name="Authentication E2E Tests Accessibility should have proper focus management" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+  <testsuite name="Dashboard E2E Tests" errors="0" failures="0" skipped="20" timestamp="2025-08-16T09:27:52" time="0.13" tests="20">
+    <testcase classname="Dashboard E2E Tests Dashboard Loading and Navigation should load dashboard page successfully" name="Dashboard E2E Tests Dashboard Loading and Navigation should load dashboard page successfully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Dashboard Loading and Navigation should display metrics overview correctly" name="Dashboard E2E Tests Dashboard Loading and Navigation should display metrics overview correctly" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Dashboard Loading and Navigation should navigate to different sections" name="Dashboard E2E Tests Dashboard Loading and Navigation should navigate to different sections" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Real-time Features should establish WebSocket connection" name="Dashboard E2E Tests Real-time Features should establish WebSocket connection" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Real-time Features should handle WebSocket messages" name="Dashboard E2E Tests Real-time Features should handle WebSocket messages" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Real-time Features should update data in real-time" name="Dashboard E2E Tests Real-time Features should update data in real-time" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Data Visualization should render traffic flow chart" name="Dashboard E2E Tests Data Visualization should render traffic flow chart" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Data Visualization should render camera map" name="Dashboard E2E Tests Data Visualization should render camera map" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Data Visualization should display recent incidents" name="Dashboard E2E Tests Data Visualization should display recent incidents" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Interactive Features should change time range filter" name="Dashboard E2E Tests Interactive Features should change time range filter" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Interactive Features should refresh dashboard data" name="Dashboard E2E Tests Interactive Features should refresh dashboard data" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Interactive Features should export dashboard data" name="Dashboard E2E Tests Interactive Features should export dashboard data" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests System Health Monitoring should display system health metrics" name="Dashboard E2E Tests System Health Monitoring should display system health metrics" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Performance and Responsiveness should meet Web Vitals thresholds" name="Dashboard E2E Tests Performance and Responsiveness should meet Web Vitals thresholds" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Performance and Responsiveness should be responsive across different viewports" name="Dashboard E2E Tests Performance and Responsiveness should be responsive across different viewports" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Performance and Responsiveness should handle slow network conditions" name="Dashboard E2E Tests Performance and Responsiveness should handle slow network conditions" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Error Handling should handle API errors gracefully" name="Dashboard E2E Tests Error Handling should handle API errors gracefully" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Error Handling should handle network disconnection" name="Dashboard E2E Tests Error Handling should handle network disconnection" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Accessibility should be keyboard navigable" name="Dashboard E2E Tests Accessibility should be keyboard navigable" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="Dashboard E2E Tests Accessibility should have proper ARIA labels" name="Dashboard E2E Tests Accessibility should have proper ARIA labels" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

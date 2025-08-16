@@ -1,0 +1,240 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-storage
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+  namespace: its-storage
+type: Opaque
+stringData:
+  access-key: "minio_admin_change_in_production"
+  secret-key: "minio_secret_key_change_in_production"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: its-storage
+  labels:
+    app: minio
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: api
+  selector:
+    app: minio
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-console
+  namespace: its-storage
+  labels:
+    app: minio
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9001
+      targetPort: 9001
+      protocol: TCP
+      name: console
+  selector:
+    app: minio
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: its-storage
+  labels:
+    app: minio
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: api
+  selector:
+    app: minio
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: its-storage
+spec:
+  serviceName: minio-headless
+  replicas: 4
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - minio
+            - server
+            - --console-address
+            - ":9001"
+            - http://minio-{0...3}.minio-headless.its-storage.svc.cluster.local/data
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secret-key
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: "public"
+            - name: MINIO_STORAGE_CLASS_STANDARD
+              value: "EC:2"
+            - name: MINIO_BROWSER
+              value: "on"
+            - name: MINIO_COMPRESSION_ENABLE
+              value: "on"
+            - name: MINIO_COMPRESSION_EXTENSIONS
+              value: ".txt,.log,.csv,.json,.tar,.xml,.bin"
+            - name: MINIO_COMPRESSION_MIME_TYPES
+              value: "text/*,application/json,application/xml"
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: minio-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 500Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-creator
+  namespace: its-storage
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - sh
+            - -c
+            - |
+              # Wait for MinIO to be ready
+              sleep 30
+              
+              # Configure MinIO client
+              mc alias set minio http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
+              
+              # Create buckets
+              mc mb minio/its-video --ignore-existing
+              mc mb minio/its-models --ignore-existing
+              mc mb minio/its-logs --ignore-existing
+              mc mb minio/its-backups --ignore-existing
+              
+              # Set bucket policies
+              mc anonymous set download minio/its-models
+              
+              # Set lifecycle policies
+              cat <<EOF | mc ilm import minio/its-video
+              {
+                "Rules": [
+                  {
+                    "ID": "delete-old-videos",
+                    "Status": "Enabled",
+                    "Expiration": {
+                      "Days": 7
+                    }
+                  }
+                ]
+              }
+              EOF
+              
+              cat <<EOF | mc ilm import minio/its-logs
+              {
+                "Rules": [
+                  {
+                    "ID": "delete-old-logs",
+                    "Status": "Enabled",
+                    "Expiration": {
+                      "Days": 30
+                    }
+                  }
+                ]
+              }
+              EOF
+              
+              # Set versioning
+              mc version enable minio/its-models
+              mc version enable minio/its-backups
+              
+              # List buckets
+              mc ls minio/
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secret-key

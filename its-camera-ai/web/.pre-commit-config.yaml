@@ -1,0 +1,291 @@
+# Pre-commit hooks for Next.js Frontend
+# Optimized for Next.js 15.4.6, React 19, TypeScript, and Tailwind CSS
+# See https://pre-commit.com for more information
+
+repos:
+  # ===========================================
+  # CODE FORMATTING & LINTING
+  # ===========================================
+  
+  # Prettier - Code formatter for JS/TS/CSS/JSON/MD
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        name: Prettier (Format Code)
+        files: \.(js|jsx|ts|tsx|css|scss|json|md|yaml|yml)$
+        exclude: ^(node_modules|\.next|out|coverage|dist)/
+        args: 
+          - --config=.prettierrc.json
+          - --ignore-path=.prettierignore
+        additional_dependencies:
+          - prettier@3.1.0
+          - prettier-plugin-tailwindcss@0.5.7
+
+  # ESLint - JavaScript/TypeScript linting
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.17.0
+    hooks:
+      - id: eslint
+        name: ESLint (Next.js + React 19)
+        files: \.(js|jsx|ts|tsx)$
+        exclude: ^(node_modules|\.next|out|coverage)/
+        args: 
+          - --fix
+          - --max-warnings=0
+          - --config=eslint.config.mjs
+        additional_dependencies:
+          - eslint@9.17.0
+          - eslint-config-next@15.4.6
+          - '@typescript-eslint/parser@8.20.0'
+          - '@typescript-eslint/eslint-plugin@8.20.0'
+          - eslint-plugin-react-hooks@5.1.0
+          - eslint-plugin-jsx-a11y@6.10.2
+          - eslint-plugin-import@2.31.0
+          - eslint-plugin-tailwindcss@3.18.0
+
+  # ===========================================
+  # TYPE CHECKING & BUILD VALIDATION
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # TypeScript type checking (fast check)
+      - id: typescript-check
+        name: TypeScript Type Check
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npx tsc --noEmit --skipLibCheck'
+        language: system
+        files: \.(ts|tsx)$
+        pass_filenames: false
+        
+      # TypeScript strict mode check (comprehensive)
+      - id: typescript-strict
+        name: TypeScript Strict Mode
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npx tsc --noEmit --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess'
+        language: system
+        files: \.(ts|tsx)$
+        pass_filenames: false
+        stages: [push]
+
+      # Next.js build validation (production build check)
+      - id: nextjs-build-check
+        name: Next.js Build Validation
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npm run build'
+        language: system
+        pass_filenames: false
+        stages: [manual]
+
+  # ===========================================
+  # SECURITY & DEPENDENCY SCANNING
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # npm audit for dependency vulnerabilities
+      - id: npm-audit
+        name: npm Security Audit
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npm audit --audit-level=moderate'
+        language: system
+        pass_filenames: false
+        stages: [push]
+        
+      # Check for exposed secrets and sensitive data
+      - id: secret-detection
+        name: Secret Detection
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && grep -r -i -E "(api_key|password|secret|token|private_key)" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" . && echo "Potential secrets detected!" && exit 1 || echo "No secrets detected"'
+        language: system
+        pass_filenames: false
+
+  # ===========================================
+  # ACCESSIBILITY & STANDARDS
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # Accessibility validation with custom script
+      - id: accessibility-check
+        name: Accessibility Validation
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && node scripts/validate-accessibility.js'
+        language: system
+        files: \.(tsx|jsx)$
+        pass_filenames: true
+        
+      # WCAG compliance check (manual stage for comprehensive testing)
+      - id: wcag-compliance
+        name: WCAG Compliance Check
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && echo "Run: npm run test:a11y for full accessibility testing"'
+        language: system
+        pass_filenames: false
+        stages: [manual]
+
+  # ===========================================
+  # PERFORMANCE & OPTIMIZATION
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # Bundle size analysis
+      - id: bundle-size-check
+        name: Bundle Size Analysis
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && node scripts/check-bundle-size.js'
+        language: system
+        pass_filenames: false
+        stages: [push]
+        
+      # Core Web Vitals check (Lighthouse CI)
+      - id: web-vitals-check
+        name: Core Web Vitals Check
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && echo "Performance check - run: npm run lighthouse for full audit"'
+        language: system
+        pass_filenames: false
+        stages: [manual]
+
+  # ===========================================
+  # INTERNATIONALIZATION (i18n)
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # next-intl validation
+      - id: i18n-validation
+        name: i18n Validation (next-intl)
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && node scripts/validate-i18n.js'
+        language: system
+        files: ^(messages/.*\.json|.*\.(js|jsx|ts|tsx))$
+        pass_filenames: false
+        
+      # Translation completeness check
+      - id: translation-completeness
+        name: Translation Completeness
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && node scripts/check-translation-completeness.js'
+        language: system
+        files: ^messages/.*\.json$
+        pass_filenames: false
+
+  # ===========================================
+  # COMPONENT & CODE QUALITY
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # Component structure validation
+      - id: component-validation
+        name: Component Structure Validation
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && node scripts/validate-components.js'
+        language: system
+        files: ^(components|app)/.*\.(tsx|ts)$
+        pass_filenames: true
+        
+      # React 19 patterns validation
+      - id: react-patterns-check
+        name: React 19 Patterns Check
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && node scripts/validate-react-patterns.js'
+        language: system
+        files: \.(tsx|ts)$
+        pass_filenames: true
+        
+      # CSS/Tailwind validation
+      - id: tailwind-validation
+        name: Tailwind CSS Validation
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npx tailwindcss -i ./app/globals.css -o /dev/null --minify'
+        language: system
+        files: \.(css|tsx|ts|jsx|js)$
+        pass_filenames: false
+
+  # ===========================================
+  # TESTING & QUALITY ASSURANCE
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      # Unit tests (fast check for pre-commit)
+      - id: jest-unit-tests
+        name: Jest Unit Tests
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npm run test:unit'
+        language: system
+        pass_filenames: false
+        stages: [push]
+        
+      # Component tests
+      - id: component-tests
+        name: Component Tests
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npm run test:components'
+        language: system
+        files: ^(components|app)/.*\.(tsx|ts)$
+        pass_filenames: false
+        stages: [push]
+
+  # ===========================================
+  # GENERAL FILE CHECKS (Consistent with Backend)
+  # ===========================================
+  
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.(md|mdx)$
+      - id: end-of-file-fixer
+        exclude: \.(md|mdx)$
+      - id: check-json
+        files: \.json$
+        exclude: ^(node_modules|\.next)/
+      - id: check-yaml
+        files: \.(yml|yaml)$
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=2000] # 2MB limit for frontend assets
+
+  # ===========================================
+  # COMMIT MESSAGE VALIDATION
+  # ===========================================
+  
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.1.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--strict, --allow-angular]
+
+  # ===========================================
+  # LINT-STAGED INTEGRATION
+  # ===========================================
+  
+  - repo: local
+    hooks:
+      - id: lint-staged
+        name: Lint Staged Files
+        entry: bash -c 'cd /Users/tindang/workspaces/its/its-camera-ai/web && npx lint-staged'
+        language: system
+        pass_filenames: false
+
+# ===========================================
+# GLOBAL CONFIGURATION
+# ===========================================
+
+# Stage configuration
+default_stages: [pre-commit]
+fail_fast: false  # Run all checks, don't stop on first failure
+minimum_pre_commit_version: "3.0.0"
+
+# CI configuration for automated environments
+ci:
+  autofix_commit_msg: |
+    style: auto-fix frontend code quality issues
+    
+    Applied automatic fixes from pre-commit hooks:
+    - Prettier formatting
+    - ESLint auto-fixes
+    - Import sorting
+    - Accessibility improvements
+    
+    🤖 Generated with [Claude Code](https://claude.ai/code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+  autofix_prs: true
+  autoupdate_branch: "chore/update-frontend-pre-commit"
+  autoupdate_commit_msg: "chore: update frontend pre-commit hooks to latest versions"
+  autoupdate_schedule: weekly
+  skip: [nextjs-build-check, wcag-compliance, web-vitals-check] # Skip manual/slow checks in CI

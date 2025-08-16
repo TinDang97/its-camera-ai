@@ -1,0 +1,404 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dcgm-exporter-config
+  namespace: monitoring
+data:
+  default-counters.csv: |
+    # Format: counter_name, field_id, counter_value, short_name, description
+    # GPU Utilization
+    DCGM_FI_DEV_GPU_UTIL, 203, gauge, gpu_utilization, GPU utilization (in %)
+    DCGM_FI_DEV_MEM_COPY_UTIL, 204, gauge, mem_copy_utilization, Memory utilization (in %)
+    DCGM_FI_DEV_ENC_UTIL, 205, gauge, enc_utilization, Encoder utilization (in %)
+    DCGM_FI_DEV_DEC_UTIL, 206, gauge, dec_utilization, Decoder utilization (in %)
+    
+    # Memory
+    DCGM_FI_DEV_FB_FREE, 232, gauge, fb_free, Framebuffer memory free (in MiB)
+    DCGM_FI_DEV_FB_USED, 233, gauge, fb_used, Framebuffer memory used (in MiB)
+    DCGM_FI_DEV_FB_TOTAL, 234, gauge, fb_total, Total framebuffer memory (in MiB)
+    
+    # Temperature
+    DCGM_FI_DEV_GPU_TEMP, 150, gauge, temperature_gpu, GPU temperature (in C)
+    DCGM_FI_DEV_MEMORY_TEMP, 151, gauge, temperature_memory, Memory temperature (in C)
+    
+    # Power
+    DCGM_FI_DEV_POWER_USAGE, 155, gauge, power_draw, Power draw (in W)
+    DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION, 156, counter, total_energy_consumption, Total energy consumption since last driver reload (in mJ)
+    
+    # Clock frequencies
+    DCGM_FI_DEV_SM_CLOCK, 158, gauge, sm_clock, SM clock frequency (in MHz)
+    DCGM_FI_DEV_MEM_CLOCK, 159, gauge, mem_clock, Memory clock frequency (in MHz)
+    
+    # Performance states
+    DCGM_FI_DEV_PSTATE, 190, gauge, pstate, Performance state
+    
+    # Compute processes
+    DCGM_FI_PROF_GR_ENGINE_ACTIVE, 1001, gauge, gr_engine_active, Ratio of time the graphics engine is active (in %)
+    DCGM_FI_PROF_SM_ACTIVE, 1002, gauge, sm_active, The ratio of cycles an SM has at least 1 warp assigned (in %)
+    DCGM_FI_PROF_SM_OCCUPANCY, 1003, gauge, sm_occupancy, The ratio of number of warps resident on an SM (in %)
+    
+    # Tensor operations (for ML workloads)
+    DCGM_FI_PROF_PIPE_TENSOR_ACTIVE, 1004, gauge, tensor_active, Ratio of cycles the tensor (HMMA) pipe is active (in %)
+    DCGM_FI_PROF_DRAM_ACTIVE, 1005, gauge, dram_active, Ratio of cycles the device memory interface is active sending or receiving data (in %)
+    
+    # PCIe
+    DCGM_FI_PROF_PCIE_TX_BYTES, 1006, counter, pcie_tx_throughput, Total number of bytes transmitted through PCIe TX
+    DCGM_FI_PROF_PCIE_RX_BYTES, 1007, counter, pcie_rx_throughput, Total number of bytes received through PCIe RX
+    
+    # NVLink (if available)
+    DCGM_FI_PROF_NVLINK_TX_BYTES, 1008, counter, nvlink_tx_throughput, Total number of bytes transmitted through NVLink
+    DCGM_FI_PROF_NVLINK_RX_BYTES, 1009, counter, nvlink_rx_throughput, Total number of bytes received through NVLink
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+  labels:
+    app: dcgm-exporter
+    its-camera-ai.io/component: gpu-metrics
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  template:
+    metadata:
+      labels:
+        app: dcgm-exporter
+        its-camera-ai.io/component: gpu-metrics
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9400"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        accelerator: nvidia-tesla-v100  # Only deploy on GPU nodes
+      
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      
+      hostNetwork: true
+      hostPID: true
+      
+      containers:
+      - name: dcgm-exporter
+        image: nvcr.io/nvidia/k8s/dcgm-exporter:3.1.8-3.1.5-ubuntu20.04
+        ports:
+        - containerPort: 9400
+          name: metrics
+          hostPort: 9400
+        
+        env:
+        - name: DCGM_EXPORTER_LISTEN
+          value: ":9400"
+        - name: DCGM_EXPORTER_KUBERNETES
+          value: "true"
+        - name: DCGM_EXPORTER_COLLECTORS
+          value: "/etc/dcgm-exporter/default-counters.csv"
+        - name: DCGM_EXPORTER_COLLECT_INTERVAL
+          value: "15000"  # 15 seconds
+        - name: DCGM_EXPORTER_KUBERNETES_GPU_ID_TYPE
+          value: "device-name"
+        
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+        - name: dcgm-exporter-config
+          mountPath: /etc/dcgm-exporter
+          readOnly: true
+        
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+            nvidia.com/gpu: 1  # Needs access to GPU for monitoring
+          requests:
+            cpu: 500m
+            memory: 512Mi
+            nvidia.com/gpu: 1
+        
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["SYS_ADMIN"]
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9400
+          initialDelaySeconds: 45
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9400
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+      
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: dcgm-exporter-config
+        configMap:
+          name: dcgm-exporter-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+  labels:
+    app: dcgm-exporter
+    its-camera-ai.io/component: gpu-metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9400"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for DaemonSet
+  ports:
+  - port: 9400
+    targetPort: 9400
+    name: metrics
+  selector:
+    app: dcgm-exporter
+
+---
+# ServiceMonitor for Prometheus Operator (if using)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+  labels:
+    app: dcgm-exporter
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  endpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics
+
+---
+# NVIDIA Device Plugin for Kubernetes (required for GPU support)
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: monitoring
+  labels:
+    app: nvidia-device-plugin
+    its-camera-ai.io/component: gpu-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-device-plugin
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: nvidia-device-plugin
+        its-camera-ai.io/component: gpu-device-plugin
+    spec:
+      nodeSelector:
+        accelerator: nvidia-tesla-v100  # Only deploy on GPU nodes
+      
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      
+      hostNetwork: true
+      
+      containers:
+      - name: nvidia-device-plugin-ctr
+        image: nvcr.io/nvidia/k8s-device-plugin:v0.14.1
+        env:
+        - name: FAIL_ON_INIT_ERROR
+          value: "false"
+        - name: MIG_STRATEGY
+          value: "none"
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "compute,utility"
+        
+        volumeMounts:
+        - name: device-plugin
+          mountPath: /var/lib/kubelet/device-plugins
+        
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      
+      volumes:
+      - name: device-plugin
+        hostPath:
+          path: /var/lib/kubelet/device-plugins
+
+---
+# Node Exporter for system metrics
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+    its-camera-ai.io/component: node-metrics
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+        its-camera-ai.io/component: node-metrics
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: "/metrics"
+    spec:
+      hostNetwork: true
+      hostPID: true
+      
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      
+      containers:
+      - name: node-exporter
+        image: prom/node-exporter:v1.6.1
+        ports:
+        - containerPort: 9100
+          name: metrics
+          hostPort: 9100
+        
+        args:
+          - '--path.procfs=/host/proc'
+          - '--path.sysfs=/host/sys'
+          - '--path.rootfs=/host/root'
+          - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)'
+          - '--collector.netclass.ignored-devices=^(veth.*|[a-f0-9]{15})$$'
+          - '--collector.netdev.device-exclude=^(veth.*|[a-f0-9]{15})$$'
+          - '--collector.textfile.directory=/host/textfile'
+          - '--collector.systemd'
+          - '--collector.processes'
+          - '--collector.cpu.info'
+          - '--collector.meminfo_numa'
+          - '--web.max-requests=40'
+          - '--log.level=warn'
+        
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+        - name: root
+          mountPath: /host/root
+          mountPropagation: HostToContainer
+          readOnly: true
+        - name: textfile
+          mountPath: /host/textfile
+          readOnly: true
+        
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+        
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+        
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9100
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+      
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: root
+        hostPath:
+          path: /
+      - name: textfile
+        hostPath:
+          path: /var/lib/node_exporter/textfile_collector
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+    its-camera-ai.io/component: node-metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9100"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for DaemonSet
+  ports:
+  - port: 9100
+    targetPort: 9100
+    name: metrics
+  selector:
+    app: node-exporter

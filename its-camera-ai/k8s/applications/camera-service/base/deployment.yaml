@@ -1,0 +1,195 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camera-service
+  labels:
+    app: camera-service
+    app.kubernetes.io/name: camera-service
+    app.kubernetes.io/part-of: its-camera-ai
+    app.kubernetes.io/component: backend-service
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: camera-service
+  template:
+    metadata:
+      labels:
+        app: camera-service
+        app.kubernetes.io/name: camera-service
+        app.kubernetes.io/part-of: its-camera-ai
+        app.kubernetes.io/component: backend-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: camera-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: camera-service
+        image: ghcr.io/its-team/its-camera-ai-camera-service:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: grpc
+          containerPort: 9090
+          protocol: TCP
+        - name: metrics
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: environment-config
+              key: ENVIRONMENT
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: environment-config
+              key: LOG_LEVEL
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: url
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-config
+              key: brokers
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: storage-config
+              key: bucket-name
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: storage-config
+              key: region
+        - name: METRICS_PORT
+          value: "8081"
+        - name: JAEGER_AGENT_HOST
+          value: "jaeger-agent.monitoring.svc.cluster.local"
+        - name: JAEGER_AGENT_PORT
+          value: "6831"
+        - name: OTEL_SERVICE_NAME
+          value: "camera-service"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=camera-service,service.version=1.0.0"
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 12
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/cache
+        - name: logs
+          mountPath: /app/logs
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: logs
+        emptyDir:
+          sizeLimit: 2Gi
+      - name: config
+        configMap:
+          name: camera-service-config
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - camera-service
+              topologyKey: kubernetes.io/hostname
+      nodeSelector:
+        node-type: general
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300

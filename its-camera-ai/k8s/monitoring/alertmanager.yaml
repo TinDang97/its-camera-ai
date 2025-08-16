@@ -1,0 +1,640 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'smtp.amazonaws.com:587'
+      smtp_from: 'alerts@its-camera-ai.com'
+      smtp_auth_username: 'AKIAIOSFODNN7EXAMPLE'
+      smtp_auth_password_file: '/etc/alertmanager/secrets/smtp_password'
+      pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+      slack_api_url_file: '/etc/alertmanager/secrets/slack_webhook'
+      resolve_timeout: 5m
+    
+    templates:
+      - '/etc/alertmanager/templates/*.tmpl'
+    
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: 'default-receiver'
+      routes:
+        # Critical alerts go to PagerDuty immediately
+        - match:
+            severity: critical
+          receiver: 'pagerduty-critical'
+          group_wait: 10s
+          continue: true
+        
+        # GPU-related alerts
+        - match:
+            component: gpu
+          receiver: 'gpu-alerts'
+          group_by: ['alertname', 'gpu_node']
+          continue: true
+        
+        # ML inference alerts
+        - match:
+            component: ml-inference
+          receiver: 'ml-inference-alerts'
+          group_by: ['alertname', 'service']
+          continue: true
+        
+        # Database alerts
+        - match:
+            component: database
+          receiver: 'database-alerts'
+          group_by: ['alertname', 'instance']
+          continue: true
+        
+        # Security alerts
+        - match:
+            component: security
+          receiver: 'security-alerts'
+          group_wait: 0s
+          continue: true
+        
+        # System alerts
+        - match:
+            component: system
+          receiver: 'system-alerts'
+          group_by: ['alertname', 'instance']
+    
+    inhibit_rules:
+      # Inhibit any warning-level alerts if there are critical alerts
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['alertname', 'instance']
+      
+      # Inhibit GPU memory alerts if GPU is down
+      - source_match:
+          alertname: 'GPUDown'
+        target_match:
+          component: 'gpu'
+        equal: ['gpu_node']
+    
+    receivers:
+      - name: 'default-receiver'
+        slack_configs:
+        - channel: '#its-camera-ai-alerts'
+          title: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          text: |
+            {{ range .Alerts }}
+            *Alert:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            *Severity:* {{ .Labels.severity }}
+            *Component:* {{ .Labels.component }}
+            {{ end }}
+          color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+          send_resolved: true
+      
+      - name: 'pagerduty-critical'
+        pagerduty_configs:
+        - routing_key_file: '/etc/alertmanager/secrets/pagerduty_key'
+          description: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          severity: '{{ .GroupLabels.severity }}'
+          details:
+            firing: '{{ .Alerts.Firing | len }}'
+            resolved: '{{ .Alerts.Resolved | len }}'
+            component: '{{ .GroupLabels.component }}'
+            cluster: '{{ .GroupLabels.cluster }}'
+          links:
+            - href: 'https://grafana.its-camera-ai.com'
+              text: 'Grafana Dashboard'
+            - href: 'https://prometheus.its-camera-ai.com'
+              text: 'Prometheus'
+        email_configs:
+        - to: 'oncall@its-camera-ai.com'
+          subject: '[CRITICAL] {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          body: |
+            Critical alert in ITS Camera AI production system.
+            
+            {{ range .Alerts }}
+            Alert: {{ .Annotations.summary }}
+            Description: {{ .Annotations.description }}
+            Severity: {{ .Labels.severity }}
+            Component: {{ .Labels.component }}
+            Instance: {{ .Labels.instance }}
+            Timestamp: {{ .StartsAt }}
+            {{ end }}
+            
+            Please investigate immediately.
+            
+            Grafana: https://grafana.its-camera-ai.com
+            Prometheus: https://prometheus.its-camera-ai.com
+      
+      - name: 'gpu-alerts'
+        slack_configs:
+        - channel: '#gpu-alerts'
+          title: 'GPU Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          text: |
+            {{ range .Alerts }}
+            *GPU Node:* {{ .Labels.gpu_node }}
+            *Alert:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            *Current Value:* {{ .Annotations.value }}
+            {{ end }}
+          color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+          send_resolved: true
+        pagerduty_configs:
+        - routing_key_file: '/etc/alertmanager/secrets/pagerduty_gpu_key'
+          description: 'GPU Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          severity: '{{ .GroupLabels.severity }}'
+          component: 'GPU Infrastructure'
+      
+      - name: 'ml-inference-alerts'
+        slack_configs:
+        - channel: '#ml-alerts'
+          title: 'ML Inference Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          text: |
+            {{ range .Alerts }}
+            *Service:* {{ .Labels.service }}
+            *Alert:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            *Impact:* This may affect inference quality and latency
+            {{ end }}
+          color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+          send_resolved: true
+        webhook_configs:
+        - url: 'https://hooks.its-camera-ai.com/ml-alerts'
+          send_resolved: true
+          http_config:
+            bearer_token_file: '/etc/alertmanager/secrets/webhook_token'
+      
+      - name: 'database-alerts'
+        slack_configs:
+        - channel: '#database-alerts'
+          title: 'Database Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          text: |
+            {{ range .Alerts }}
+            *Database:* {{ .Labels.datname }}
+            *Instance:* {{ .Labels.instance }}
+            *Alert:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            {{ end }}
+          color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+          send_resolved: true
+        pagerduty_configs:
+        - routing_key_file: '/etc/alertmanager/secrets/pagerduty_db_key'
+          description: 'Database Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          severity: '{{ .GroupLabels.severity }}'
+          component: 'Database Infrastructure'
+      
+      - name: 'security-alerts'
+        slack_configs:
+        - channel: '#security-alerts'
+          title: '🚨 SECURITY ALERT: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          text: |
+            {{ range .Alerts }}
+            *SECURITY INCIDENT DETECTED*
+            *Alert:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            *Node:* {{ .Labels.instance }}
+            *Immediate Action Required*
+            {{ end }}
+          color: 'danger'
+          send_resolved: true
+        pagerduty_configs:
+        - routing_key_file: '/etc/alertmanager/secrets/pagerduty_security_key'
+          description: 'SECURITY ALERT: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          severity: 'critical'
+          component: 'Security'
+        email_configs:
+        - to: 'security@its-camera-ai.com'
+          subject: '🚨 SECURITY ALERT: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          body: |
+            IMMEDIATE ATTENTION REQUIRED
+            
+            A security alert has been triggered in the ITS Camera AI system.
+            
+            {{ range .Alerts }}
+            Alert: {{ .Annotations.summary }}
+            Description: {{ .Annotations.description }}
+            Node: {{ .Labels.instance }}
+            Timestamp: {{ .StartsAt }}
+            {{ end }}
+            
+            Please investigate immediately and follow incident response procedures.
+      
+      - name: 'system-alerts'
+        slack_configs:
+        - channel: '#system-alerts'
+          title: 'System Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          text: |
+            {{ range .Alerts }}
+            *Node:* {{ .Labels.instance }}
+            *Alert:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            {{ end }}
+          color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+          send_resolved: true
+
+  alert-templates.tmpl: |
+    {{ define "slack.title" }}
+    {{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .GroupLabels.alertname }}
+    {{ end }}
+    
+    {{ define "slack.text" }}
+    {{ range .Alerts }}
+    *Alert:* {{ .Annotations.summary }}
+    *Description:* {{ .Annotations.description }}
+    *Severity:* {{ .Labels.severity }}
+    *Component:* {{ .Labels.component }}
+    *Instance:* {{ .Labels.instance }}
+    {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+    {{ end }}
+    {{ end }}
+    
+    {{ define "email.subject" }}
+    [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }} - {{ .GroupLabels.cluster }}
+    {{ end }}
+    
+    {{ define "email.body" }}
+    <h2>Alert Summary</h2>
+    <p><strong>Status:</strong> {{ .Status }}</p>
+    <p><strong>Group:</strong> {{ .GroupLabels.alertname }}</p>
+    <p><strong>Cluster:</strong> {{ .GroupLabels.cluster }}</p>
+    
+    <h3>Alert Details</h3>
+    {{ range .Alerts }}
+    <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0;">
+        <h4>{{ .Annotations.summary }}</h4>
+        <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+        <p><strong>Severity:</strong> {{ .Labels.severity }}</p>
+        <p><strong>Component:</strong> {{ .Labels.component }}</p>
+        <p><strong>Instance:</strong> {{ .Labels.instance }}</p>
+        <p><strong>Started:</strong> {{ .StartsAt }}</p>
+        {{ if .Annotations.runbook_url }}
+        <p><strong>Runbook:</strong> <a href="{{ .Annotations.runbook_url }}">{{ .Annotations.runbook_url }}</a></p>
+        {{ end }}
+    </div>
+    {{ end }}
+    
+    <h3>Links</h3>
+    <ul>
+        <li><a href="https://grafana.its-camera-ai.com">Grafana Dashboard</a></li>
+        <li><a href="https://prometheus.its-camera-ai.com">Prometheus</a></li>
+        <li><a href="https://alertmanager.its-camera-ai.com">AlertManager</a></li>
+    </ul>
+    {{ end }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-secrets
+  namespace: monitoring
+type: Opaque
+data:
+  # PagerDuty integration keys (base64 encoded)
+  pagerduty_key: cGFnZXJkdXR5LWNyaXRpY2FsLWludGVncmF0aW9uLWtleQ==
+  pagerduty_gpu_key: cGFnZXJkdXR5LWdwdS1pbnRlZ3JhdGlvbi1rZXk=
+  pagerduty_db_key: cGFnZXJkdXR5LWRhdGFiYXNlLWludGVncmF0aW9uLWtleQ==
+  pagerduty_security_key: cGFnZXJkdXR5LXNlY3VyaXR5LWludGVncmF0aW9uLWtleQ==
+  
+  # Slack webhook URL
+  slack_webhook: aHR0cHM6Ly9ob29rcy5zbGFjay5jb20vc2VydmljZXMvVDAwMDAwMDAwL0IwMDAwMDAwMC9YWFhYWFhYWFhYWFhYWFhYWFhYWFhY
+  
+  # SMTP password for email alerts
+  smtp_password: c210cC1wYXNzd29yZC1mb3ItYWxlcnRz
+  
+  # Webhook authentication token
+  webhook_token: d2ViaG9vay1hdXRoLXRva2VuLWZvci1tbC1hbGVydHM=
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    its-camera-ai.io/component: alerting
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+        its-camera-ai.io/component: alerting
+    spec:
+      nodeSelector:
+        node.kubernetes.io/instance-type: general
+        its-camera-ai/node-type: general-workload
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - alertmanager
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: alertmanager
+        image: prom/alertmanager:v0.26.0
+        ports:
+        - containerPort: 9093
+          name: alertmanager
+        - containerPort: 9094
+          name: cluster
+        
+        args:
+          - '--config.file=/etc/alertmanager/alertmanager.yml'
+          - '--storage.path=/alertmanager'
+          - '--data.retention=120h'
+          - '--cluster.listen-address=0.0.0.0:9094'
+          - '--cluster.advertise-address=$(POD_IP):9094'
+          - '--cluster.peer=alertmanager-0.alertmanager:9094'
+          - '--cluster.peer=alertmanager-1.alertmanager:9094'
+          - '--web.external-url=https://alertmanager.its-camera-ai.com'
+          - '--web.route-prefix=/'
+          - '--log.level=info'
+        
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        
+        volumeMounts:
+        - name: alertmanager-config
+          mountPath: /etc/alertmanager
+        - name: alertmanager-secrets
+          mountPath: /etc/alertmanager/secrets
+          readOnly: true
+        - name: alertmanager-storage
+          mountPath: /alertmanager
+        
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9093
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9093
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 10
+          failureThreshold: 3
+      
+      volumes:
+      - name: alertmanager-config
+        configMap:
+          name: alertmanager-config
+      - name: alertmanager-secrets
+        secret:
+          secretName: alertmanager-secrets
+      - name: alertmanager-storage
+        persistentVolumeClaim:
+          claimName: alertmanager-storage
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alertmanager-storage
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    its-camera-ai.io/component: alerting
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless for clustering
+  ports:
+  - port: 9093
+    targetPort: 9093
+    name: alertmanager
+  - port: 9094
+    targetPort: 9094
+    name: cluster
+  selector:
+    app: alertmanager
+
+---
+# LoadBalancer service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-external
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    its-camera-ai.io/component: alerting
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9093
+    targetPort: 9093
+    name: alertmanager
+  selector:
+    app: alertmanager
+
+---
+# ServiceMonitor for Prometheus to scrape AlertManager metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+spec:
+  selector:
+    matchLabels:
+      app: alertmanager
+  endpoints:
+  - port: alertmanager
+    path: /metrics
+    interval: 30s
+
+---
+# PagerDuty Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pagerduty-services
+  namespace: monitoring
+data:
+  services.yml: |
+    # PagerDuty Service Configuration for ITS Camera AI
+    
+    services:
+      critical:
+        name: "ITS Camera AI - Critical"
+        description: "Critical alerts affecting system availability"
+        escalation_policy: "ITS Camera AI Critical Escalation"
+        integration_type: "prometheus"
+        auto_resolve_timeout: 14400  # 4 hours
+        acknowledgement_timeout: 1800  # 30 minutes
+        
+      gpu:
+        name: "ITS Camera AI - GPU Infrastructure"
+        description: "GPU-related alerts and performance issues"
+        escalation_policy: "ITS Camera AI Infrastructure"
+        integration_type: "prometheus"
+        auto_resolve_timeout: 7200  # 2 hours
+        
+      database:
+        name: "ITS Camera AI - Database"
+        description: "Database performance and availability alerts"
+        escalation_policy: "ITS Camera AI Database"
+        integration_type: "prometheus"
+        auto_resolve_timeout: 3600  # 1 hour
+        
+      security:
+        name: "ITS Camera AI - Security"
+        description: "Security incidents and threats"
+        escalation_policy: "ITS Camera AI Security"
+        integration_type: "prometheus"
+        auto_resolve_timeout: 0  # Manual resolution required
+    
+    escalation_policies:
+      critical:
+        name: "ITS Camera AI Critical Escalation"
+        escalation_rules:
+          - escalation_delay_in_minutes: 0
+            targets:
+              - type: "user"
+                id: "oncall-engineer"
+          - escalation_delay_in_minutes: 15
+            targets:
+              - type: "user"
+                id: "senior-engineer"
+          - escalation_delay_in_minutes: 30
+            targets:
+              - type: "user"
+                id: "engineering-manager"
+      
+      infrastructure:
+        name: "ITS Camera AI Infrastructure"
+        escalation_rules:
+          - escalation_delay_in_minutes: 0
+            targets:
+              - type: "user"
+                id: "infrastructure-engineer"
+          - escalation_delay_in_minutes: 30
+            targets:
+              - type: "user"
+                id: "senior-engineer"
+      
+      database:
+        name: "ITS Camera AI Database"
+        escalation_rules:
+          - escalation_delay_in_minutes: 0
+            targets:
+              - type: "user"
+                id: "database-engineer"
+          - escalation_delay_in_minutes: 20
+            targets:
+              - type: "user"
+                id: "senior-engineer"
+      
+      security:
+        name: "ITS Camera AI Security"
+        escalation_rules:
+          - escalation_delay_in_minutes: 0
+            targets:
+              - type: "user"
+                id: "security-engineer"
+              - type: "user"
+                id: "security-manager"
+
+---
+# Network Policy for AlertManager
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-network-policy
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: alertmanager
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 9093
+  - from:
+    - podSelector:
+        matchLabels:
+          app: alertmanager
+    ports:
+    - protocol: TCP
+      port: 9094
+  egress:
+  - to: []  # Allow all outbound for webhooks, email, PagerDuty
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 587
+    - protocol: TCP
+      port: 25
+  - to:
+    - podSelector:
+        matchLabels:
+          app: alertmanager
+    ports:
+    - protocol: TCP
+      port: 9094
+  - to: []  # Allow DNS resolution
+    ports:
+    - protocol: UDP
+      port: 53

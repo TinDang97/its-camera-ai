@@ -1,0 +1,90 @@
+# Container Structure Tests for ITS Camera AI Docker Images
+# Validates security, configuration, and operational requirements
+
+schemaVersion: 2.0.0
+
+# File existence tests
+fileExistenceTests:
+- name: 'Python application exists'
+  path: '/app/src'
+  shouldExist: true
+  permissions: '755'
+
+- name: 'Application entry point exists'
+  path: '/app/src/its_camera_ai'
+  shouldExist: true
+
+- name: 'Virtual environment exists'
+  path: '/app/.venv'
+  shouldExist: true
+
+- name: 'Build info exists'
+  path: '/app/BUILD_INFO'
+  shouldExist: true
+
+# File content tests
+fileContentTests:
+- name: 'Non-root user configured'
+  path: '/etc/passwd'
+  expectedContents:
+    - 'app:x:1001:1001:ITS Camera AI.*:/app:/sbin/nologin'
+
+- name: 'Python version check'
+  path: '/app/BUILD_INFO'
+  expectedContents:
+    - 'Python Version: Python 3.12.*'
+
+# Command tests
+commandTests:
+- name: 'Python import test'
+  command: 'python'
+  args: ['-c', 'import its_camera_ai; print("Import successful")']
+  expectedOutput:
+    - 'Import successful'
+
+- name: 'Application help command'
+  command: 'python'
+  args: ['-m', 'its_camera_ai.cli.main', '--help']
+  exitCode: 0
+
+- name: 'Health check endpoint available'
+  command: 'python'
+  args: ['-c', 'from its_camera_ai.api.health import health_check; print("Health check available")']
+  expectedOutput:
+    - 'Health check available'
+
+- name: 'Security - no root processes'
+  command: 'ps'
+  args: ['aux']
+  excludedOutput:
+    - 'root.*python'
+
+# Metadata tests  
+metadataTest:
+  envVars:
+  - key: 'PYTHONUNBUFFERED'
+    value: '1'
+  - key: 'PYTHONDONTWRITEBYTECODE'  
+    value: '1'
+  - key: 'PYTHONPATH'
+    value: '/app/src'
+    
+  labels:
+  - key: 'org.opencontainers.image.title'
+    value: 'ITS Camera AI*'
+  - key: 'org.opencontainers.image.vendor'
+    value: 'ITS Camera AI Team'
+  - key: 'security.non-root'
+    value: 'true'
+    
+  exposedPorts: ['8000']
+  
+  user: 'app'
+  
+  workdir: '/app'
+
+# License tests
+licenseTests:
+- debian: false
+  files:
+  - '/app/LICENSE'

@@ -1,0 +1,343 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: its-messaging
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper-headless
+  namespace: its-messaging
+  labels:
+    app: zookeeper
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 2181
+      targetPort: 2181
+      protocol: TCP
+      name: client
+    - port: 2888
+      targetPort: 2888
+      protocol: TCP
+      name: follower
+    - port: 3888
+      targetPort: 3888
+      protocol: TCP
+      name: election
+  selector:
+    app: zookeeper
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: its-messaging
+  labels:
+    app: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+    - port: 2181
+      targetPort: 2181
+      protocol: TCP
+      name: client
+  selector:
+    app: zookeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: its-messaging
+spec:
+  serviceName: zookeeper-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: zookeeper
+          image: confluentinc/cp-zookeeper:7.5.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 2181
+              name: client
+            - containerPort: 2888
+              name: follower
+            - containerPort: 3888
+              name: election
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
+            - name: ZOOKEEPER_INIT_LIMIT
+              value: "10"
+            - name: ZOOKEEPER_SYNC_LIMIT
+              value: "5"
+            - name: ZOOKEEPER_MAX_CLIENT_CNXNS
+              value: "60"
+            - name: ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT
+              value: "3"
+            - name: ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL
+              value: "24"
+            - name: ZOOKEEPER_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ZOOKEEPER_SERVERS
+              value: "zookeeper-0.zookeeper-headless:2888:3888;zookeeper-1.zookeeper-headless:2888:3888;zookeeper-2.zookeeper-headless:2888:3888"
+          volumeMounts:
+            - name: zookeeper-data
+              mountPath: /var/lib/zookeeper/data
+            - name: zookeeper-logs
+              mountPath: /var/lib/zookeeper/log
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "echo ruok | nc localhost 2181 | grep imok"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "echo ruok | nc localhost 2181 | grep imok"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: zookeeper-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: zookeeper-logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: its-messaging
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 9092
+      targetPort: 9092
+      protocol: TCP
+      name: broker
+    - port: 9093
+      targetPort: 9093
+      protocol: TCP
+      name: controller
+  selector:
+    app: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: its-messaging
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9092
+      targetPort: 9092
+      protocol: TCP
+      name: broker
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: its-messaging
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:7.5.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9092
+              name: broker
+            - containerPort: 9093
+              name: controller
+          env:
+            - name: KAFKA_BROKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: "zookeeper-0.zookeeper-headless:2181,zookeeper-1.zookeeper-headless:2181,zookeeper-2.zookeeper-headless:2181"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://$(KAFKA_BROKER_ID).kafka-headless:9092"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "168"
+            - name: KAFKA_LOG_SEGMENT_BYTES
+              value: "1073741824"
+            - name: KAFKA_NUM_NETWORK_THREADS
+              value: "8"
+            - name: KAFKA_NUM_IO_THREADS
+              value: "8"
+            - name: KAFKA_SOCKET_SEND_BUFFER_BYTES
+              value: "102400"
+            - name: KAFKA_SOCKET_RECEIVE_BUFFER_BYTES
+              value: "102400"
+            - name: KAFKA_SOCKET_REQUEST_MAX_BYTES
+              value: "104857600"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "3"
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "2"
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: "2"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "2"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "3000"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            - name: KAFKA_COMPRESSION_TYPE
+              value: "snappy"
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kafka-broker-api-versions --bootstrap-server localhost:9092"
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kafka-broker-api-versions --bootstrap-server localhost:9092"
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-creator
+  namespace: its-messaging
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-topic-creator
+          image: confluentinc/cp-kafka:7.5.0
+          command:
+            - sh
+            - -c
+            - |
+              # Wait for Kafka to be ready
+              sleep 30
+              
+              # Create topics
+              kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+                --topic camera-events --partitions 6 --replication-factor 2 \
+                --config retention.ms=604800000 --config compression.type=snappy
+              
+              kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+                --topic vehicle-detections --partitions 12 --replication-factor 2 \
+                --config retention.ms=604800000 --config compression.type=snappy
+              
+              kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+                --topic alerts --partitions 3 --replication-factor 2 \
+                --config retention.ms=2592000000
+              
+              kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+                --topic ml-inference-metrics --partitions 6 --replication-factor 2 \
+                --config retention.ms=259200000 --config compression.type=snappy
+              
+              # List created topics
+              kafka-topics --bootstrap-server kafka:9092 --list

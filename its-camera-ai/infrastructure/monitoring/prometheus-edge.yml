@@ -1,0 +1,48 @@
+# Edge Prometheus Configuration for ITS Camera AI
+# Lightweight monitoring for resource-constrained edge devices
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    cluster: 'its-camera-ai-edge'
+    environment: 'edge'
+
+# Reduced rule evaluation for edge
+rule_files:
+  - "rules/edge/*.yml"
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 60s
+
+  # Edge Application
+  - job_name: 'its-camera-ai-edge'
+    static_configs:
+      - targets: ['app-edge:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Edge PostgreSQL
+  - job_name: 'edge-postgres'
+    static_configs:
+      - targets: ['edge-postgres:5432']
+    metrics_path: '/metrics'
+    scrape_interval: 60s
+
+  # Edge Redis
+  - job_name: 'edge-redis'
+    static_configs:
+      - targets: ['edge-redis:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 60s
+
+# Storage retention optimized for edge
+# storage:
+#   tsdb:
+#     retention.time: 7d
+#     retention.size: 500MB

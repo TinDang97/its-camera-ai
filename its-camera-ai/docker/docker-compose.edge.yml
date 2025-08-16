@@ -1,0 +1,393 @@
+# Edge Deployment Configuration for ITS Camera AI
+# Lightweight configuration optimized for resource-constrained edge devices
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.edge.yml --profile edge up
+
+version: '3.8'
+
+services:
+  # Edge-Optimized Application Service
+  app-edge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: edge
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-$(git rev-parse HEAD)}
+        VERSION: ${VERSION:-edge-latest}
+        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
+        TARGETARCH: ${TARGETARCH:-amd64}
+    container_name: its-camera-ai-edge
+    restart: unless-stopped
+    environment:
+      # Edge-specific environment
+      - ENVIRONMENT=edge
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-WARN}
+      # Resource optimization for edge
+      - WORKERS=1
+      - WORKER_CLASS=uvicorn.workers.UvicornWorker
+      - WORKER_CONNECTIONS=${EDGE_WORKER_CONNECTIONS:-100}
+      - KEEP_ALIVE=5
+      - MAX_REQUESTS=${EDGE_MAX_REQUESTS:-1000}
+      # Edge ML settings
+      - BATCH_SIZE=${EDGE_BATCH_SIZE:-1}
+      - MAX_BATCH_DELAY=${EDGE_MAX_BATCH_DELAY:-200}
+      - MODEL_CACHE_SIZE=${EDGE_MODEL_CACHE_SIZE:-128}
+      - INFERENCE_THREADS=${EDGE_INFERENCE_THREADS:-2}
+      # Memory optimization
+      - MALLOC_ARENA_MAX=1
+      - MALLOC_MMAP_THRESHOLD_=65536
+      - OMP_NUM_THREADS=${EDGE_OMP_NUM_THREADS:-2}
+      - OPENBLAS_NUM_THREADS=1
+      # Edge connectivity settings
+      - CONNECTION_TIMEOUT=${EDGE_CONNECTION_TIMEOUT:-30}
+      - READ_TIMEOUT=${EDGE_READ_TIMEOUT:-60}
+      - RETRY_ATTEMPTS=${EDGE_RETRY_ATTEMPTS:-3}
+      - OFFLINE_MODE=${EDGE_OFFLINE_MODE:-false}
+      # Local data processing
+      - EDGE_PROCESSING_ENABLED=true
+      - CLOUD_SYNC_ENABLED=${EDGE_CLOUD_SYNC:-true}
+      - SYNC_INTERVAL=${EDGE_SYNC_INTERVAL:-3600}
+    ports:
+      - "${EDGE_APP_PORT:-8000}:8000"
+      - "${EDGE_METRICS_PORT:-8001}:8001"
+    volumes:
+      # Edge data persistence
+      - edge_data:/app/data
+      - edge_logs:/app/logs
+      - edge_models:/app/models
+      - edge_temp:/app/temp
+      - edge_cache:/app/cache
+      # Edge configuration
+      - ${PWD}/edge_config.json:/app/config.json:ro
+      - ${PWD}/models/edge:/app/models/edge:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health", "--max-time", "5"]
+      interval: 60s
+      timeout: 10s
+      retries: 2
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${EDGE_MEMORY_LIMIT:-1G}
+          cpus: ${EDGE_CPU_LIMIT:-1.0}
+        reservations:
+          memory: ${EDGE_MEMORY_RESERVATION:-512M}
+          cpus: ${EDGE_CPU_RESERVATION:-0.5}
+    depends_on:
+      edge-postgres:
+        condition: service_healthy
+      edge-redis:
+        condition: service_healthy
+    networks:
+      - its-edge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=its-camera-ai-edge,deployment=edge"
+
+  # Lightweight PostgreSQL for Edge
+  edge-postgres:
+    image: postgres:15-alpine
+    container_name: its-camera-ai-edge-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${EDGE_POSTGRES_DB:-its_camera_ai_edge}
+      - POSTGRES_USER=${EDGE_POSTGRES_USER:-its_edge_user}
+      - POSTGRES_PASSWORD=${EDGE_POSTGRES_PASSWORD:-edge_password}
+      - POSTGRES_INITDB_ARGS=--auth-host=md5 --locale=C
+    ports:
+      - "${EDGE_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - edge_postgres_data:/var/lib/postgresql/data
+      - ${PWD}/infrastructure/database/init/edge:/docker-entrypoint-initdb.d:ro
+    command: >
+      postgres
+        -c max_connections=50
+        -c shared_buffers=128MB
+        -c effective_cache_size=512MB
+        -c maintenance_work_mem=64MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=4MB
+        -c default_statistics_target=50
+        -c random_page_cost=1.1
+        -c work_mem=4MB
+        -c min_wal_size=80MB
+        -c max_wal_size=1GB
+        -c fsync=off
+        -c synchronous_commit=off
+        -c full_page_writes=off
+        -c log_min_duration_statement=5000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${EDGE_POSTGRES_USER:-its_edge_user}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${EDGE_POSTGRES_MEMORY_LIMIT:-512M}
+          cpus: ${EDGE_POSTGRES_CPU_LIMIT:-0.5}
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - its-edge-network
+    profiles:
+      - edge
+
+  # Lightweight Redis for Edge
+  edge-redis:
+    image: redis:7-alpine
+    container_name: its-camera-ai-edge-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+        --maxmemory ${EDGE_REDIS_MAXMEMORY:-128mb}
+        --maxmemory-policy allkeys-lru
+        --save ""
+        --appendonly no
+        --timeout 300
+        --tcp-keepalive 60
+    ports:
+      - "${EDGE_REDIS_PORT:-6380}:6379"
+    volumes:
+      - edge_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${EDGE_REDIS_MEMORY_LIMIT:-256M}
+          cpus: ${EDGE_REDIS_CPU_LIMIT:-0.25}
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    networks:
+      - its-edge-network
+    profiles:
+      - edge
+
+  # Edge Data Sync Service
+  edge-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: edge
+    container_name: its-camera-ai-edge-sync
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=edge
+      - SERVICE_TYPE=sync
+      - CLOUD_ENDPOINT=${CLOUD_ENDPOINT}
+      - CLOUD_API_KEY=${CLOUD_API_KEY}
+      - SYNC_INTERVAL=${EDGE_SYNC_INTERVAL:-3600}
+      - SYNC_BATCH_SIZE=${EDGE_SYNC_BATCH_SIZE:-100}
+      - COMPRESSION_ENABLED=${EDGE_COMPRESSION:-true}
+      - ENCRYPTION_ENABLED=${EDGE_ENCRYPTION:-true}
+    volumes:
+      - edge_data:/app/data:ro
+      - edge_sync_queue:/app/sync_queue
+      - edge_sync_logs:/app/logs
+    command: >
+      sh -c "
+        echo 'Starting Edge Data Sync Service...' &&
+        python -m its_camera_ai.edge.sync_service
+      "
+    depends_on:
+      app-edge:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    networks:
+      - its-edge-network
+    profiles:
+      - edge
+      - sync
+
+  # Edge Monitoring (Lightweight)
+  edge-monitor:
+    image: prom/prometheus:latest
+    container_name: its-camera-ai-edge-monitor
+    restart: unless-stopped
+    ports:
+      - "${EDGE_PROMETHEUS_PORT:-9091}:9090"
+    volumes:
+      - ${PWD}/infrastructure/monitoring/prometheus-edge.yml:/etc/prometheus/prometheus.yml:ro
+      - edge_prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=500MB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    networks:
+      - its-edge-network
+    profiles:
+      - edge
+      - monitoring
+
+  # Edge Log Collector (Lightweight)
+  edge-logs:
+    image: fluent/fluent-bit:2.2
+    container_name: its-camera-ai-edge-logs
+    restart: unless-stopped
+    volumes:
+      - edge_logs:/app/logs:ro
+      - ${PWD}/infrastructure/logging/fluent-bit-edge.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - edge_log_buffer:/tmp/fluent-bit-buffer
+    command: /fluent-bit/bin/fluent-bit --config=/fluent-bit/etc/fluent-bit.conf
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    networks:
+      - its-edge-network
+    profiles:
+      - edge
+      - logging
+
+  # Edge Backup Service
+  edge-backup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: edge
+    container_name: its-camera-ai-edge-backup
+    restart: "no"  # Run as scheduled job
+    environment:
+      - ENVIRONMENT=edge
+      - SERVICE_TYPE=backup
+      - BACKUP_INTERVAL=${EDGE_BACKUP_INTERVAL:-86400}  # Daily
+      - BACKUP_RETENTION_DAYS=${EDGE_BACKUP_RETENTION:-7}
+      - COMPRESSION_LEVEL=${EDGE_BACKUP_COMPRESSION:-6}
+    volumes:
+      - edge_data:/app/data:ro
+      - edge_postgres_data:/app/postgres:ro
+      - edge_backups:/app/backups
+      - edge_logs:/app/logs
+    command: >
+      sh -c "
+        echo 'Starting Edge Backup Service...' &&
+        python -m its_camera_ai.edge.backup_service &&
+        echo 'Backup completed successfully.'
+      "
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    networks:
+      - its-edge-network
+    profiles:
+      - edge
+      - backup
+
+# Edge-optimized volumes (smaller, local-only)
+volumes:
+  edge_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,size=2G
+      device: ${PWD}/data/edge
+  edge_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,size=500M
+      device: ${PWD}/logs/edge
+  edge_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,size=1G
+      device: ${PWD}/models/edge
+  edge_temp:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=256m,uid=1001,gid=1001
+  edge_cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=256m,uid=1001,gid=1001
+  edge_postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,size=1G
+      device: ${PWD}/data/edge/postgres
+  edge_redis_data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=128m
+  edge_sync_queue:
+    driver: local
+  edge_sync_logs:
+    driver: local
+  edge_prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,size=500M
+      device: ${PWD}/data/edge/prometheus
+  edge_log_buffer:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=128m
+  edge_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,size=2G
+      device: ${PWD}/backups/edge
+
+# Edge network with optimized settings
+networks:
+  its-edge-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: its-edge-bridge
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.bridge.host_binding_ipv4: "0.0.0.0"
+      com.docker.network.driver.mtu: 1500

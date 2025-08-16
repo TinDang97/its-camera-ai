@@ -418,22 +418,6 @@ models/*.bin
 .env.prod
 config.local.json
 
-# Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
-
-# Development tools
-Makefile
-LICENSE
-.pre-commit-config.yaml
-.github/
-
-# Infrastructure configs (handled separately)
-infrastructure/
-k8s/
-helm/
-
 # Temporary files
 *.tmp
 *.temp

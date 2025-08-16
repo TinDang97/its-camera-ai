@@ -1,0 +1,84 @@
+# Alertmanager Configuration for ITS Camera AI
+
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@its-camera-ai.com'
+  smtp_auth_username: ''
+  smtp_auth_password: ''
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+  routes:
+    - match:
+        alertname: 'DeadMansSwitch'
+      receiver: 'null'
+    - match_re:
+        severity: 'critical|high'
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      repeat_interval: 5m
+    - match:
+        severity: 'warning'
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      repeat_interval: 1h
+    - match:
+        service: 'its-camera-ai'
+      receiver: 'its-camera-ai-alerts'
+
+receivers:
+  - name: 'null'
+
+  - name: 'web.hook'
+    webhook_configs:
+      - url: 'http://127.0.0.1:5001/'
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'critical-alerts@its-camera-ai.com'
+        subject: 'CRITICAL: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Instance: {{ .Labels.instance }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts-critical'
+        title: 'CRITICAL Alert - ITS Camera AI'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  - name: 'warning-alerts'
+    email_configs:
+      - to: 'alerts@its-camera-ai.com'
+        subject: 'WARNING: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Instance: {{ .Labels.instance }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+
+  - name: 'its-camera-ai-alerts'
+    webhook_configs:
+      - url: 'http://app:8000/api/v1/alerts/webhook'
+        http_config:
+          basic_auth:
+            username: 'alertmanager'
+            password: '${ALERTMANAGER_WEBHOOK_PASSWORD}'
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']

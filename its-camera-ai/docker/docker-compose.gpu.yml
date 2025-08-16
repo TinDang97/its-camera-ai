@@ -1,0 +1,336 @@
+# GPU-Accelerated Environment Configuration for ITS Camera AI
+# Optimized for CUDA-enabled inference with sub-100ms latency requirements
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up
+
+version: '3.8'
+
+services:
+  # GPU-Accelerated Application Service
+  app-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu-production
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-$(git rev-parse HEAD)}
+        VERSION: ${VERSION:-latest}
+        CUDA_VERSION: ${CUDA_VERSION:-12.6}
+        CUDNN_VERSION: ${CUDNN_VERSION:-8}
+    container_name: its-camera-ai-gpu
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      # GPU-specific environment variables
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      # PyTorch GPU optimizations
+      - PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128,garbage_collection_threshold:0.6}
+      - CUDA_LAUNCH_BLOCKING=${CUDA_LAUNCH_BLOCKING:-0}
+      - CUDA_CACHE_DISABLE=${CUDA_CACHE_DISABLE:-0}
+      - CUDA_CACHE_MAXSIZE=${CUDA_CACHE_MAXSIZE:-1073741824}
+      # GPU memory management
+      - GPU_MEMORY_FRACTION=${GPU_MEMORY_FRACTION:-0.8}
+      - MIXED_PRECISION=${MIXED_PRECISION:-true}
+      - TORCH_CUDNN_BENCHMARK=${TORCH_CUDNN_BENCHMARK:-true}
+      # Inference optimization
+      - BATCH_SIZE=${GPU_BATCH_SIZE:-32}
+      - MAX_BATCH_DELAY=${GPU_MAX_BATCH_DELAY:-50}
+      - MODEL_CACHE_SIZE=${GPU_MODEL_CACHE_SIZE:-2048}
+      - TENSORRT_ENABLED=${TENSORRT_ENABLED:-true}
+      - ONNX_RUNTIME_PROVIDERS=${ONNX_RUNTIME_PROVIDERS:-CUDAExecutionProvider,CPUExecutionProvider}
+      # Performance monitoring
+      - NVIDIA_ML_PY=1
+      - GPU_MONITORING_ENABLED=true
+      # Multi-GPU setup (if available)
+      - NCCL_DEBUG=${NCCL_DEBUG:-INFO}
+      - NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0}
+    ports:
+      - "${GPU_APP_PORT:-8000}:8000"
+      - "${GPU_METRICS_PORT:-8001}:8001"
+      - "${GPU_PROFILER_PORT:-8002}:8002"  # GPU profiler port
+    volumes:
+      # GPU-optimized data volumes
+      - gpu_data:/app/data
+      - gpu_logs:/app/logs
+      - gpu_models:/app/models
+      - gpu_temp:/app/temp
+      - gpu_cache:/app/cache
+      # GPU model cache for faster loading
+      - gpu_model_cache:/app/cache/models
+      - gpu_inference_cache:/app/cache/inference
+      # CUDA cache persistence
+      - gpu_cuda_cache:/root/.nv
+      # TensorRT cache
+      - gpu_tensorrt_cache:/app/cache/tensorrt
+    deploy:
+      resources:
+        limits:
+          memory: ${GPU_APP_MEMORY_LIMIT:-16G}
+          cpus: ${GPU_APP_CPU_LIMIT:-8.0}
+        reservations:
+          memory: ${GPU_APP_MEMORY_RESERVATION:-8G}
+          cpus: ${GPU_APP_CPU_RESERVATION:-4.0}
+          devices:
+            - driver: nvidia
+              count: ${GPU_COUNT:-1}
+              capabilities: [gpu, compute, utility]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import torch; assert torch.cuda.is_available(); print(f'GPU Health: {torch.cuda.device_count()} GPUs available')"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - its-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "5"
+        labels: "service=its-camera-ai-gpu,gpu_enabled=true"
+
+  # GPU Monitoring and Metrics Collection
+  nvidia-exporter:
+    image: utkuozdemir/nvidia_gpu_exporter:1.2.0
+    container_name: its-camera-ai-nvidia-exporter
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "${NVIDIA_EXPORTER_PORT:-9835}:9835"
+    volumes:
+      - /usr/lib/nvidia:/usr/lib/nvidia:ro
+      - /usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+    networks:
+      - its-network
+    profiles:
+      - gpu
+      - monitoring
+
+  # Triton Inference Server for High-Performance GPU Inference
+  triton-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: triton-inference
+    container_name: its-camera-ai-triton
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${TRITON_VISIBLE_DEVICES:-0}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TRITON_SERVER_LOG_LEVEL=${TRITON_LOG_LEVEL:-1}
+      - TRITON_SERVER_EXIT_ON_ERROR=1
+      - CUDA_MEMORY_POOL_DISABLED=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+    ports:
+      - "${TRITON_HTTP_PORT:-8000}:8000"   # HTTP inference
+      - "${TRITON_GRPC_PORT:-8001}:8001"   # gRPC inference
+      - "${TRITON_METRICS_PORT:-8002}:8002" # Metrics
+    volumes:
+      - gpu_models:/workspace/models
+      - gpu_triton_cache:/workspace/cache
+      - triton_logs:/workspace/logs
+    command: >
+      tritonserver
+        --model-repository=/workspace/models
+        --allow-http=true
+        --allow-grpc=true
+        --allow-metrics=true
+        --http-port=8000
+        --grpc-port=8001
+        --metrics-port=8002
+        --model-control-mode=explicit
+        --load-model=yolo11_ensemble
+        --backend-config=pytorch,shm-default-byte-size=134217728
+        --log-verbose=${TRITON_LOG_LEVEL:-1}
+        --exit-on-error=true
+        --strict-model-config=false
+        --strict-readiness=false
+    deploy:
+      resources:
+        limits:
+          memory: ${TRITON_MEMORY_LIMIT:-8G}
+          cpus: ${TRITON_CPU_LIMIT:-4.0}
+        reservations:
+          memory: ${TRITON_MEMORY_RESERVATION:-4G}
+          cpus: ${TRITON_CPU_RESERVATION:-2.0}
+          devices:
+            - driver: nvidia
+              count: ${TRITON_GPU_COUNT:-1}
+              capabilities: [gpu, compute, utility]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - its-network
+    profiles:
+      - gpu
+      - triton
+
+  # GPU Development Environment (Optional)
+  jupyter-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu-development
+    container_name: its-camera-ai-jupyter-gpu
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${JUPYTER_VISIBLE_DEVICES:-0}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-jupyter-gpu-token-12345}
+      - CUDA_VISIBLE_DEVICES=${JUPYTER_CUDA_DEVICES:-0}
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+    ports:
+      - "${JUPYTER_GPU_PORT:-8888}:8888"
+    command: >
+      sh -c "
+        echo 'Starting GPU-enabled Jupyter Lab...' &&
+        jupyter lab
+          --ip=0.0.0.0
+          --port=8888
+          --no-browser
+          --allow-root
+          --NotebookApp.token='${JUPYTER_TOKEN:-jupyter-gpu-token-12345}'
+          --ServerApp.allow_origin='*'
+          --ServerApp.allow_remote_access=True
+      "
+    volumes:
+      - ${PWD}:/app
+      - gpu_jupyter_data:/root/.jupyter
+      - gpu_models:/app/models
+      - gpu_data:/app/data
+      - gpu_cache:/app/cache
+    deploy:
+      resources:
+        limits:
+          memory: ${JUPYTER_GPU_MEMORY_LIMIT:-8G}
+          cpus: ${JUPYTER_GPU_CPU_LIMIT:-4.0}
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, compute, utility]
+    networks:
+      - its-network
+    profiles:
+      - gpu
+      - dev
+
+  # GPU Benchmark and Testing Service
+  gpu-benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu-development
+    container_name: its-camera-ai-gpu-benchmark
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${BENCHMARK_VISIBLE_DEVICES:-0}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      - BENCHMARK_MODE=true
+    volumes:
+      - gpu_models:/app/models
+      - gpu_benchmark_results:/app/benchmark_results
+      - gpu_cache:/app/cache
+    command: >
+      sh -c "
+        echo 'Running GPU benchmark suite...' &&
+        python -m its_camera_ai.benchmarks.gpu_performance_test &&
+        python -m its_camera_ai.benchmarks.inference_latency_test &&
+        echo 'GPU benchmarks completed. Results saved to /app/benchmark_results'
+      "
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+    networks:
+      - its-network
+    profiles:
+      - gpu
+      - benchmark
+
+# GPU-optimized volumes
+volumes:
+  gpu_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/gpu
+  gpu_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/logs/gpu
+  gpu_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/models/gpu
+  gpu_temp:
+    driver: local
+  gpu_cache:
+    driver: local
+  gpu_model_cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=4g,uid=1001,gid=1001
+  gpu_inference_cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=2g,uid=1001,gid=1001
+  gpu_cuda_cache:
+    driver: local
+  gpu_tensorrt_cache:
+    driver: local
+  gpu_triton_cache:
+    driver: local
+  gpu_jupyter_data:
+    driver: local
+  gpu_benchmark_results:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/benchmark_results
+  triton_logs:
+    driver: local

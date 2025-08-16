@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    its-camera-ai.io/tier: tier-1
+    its-camera-ai.io/component: observability

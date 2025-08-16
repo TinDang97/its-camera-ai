@@ -1,0 +1,1099 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-config
+  namespace: monitoring
+data:
+  grafana.ini: |
+    [analytics]
+    check_for_updates = true
+    
+    [log]
+    mode = console
+    level = info
+    
+    [paths]
+    data = /var/lib/grafana/
+    logs = /var/log/grafana
+    plugins = /var/lib/grafana/plugins
+    provisioning = /etc/grafana/provisioning
+    
+    [server]
+    http_port = 3000
+    domain = localhost
+    
+    [database]
+    type = sqlite3
+    host = 127.0.0.1:3306
+    name = grafana
+    user = root
+    password =
+    path = grafana.db
+    
+    [session]
+    provider = file
+    
+    [security]
+    admin_user = admin
+    admin_password = its-camera-ai-grafana-admin-password
+    secret_key = SW2YcwTIb9zpOOhoPsMm
+    
+    [snapshots]
+    external_enabled = false
+    
+    [dashboards]
+    default_home_dashboard_path = /etc/grafana/dashboards/home.json
+    
+    [alerting]
+    enabled = true
+    execute_alerts = true
+    
+    [metrics]
+    enabled = true
+    interval_seconds = 10
+    
+    [explore]
+    enabled = true
+    
+    [panels]
+    enable_alpha = true
+    
+    [plugins]
+    enable_alpha = true
+    allow_loading_unsigned_plugins = []
+    
+  datasources.yaml: |
+    apiVersion: 1
+    
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: true
+        
+      - name: PostgreSQL-Analytics
+        type: postgres
+        access: proxy
+        url: analytics-pgbouncer.postgresql-cluster.svc.cluster.local:5432
+        database: its_camera_ai
+        user: its_camera_ai_analytics
+        secureJsonData:
+          password: analytics-service-password
+        jsonData:
+          sslmode: disable
+          maxOpenConns: 10
+          maxIdleConns: 5
+          connMaxLifetime: 14400
+        editable: true
+        
+  dashboards.yaml: |
+    apiVersion: 1
+    
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /etc/grafana/dashboards
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  gpu-performance.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "GPU Performance Dashboard",
+        "tags": ["gpu", "nvidia", "performance"],
+        "style": "dark",
+        "timezone": "browser",
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "GPU Utilization",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "DCGM_FI_DEV_GPU_UTIL",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 70},
+                    {"color": "red", "value": 90}
+                  ]
+                },
+                "unit": "percent",
+                "min": 0,
+                "max": 100
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "GPU Memory Usage",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL * 100",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 75},
+                    {"color": "red", "value": 90}
+                  ]
+                },
+                "unit": "percent",
+                "min": 0,
+                "max": 100
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "GPU Temperature",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "DCGM_FI_DEV_GPU_TEMP",
+                "refId": "A",
+                "legendFormat": "GPU {{gpu}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "celsius",
+                "min": 0,
+                "max": 100,
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 70},
+                    {"color": "red", "value": 85}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "GPU Power Consumption",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "DCGM_FI_DEV_POWER_USAGE",
+                "refId": "A",
+                "legendFormat": "GPU {{gpu}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "watt"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 5,
+            "title": "Tensor Engine Activity",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+                "refId": "A",
+                "legendFormat": "Tensor Engine {{gpu}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "percent",
+                "min": 0,
+                "max": 100
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          }
+        ]
+      }
+    }
+    
+  ml-inference.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "ML Inference Performance",
+        "tags": ["ml", "inference", "ai", "performance"],
+        "style": "dark",
+        "timezone": "browser", 
+        "refresh": "15s",
+        "time": {
+          "from": "now-30m",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Inference Requests per Second",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "rate(inference_requests_total[5m])",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "unit": "reqps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Inference Latency P95",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m]))",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 0.05},
+                    {"color": "red", "value": 0.1}
+                  ]
+                },
+                "unit": "s"
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Error Rate",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "rate(inference_errors_total[5m]) / rate(inference_requests_total[5m]) * 100",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 1},
+                    {"color": "red", "value": 5}
+                  ]
+                },
+                "unit": "percent"
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "Inference Latency Distribution",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, rate(inference_duration_seconds_bucket[5m]))",
+                "refId": "A",
+                "legendFormat": "P50"
+              },
+              {
+                "expr": "histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m]))",
+                "refId": "B", 
+                "legendFormat": "P95"
+              },
+              {
+                "expr": "histogram_quantile(0.99, rate(inference_duration_seconds_bucket[5m]))",
+                "refId": "C",
+                "legendFormat": "P99"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "s"
+              }
+            },
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Model Accuracy Over Time",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "avg(model_accuracy_score) by (model_version)",
+                "refId": "A",
+                "legendFormat": "{{model_version}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "percent",
+                "min": 0,
+                "max": 100
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "Batch Size Distribution",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "avg(inference_batch_size) by (service)",
+                "refId": "A",
+                "legendFormat": "{{service}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          }
+        ]
+      }
+    }
+    
+  database-performance.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Database Performance",
+        "tags": ["database", "postgresql", "citus", "timescaledb"],
+        "style": "dark",
+        "timezone": "browser",
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Database Connections",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "pg_stat_database_numbackends",
+                "refId": "A",
+                "legendFormat": "{{datname}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Query Rate",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m])",
+                "refId": "A",
+                "legendFormat": "{{datname}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "tps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "PgBouncer Pool Status",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "pgbouncer_pools_cl_active",
+                "refId": "A",
+                "legendFormat": "Active - {{database}}"
+              },
+              {
+                "expr": "pgbouncer_pools_cl_waiting",
+                "refId": "B",
+                "legendFormat": "Waiting - {{database}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "TimescaleDB Compression Ratio",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "timescaledb_compression_ratio",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 5},
+                    {"color": "green", "value": 10}
+                  ]
+                },
+                "unit": "none"
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16}
+          },
+          {
+            "id": 5,
+            "title": "Cache Hit Ratio",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "pg_stat_database_blks_hit / (pg_stat_database_blks_hit + pg_stat_database_blks_read) * 100",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 90},
+                    {"color": "green", "value": 95}
+                  ]
+                },
+                "unit": "percent"
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "Slow Queries",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "pg_stat_statements_mean_time > 1000",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 10},
+                    {"color": "red", "value": 50}
+                  ]
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16}
+          }
+        ]
+      }
+    }
+
+  camera-analytics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Camera Stream Analytics",
+        "tags": ["camera", "streaming", "analytics", "detection"],
+        "style": "dark",
+        "timezone": "browser",
+        "refresh": "15s",
+        "time": {
+          "from": "now-2h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Active Camera Streams",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "count(camera_stream_active)",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Average FPS",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "avg(camera_fps)",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 20},
+                    {"color": "green", "value": 25}
+                  ]
+                },
+                "unit": "fps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Detection Rate",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "rate(detection_events_total[5m])",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "unit": "eps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "Processing Errors",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "rate(camera_processing_errors_total[5m])",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 0.1},
+                    {"color": "red", "value": 1}
+                  ]
+                },
+                "unit": "eps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+          },
+          {
+            "id": 5,
+            "title": "Camera Stream Health",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "camera_stream_active",
+                "refId": "A",
+                "legendFormat": "{{camera_name}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "short",
+                "min": 0,
+                "max": 1
+              }
+            },
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 6,
+            "title": "Object Detection by Type",
+            "type": "piechart",
+            "targets": [
+              {
+                "expr": "sum by (object_type) (detection_objects_total)",
+                "refId": "A",
+                "legendFormat": "{{object_type}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 7,
+            "title": "Traffic Density Heatmap",
+            "type": "heatmap",
+            "targets": [
+              {
+                "expr": "avg by (camera_location) (traffic_density_score)",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "continuous-GrYlRd"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          }
+        ]
+      }
+    }
+
+  system-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "System Overview",
+        "tags": ["system", "kubernetes", "overview"],
+        "style": "dark",
+        "timezone": "browser",
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Cluster CPU Usage",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 70},
+                    {"color": "red", "value": 85}
+                  ]
+                },
+                "unit": "percent"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Cluster Memory Usage",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "(1 - (avg(node_memory_MemAvailable_bytes) / avg(node_memory_MemTotal_bytes))) * 100",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 75},
+                    {"color": "red", "value": 90}
+                  ]
+                },
+                "unit": "percent"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Pod Count",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "count(kube_pod_info)",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "Node Count",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "count(kube_node_info)",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "unit": "short"
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+          },
+          {
+            "id": 5,
+            "title": "Network I/O",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "rate(node_network_receive_bytes_total[5m])",
+                "refId": "A",
+                "legendFormat": "RX - {{device}}"
+              },
+              {
+                "expr": "rate(node_network_transmit_bytes_total[5m])",
+                "refId": "B",
+                "legendFormat": "TX - {{device}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "Bps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 6,
+            "title": "Disk I/O",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "rate(node_disk_read_bytes_total[5m])",
+                "refId": "A",
+                "legendFormat": "Read - {{device}}"
+              },
+              {
+                "expr": "rate(node_disk_written_bytes_total[5m])",
+                "refId": "B",
+                "legendFormat": "Write - {{device}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "Bps"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 7,
+            "title": "Container Restarts",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "rate(kube_pod_container_status_restarts_total[5m])",
+                "refId": "A",
+                "legendFormat": "{{namespace}}/{{pod}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "palette-classic"
+                },
+                "unit": "ops"
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          }
+        ]
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+    its-camera-ai.io/component: visualization
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+        its-camera-ai.io/component: visualization
+    spec:
+      nodeSelector:
+        node.kubernetes.io/instance-type: general
+        its-camera-ai/node-type: general-workload
+      
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.1.0
+        ports:
+        - containerPort: 3000
+          name: grafana
+        
+        env:
+        - name: GF_SECURITY_ADMIN_USER
+          value: admin
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: its-camera-ai-grafana-admin-password
+        - name: GF_INSTALL_PLUGINS
+          value: grafana-piechart-panel,grafana-clock-panel,vonage-status-panel
+        
+        volumeMounts:
+        - name: grafana-config
+          mountPath: /etc/grafana
+        - name: grafana-dashboards
+          mountPath: /etc/grafana/dashboards
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+        
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+      
+      volumes:
+      - name: grafana-config
+        configMap:
+          name: grafana-config
+      - name: grafana-dashboards
+        configMap:
+          name: grafana-dashboards
+      - name: grafana-storage
+        persistentVolumeClaim:
+          claimName: grafana-storage
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-storage
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+    its-camera-ai.io/component: visualization
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3000
+    targetPort: 3000
+    name: grafana
+  selector:
+    app: grafana
+
+---
+# LoadBalancer service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-external
+  namespace: monitoring
+  labels:
+    app: grafana
+    its-camera-ai.io/component: visualization
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 3000
+    targetPort: 3000
+    name: grafana
+  selector:
+    app: grafana

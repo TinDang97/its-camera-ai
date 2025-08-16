@@ -2,7 +2,8 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/*, hotfix/*]
+    tags: ['v*']
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -12,12 +13,29 @@ on:
         required: false
         default: false
         type: boolean
+      deployment_environment:
+        description: 'Target deployment environment'
+        required: false
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      force_build:
+        description: 'Force rebuild of Docker images'
+        required: false
+        default: false
+        type: boolean
 
 env:
   PYTHON_VERSION: "3.12"
-  UV_VERSION: "0.4.29"
+  UV_VERSION: "0.5.8"
   COVERAGE_THRESHOLD: "90"
   SECURITY_SCAN_FAIL_ON: "high"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
 
 jobs:
   test:
@@ -81,7 +99,7 @@ jobs:
       env:
         DATABASE_URL: postgresql+asyncpg://its_user:its_password@localhost:5432/its_camera_ai_test
         REDIS_URL: redis://localhost:6379/0
-    
+
     - name: Publish test results
       uses: EnricoMi/publish-unit-test-result-action@v2
       if: always()
@@ -90,7 +108,7 @@ jobs:
         check_name: "Unit Test Results"
         comment_mode: create new
         fail_on: "test failures"
-    
+
     - name: Upload coverage reports
       uses: actions/upload-artifact@v4
       if: always()
@@ -129,7 +147,7 @@ jobs:
       run: |
         uv run bandit -r src/ -f json -o bandit-report.json
         uv run bandit -r src/ -f txt -o bandit-report.txt
-        
+
         # Check for high/critical issues
         HIGH_ISSUES=$(jq '[.results[] | select(.issue_severity == "HIGH" or .issue_severity == "CRITICAL")] | length' bandit-report.json)
         if [ "$HIGH_ISSUES" -gt 0 ]; then
@@ -138,7 +156,7 @@ jobs:
           exit 1
         fi
         echo "✅ No high/critical security issues found"
-    
+
     - name: Run Safety check
       run: |
         uv run safety check --json --output safety-report.json
@@ -150,7 +168,7 @@ jobs:
           exit 1
         fi
         echo "✅ No known vulnerabilities found"
-    
+
     - name: Run pip-audit
       run: |
         uv run pip-audit --format=json --output=pip-audit-report.json
@@ -219,7 +237,7 @@ jobs:
       with:
         name: benchmark-results
         path: benchmark.json
-    
+
     - name: Validate performance benchmarks
       run: |
         # Check if any benchmarks exceed thresholds
@@ -237,32 +255,32 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs: [test, security, docker, performance]
-    
+
     steps:
     - name: Collect pipeline metrics
       run: |
         # Calculate pipeline success rate
         JOBS_TOTAL=4
         JOBS_SUCCESS=0
-        
+
         if [[ "${{ needs.test.result }}" == "success" ]]; then ((JOBS_SUCCESS++)); fi
         if [[ "${{ needs.security.result }}" == "success" ]]; then ((JOBS_SUCCESS++)); fi
         if [[ "${{ needs.docker.result }}" == "success" ]]; then ((JOBS_SUCCESS++)); fi
         if [[ "${{ needs.performance.result }}" == "success" || "${{ needs.performance.result }}" == "skipped" ]]; then ((JOBS_SUCCESS++)); fi
-        
+
         SUCCESS_RATE=$(echo "scale=2; $JOBS_SUCCESS * 100 / $JOBS_TOTAL" | bc)
-        
+
         echo "Pipeline Success Rate: $SUCCESS_RATE%"
         echo "TARGET_SUCCESS_RATE=95" >> $GITHUB_ENV
         echo "ACTUAL_SUCCESS_RATE=$SUCCESS_RATE" >> $GITHUB_ENV
-        
+
         # Send metrics to monitoring system (placeholder)
         curl -X POST "$WEBHOOK_URL" \
           -H "Content-Type: application/json" \
           -d "{\"pipeline_success_rate\": $SUCCESS_RATE, \"commit\": \"$GITHUB_SHA\", \"branch\": \"$GITHUB_REF_NAME\"}" || true
       env:
         WEBHOOK_URL: ${{ secrets.PIPELINE_METRICS_WEBHOOK_URL }}
-    
+
     - name: Check pipeline success rate SLA
       run: |
         if (( $(echo "$ACTUAL_SUCCESS_RATE < $TARGET_SUCCESS_RATE" | bc -l) )); then

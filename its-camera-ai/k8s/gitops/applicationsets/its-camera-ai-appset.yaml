@@ -1,0 +1,102 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: its-camera-ai-services
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: its-camera-ai
+    its-camera-ai.io/component: applicationset
+spec:
+  generators:
+  # Git directory generator for service discovery
+  - git:
+      repoURL: https://github.com/its-camera-ai/infrastructure
+      revision: main
+      directories:
+      - path: k8s/applications/*
+      
+  # Matrix generator for multi-environment deployment
+  - matrix:
+      generators:
+      - git:
+          repoURL: https://github.com/its-camera-ai/infrastructure
+          revision: main
+          directories:
+          - path: k8s/applications/*
+      
+      - list:
+          elements:
+          - environment: production
+            cluster: https://kubernetes.default.svc
+            namespace: its-camera-ai
+            replicas: "3"
+            gpu_enabled: "true"
+          - environment: staging
+            cluster: https://kubernetes.default.svc
+            namespace: its-camera-ai-staging
+            replicas: "1"
+            gpu_enabled: "false"
+  
+  template:
+    metadata:
+      name: '{{path.basename}}-{{environment}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/part-of: its-camera-ai
+        its-camera-ai.io/component: '{{path.basename}}'
+        its-camera-ai.io/environment: '{{environment}}'
+      finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    
+    spec:
+      project: its-camera-ai
+      
+      source:
+        repoURL: https://github.com/its-camera-ai/infrastructure
+        targetRevision: main
+        path: '{{path}}'
+        
+        helm:
+          valueFiles:
+          - values.yaml
+          - 'values-{{environment}}.yaml'
+          
+          parameters:
+          - name: environment
+            value: '{{environment}}'
+          - name: replicas
+            value: '{{replicas}}'
+          - name: gpu.enabled
+            value: '{{gpu_enabled}}'
+          - name: image.tag
+            value: '{{environment}}-latest'
+      
+      destination:
+        server: '{{cluster}}'
+        namespace: '{{namespace}}-{{path.basename}}'
+      
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        
+        syncOptions:
+        - CreateNamespace=true
+        - PrunePropagationPolicy=foreground
+        - PruneLast=true
+        
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+      
+      revisionHistoryLimit: 10
+      
+      ignoreDifferences:
+      - group: apps
+        kind: Deployment
+        managedFieldsManagers:
+        - kube-controller-manager
