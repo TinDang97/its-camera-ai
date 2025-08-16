@@ -58,44 +58,76 @@ ITS Camera AI is a comprehensive, production-ready system that leverages compute
 
 ## ⚡ Quick Start
 
-### Method 1: Docker Compose (Recommended for Testing)
+### 🐳 Docker Deployment (Recommended)
 
-**Start everything with one command:**
+**One-command development environment:**
 
 ```bash
 # Clone the repository
 git clone https://github.com/your-org/its-camera-ai.git
 cd its-camera-ai
 
-# Start local development environment
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Start complete development stack
 docker-compose up -d
 
-# Check services status
+# Check all services
 docker-compose ps
-
-# View logs (optional)
-docker-compose logs -f app
 
 # Access the application
 open http://localhost:8000/docs    # API Documentation
-open http://localhost:3000         # Grafana Monitoring (admin/admin123)
-open http://localhost:9000         # MinIO Storage (minioadmin/minioadmin123)
+open http://localhost:3000         # Grafana Monitoring (admin/admin)
+open http://localhost:9001         # MinIO Console (minioadmin/minioadmin)
+open http://localhost:8080         # Kafka UI
+open http://localhost:8001         # Redis Insight
 ```
 
-**Production-like environment:**
+**GPU-enabled development (requires NVIDIA Docker):**
 
 ```bash
-# Start production stack with clustering
-docker-compose -f docker-compose.prod.yml up -d
+# Start GPU-enabled ML inference
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
-# Scale application instances
-docker-compose -f docker-compose.prod.yml up -d --scale app1=2 --scale worker1=3
+# Verify GPU access
+docker-compose exec ml-inference nvidia-smi
+docker-compose exec ml-inference python -c "import torch; print(torch.cuda.is_available())"
 
-# Access services
-open http://localhost:80           # Load-balanced application
-open http://localhost:3000         # Grafana (admin/production_password)
-open http://localhost:9090         # Prometheus Metrics
+# Monitor GPU metrics at http://localhost:3000/d/gpu-monitoring
 ```
+
+**Production deployment with high availability:**
+
+```bash
+# Configure production environment
+cp .env.example .env.prod
+# Edit .env.prod with production secrets
+
+# Deploy production stack with clustering
+docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+# Verify production deployment
+curl -k https://your-domain.com/health
+
+# Access production services
+open https://your-domain.com           # Load-balanced API (SSL)
+open https://monitoring.your-domain.com/grafana  # Monitoring dashboard
+```
+
+### 🛠️ Available Docker Services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **API Gateway** | http://localhost:8000 | FastAPI application with hot-reload |
+| **API Documentation** | http://localhost:8000/docs | Interactive Swagger UI |
+| **ML Inference** | grpc://localhost:50051 | GPU-accelerated YOLO11 inference |
+| **Grafana** | http://localhost:3000 | Monitoring dashboards (admin/admin) |
+| **Prometheus** | http://localhost:9090 | Metrics collection and queries |
+| **MinIO Console** | http://localhost:9001 | Object storage management |
+| **Kafka UI** | http://localhost:8080 | Message broker monitoring |
+| **Redis Insight** | http://localhost:8001 | Cache debugging and analysis |
 
 ### Method 2: Manual Setup (For Development)
 
@@ -158,11 +190,37 @@ its-camera-ai ml deploy --model-path ./models/yolo11n.pt
 ### 🎯 One-Command Setup
 
 ```bash
-# Complete setup with verification
+# Complete setup with verification (Manual setup)
 ./scripts/quickstart.sh
 
-# Or with specific environment
+# Or with specific environment (Manual setup)
 ./scripts/quickstart.sh --env production --gpu --monitoring
+
+# Quick Docker setup (Recommended)
+docker-compose up -d && echo "🎉 ITS Camera AI is ready at http://localhost:8000/docs"
+```
+
+### 🔍 Docker Build Automation
+
+Use the comprehensive build script for advanced Docker operations:
+
+```bash
+# Build all environments
+./docker/docker-build.sh all
+
+# Build specific target
+./docker/docker-build.sh development
+./docker/docker-build.sh gpu-dev
+./docker/docker-build.sh production
+
+# Run tests in Docker
+./docker/docker-build.sh test
+
+# Security scan
+./docker/docker-build.sh scan
+
+# Clean build cache
+./docker/docker-build.sh clean
 ```
 
 ## 📖 Configuration
@@ -410,7 +468,71 @@ open htmlcov/index.html
 
 ## 🚀 Deployment
 
-### 🏭 Production Kubernetes Deployment
+### 🐳 Docker Container Deployment
+
+**📋 Quick Reference:**
+
+| Environment | Command | Use Case |
+|-------------|---------|----------|
+| **Development** | `docker-compose up -d` | Local development with hot-reload |
+| **GPU Development** | `docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` | ML development with GPU support |
+| **Production** | `docker-compose -f docker-compose.prod.yml up -d` | Production deployment with HA |
+
+**🔧 Build Targets Available:**
+
+```bash
+# Development environment with hot-reload
+docker build --target development -t its-camera-ai:dev .
+
+# GPU-enabled environment with CUDA 12.1
+docker build --target gpu-development -t its-camera-ai:gpu-dev .
+
+# Production-optimized runtime
+docker build --target production -t its-camera-ai:prod .
+
+# GPU-enabled production runtime
+docker build --target gpu-production -t its-camera-ai:gpu-prod .
+
+# Edge deployment (lightweight)
+docker build --target edge -t its-camera-ai:edge .
+
+# Triton inference server (high-performance)
+docker build --target triton-inference -t its-camera-ai:triton .
+
+# Background workers
+docker build --target worker -t its-camera-ai:worker .
+```
+
+**🏗️ Production Features:**
+
+- **High Availability**: Load-balanced API with primary/secondary instances
+- **Database Clustering**: PostgreSQL primary-replica with automatic failover
+- **Cache Clustering**: Redis master-replica setup
+- **Message Broker**: Kafka 3-node cluster with Zookeeper
+- **Object Storage**: MinIO 4-node distributed cluster
+- **Monitoring**: Comprehensive observability with Prometheus + Grafana
+- **Security**: SSL termination, rate limiting, authentication
+- **Auto-scaling**: Container replicas based on resource usage
+
+**📊 Production Architecture:**
+
+```text
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Load Balancer │    │   API Cluster   │    │  ML Inference   │
+│     (Nginx)     │────│  Primary/Backup │────│   GPU Cluster   │
+│   SSL + Caching │    │   Hot Standby   │    │  YOLO11 + TRT   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+    │  Database HA    │    │  Cache Cluster  │    │ Message Broker  │
+    │ Primary/Replica │    │ Master/Replica  │    │ Kafka Cluster   │
+    │ TimescaleDB     │    │    Redis        │    │   3 Brokers     │
+    └─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### 🏭 Kubernetes Deployment
 
 **Complete production infrastructure with auto-scaling:**
 
@@ -428,40 +550,13 @@ open htmlcov/index.html
 kubectl apply -f k8s/application/
 ```
 
-**Production features:**
+**Production Kubernetes features:**
 - **Database**: Citus distributed PostgreSQL with 64 shards, 90% compression
 - **Monitoring**: GPU metrics with NVIDIA DCGM, 5 pre-configured dashboards
 - **Scaling**: Handles 10TB/day from 1000+ cameras
 - **High Availability**: 3 coordinator + 6 worker database cluster
 - **Connection Pooling**: PgBouncer supporting 10,000+ connections
 - **Alerting**: Multi-channel notifications (PagerDuty, Slack, email)
-
-### 🐳 Container Deployment
-
-**Local development:**
-```bash
-# Build and run development environment
-docker build --target development -t its-camera-ai:dev .
-docker-compose up -d
-
-# View application logs
-docker-compose logs -f app worker
-```
-
-**Production deployment:**
-```bash
-# Build production image with optimizations
-docker build --target production -t its-camera-ai:prod .
-
-# Run production stack with clustering
-docker-compose -f docker-compose.prod.yml up -d
-
-# Scale services horizontally
-docker-compose -f docker-compose.prod.yml up -d --scale app1=3 --scale worker1=5
-
-# Health check all services
-docker-compose -f docker-compose.prod.yml ps
-```
 
 ### 🌐 Edge Deployment
 
@@ -686,10 +781,11 @@ We welcome contributions! Please follow these guidelines:
 
 ### Documentation
 
-- **Architecture Guide**: [docs/architecture.md](docs/architecture.md)
-- **API Reference**: [docs/api.md](docs/api.md)
-- **Deployment Guide**: [docs/deployment.md](docs/deployment.md)
-- **Security Guide**: [docs/security.md](docs/security.md)
+- **🐳 Docker Deployment Guide**: [DOCKER_DEPLOYMENT_GUIDE.md](DOCKER_DEPLOYMENT_GUIDE.md) - Comprehensive container deployment
+- **🏗️ Architecture Guide**: [docs/architecture.md](docs/architecture.md) - System design and patterns
+- **📡 API Reference**: [docs/api.md](docs/api.md) - REST API documentation
+- **🔒 Security Guide**: [docs/security.md](docs/security.md) - Security best practices
+- **⚙️ Developer Guide**: [CLAUDE.md](CLAUDE.md) - Development guidelines and setup
 
 ### Examples
 
@@ -720,4 +816,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Built with ❤️ by the ITS Camera AI Team**
 
-For detailed development guidelines and architecture information, see [CLAUDE.md](CLAUDE.md).
+## 🚀 Ready to Get Started?
+
+1. **📖 Read the Docker Guide**: [DOCKER_DEPLOYMENT_GUIDE.md](DOCKER_DEPLOYMENT_GUIDE.md)
+2. **🐳 Quick Start**: `docker-compose up -d`
+3. **🔧 Development**: See [CLAUDE.md](CLAUDE.md) for detailed setup
+4. **🏭 Production**: Follow [production deployment](#production-deployment-with-high-availability) steps
+
+---
+
+*Experience real-time AI-powered traffic monitoring with sub-100ms latency and enterprise-grade reliability.*

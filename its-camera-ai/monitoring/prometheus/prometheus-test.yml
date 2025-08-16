@@ -1,0 +1,54 @@
+# Test Prometheus Configuration for ITS Camera AI
+# Lightweight configuration for CI/CD testing
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  scrape_timeout: 10s
+
+# Rule files
+rule_files: []
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+
+  # API service metrics
+  - job_name: 'its-camera-ai-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 5s
+
+  # Frontend health monitoring (basic)
+  - job_name: 'its-camera-ai-frontend'
+    static_configs:
+      - targets: ['frontend:3002']
+    metrics_path: '/api/health'
+    scrape_interval: 30s
+    scrape_timeout: 5s
+
+  # Database metrics (if available)
+  - job_name: 'postgres-test'
+    static_configs:
+      - targets: ['postgres-test:5432']
+    scrape_interval: 30s
+    scrape_timeout: 5s
+
+  # Redis metrics (if available)
+  - job_name: 'redis-test'
+    static_configs:
+      - targets: ['redis-test:6379']
+    scrape_interval: 30s
+    scrape_timeout: 5s
+
+# Minimal alerting (for testing)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []

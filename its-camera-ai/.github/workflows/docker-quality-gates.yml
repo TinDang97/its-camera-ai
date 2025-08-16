@@ -1,0 +1,572 @@
+# Docker-based Quality Gates and Testing Pipeline
+# Comprehensive testing using Docker containers for isolation and consistency
+name: Docker Quality Gates
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run nightly for dependency vulnerability scans
+    - cron: '0 2 * * *'
+
+env:
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # =============================================================================
+  # Docker Environment Setup & Validation
+  # =============================================================================
+  docker-setup:
+    name: Docker Environment Setup
+    runs-on: ubuntu-latest
+
+    outputs:
+      cache-key: ${{ steps.cache-key.outputs.key }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+
+      - name: Generate cache key
+        id: cache-key
+        run: |
+          echo "key=docker-${{ runner.os }}-${{ hashFiles('**/Dockerfile', '**/docker-compose*.yml', '**/package*.json', '**/yarn.lock', '**/pyproject.toml') }}" >> $GITHUB_OUTPUT
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: |
+            docker-${{ runner.os }}-
+
+      - name: Build base images for testing
+        run: |
+          # Build backend base image
+          docker buildx build \
+            --target base \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new \
+            --tag its-camera-ai:base \
+            .
+
+          # Build frontend base image
+          docker buildx build \
+            --target base \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new \
+            --tag its-camera-ai-frontend:base \
+            ./web
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  # =============================================================================
+  # Backend Code Quality in Docker
+  # =============================================================================
+  backend-quality:
+    name: Backend Quality (Docker)
+    runs-on: ubuntu-latest
+    needs: docker-setup
+
+    strategy:
+      matrix:
+        tool: [mypy, black, isort, ruff, bandit]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ needs.docker-setup.outputs.cache-key }}
+          restore-keys: |
+            docker-${{ runner.os }}-
+
+      - name: Run ${{ matrix.tool }} in Docker
+        run: |
+          case "${{ matrix.tool }}" in
+            mypy)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai:dev \
+                . && \
+              docker run --rm its-camera-ai:dev uv run mypy src/
+              ;;
+            black)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai:dev \
+                . && \
+              docker run --rm its-camera-ai:dev uv run black --check src/ tests/
+              ;;
+            isort)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai:dev \
+                . && \
+              docker run --rm its-camera-ai:dev uv run isort --check-only src/ tests/
+              ;;
+            ruff)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai:dev \
+                . && \
+              docker run --rm its-camera-ai:dev uv run ruff check src/ tests/
+              ;;
+            bandit)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai:dev \
+                . && \
+              docker run --rm its-camera-ai:dev uv run bandit -r src/ -f json
+              ;;
+          esac
+
+  # =============================================================================
+  # Frontend Code Quality in Docker
+  # =============================================================================
+  frontend-quality:
+    name: Frontend Quality (Docker)
+    runs-on: ubuntu-latest
+    needs: docker-setup
+
+    strategy:
+      matrix:
+        tool: [typescript, eslint, build-test]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ needs.docker-setup.outputs.cache-key }}
+          restore-keys: |
+            docker-${{ runner.os }}-
+
+      - name: Run ${{ matrix.tool }} in Docker
+        run: |
+          case "${{ matrix.tool }}" in
+            typescript)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai-frontend:dev \
+                ./web && \
+              docker run --rm its-camera-ai-frontend:dev yarn type-check
+              ;;
+            eslint)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai-frontend:dev \
+                ./web && \
+              docker run --rm its-camera-ai-frontend:dev yarn lint
+              ;;
+            build-test)
+              docker buildx build \
+                --target development \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --tag its-camera-ai-frontend:dev \
+                ./web && \
+              docker run --rm its-camera-ai-frontend:dev yarn build
+              ;;
+          esac
+
+  # =============================================================================
+  # Containerized Unit Tests
+  # =============================================================================
+  backend-unit-tests:
+    name: Backend Unit Tests (Docker)
+    runs-on: ubuntu-latest
+    needs: [docker-setup, backend-quality]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ needs.docker-setup.outputs.cache-key }}
+          restore-keys: |
+            docker-${{ runner.os }}-
+
+      - name: Build test image
+        run: |
+          docker buildx build \
+            --target development \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --tag its-camera-ai:test \
+            .
+
+      - name: Start test database
+        run: |
+          docker run -d \
+            --name postgres-test \
+            --network host \
+            -e POSTGRES_PASSWORD=test_password \
+            -e POSTGRES_USER=test_user \
+            -e POSTGRES_DB=test_db \
+            -e POSTGRES_INITDB_ARGS="--auth-host=md5" \
+            -p 5432:5432 \
+            timescale/timescaledb:latest-pg17
+
+      - name: Start test Redis
+        run: |
+          docker run -d \
+            --name redis-test \
+            --network host \
+            -p 6379:6379 \
+            redis:7.2-alpine
+
+      - name: Wait for services
+        run: |
+          timeout 60 bash -c 'until docker exec postgres-test pg_isready -U test_user -d test_db; do sleep 2; done'
+          timeout 30 bash -c 'until docker exec redis-test redis-cli ping; do sleep 2; done'
+
+      - name: Run database migrations
+        run: |
+          docker run --rm \
+            --network host \
+            -e DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_db \
+            its-camera-ai:test \
+            uv run alembic upgrade head
+
+      - name: Run unit tests with coverage
+        run: |
+          docker run --rm \
+            --network host \
+            -e DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_db \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            -e ENVIRONMENT=test \
+            -v ${{ github.workspace }}/test-results:/app/test-results \
+            its-camera-ai:test \
+            bash -c "
+              uv run pytest tests/unit/ \
+                --cov=src/its_camera_ai \
+                --cov-report=xml:/app/test-results/coverage.xml \
+                --cov-report=html:/app/test-results/htmlcov \
+                --cov-fail-under=90 \
+                --junitxml=/app/test-results/pytest-unit.xml \
+                -v
+            "
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-unit-test-results
+          path: test-results/
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop postgres-test redis-test || true
+          docker rm postgres-test redis-test || true
+
+  # =============================================================================
+  # Containerized Integration Tests
+  # =============================================================================
+  integration-tests:
+    name: Integration Tests (Docker Compose)
+    runs-on: ubuntu-latest
+    needs: [docker-setup, backend-quality, frontend-quality]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ needs.docker-setup.outputs.cache-key }}
+          restore-keys: |
+            docker-${{ runner.os }}-
+
+      - name: Build images for integration testing
+        run: |
+          DOCKER_BUILDKIT=1 docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            build \
+            --parallel
+
+      - name: Start integration test environment
+        run: |
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            up -d \
+            postgres-test redis-test api frontend
+
+      - name: Wait for services to be healthy
+        run: |
+          timeout 180 bash -c '
+            until docker-compose \
+              -f docker-compose.yml \
+              -f docker-compose.test.yml \
+              ps --filter "health=healthy" | grep -q api;
+            do
+              echo "Waiting for services to be healthy..."
+              sleep 10
+            done
+          '
+
+      - name: Run integration tests
+        run: |
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            exec -T api \
+            uv run pytest tests/integration/ \
+              --junitxml=/app/test-results/pytest-integration.xml \
+              -v
+
+      - name: Run API tests with Newman (if available)
+        continue-on-error: true
+        run: |
+          if [ -f "tests/api/postman-collection.json" ]; then
+            docker run --rm \
+              --network container:$(docker-compose ps -q api) \
+              -v ${{ github.workspace }}/tests/api:/etc/newman \
+              postman/newman:latest \
+              run postman-collection.json \
+              --environment postman-environment.json \
+              --reporters cli,json \
+              --reporter-json-export /etc/newman/newman-results.json
+          fi
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p test-logs
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            logs api > test-logs/api.log
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            logs frontend > test-logs/frontend.log
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: |
+            test-results/
+            test-logs/
+            tests/api/newman-results.json
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            down -v
+
+  # =============================================================================
+  # Security Scanning in Containers
+  # =============================================================================
+  security-scan:
+    name: Security Scan (Docker)
+    runs-on: ubuntu-latest
+    needs: docker-setup
+
+    strategy:
+      matrix:
+        scan-type: [filesystem, dependencies, secrets]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run ${{ matrix.scan-type }} security scan
+        run: |
+          case "${{ matrix.scan-type }}" in
+            filesystem)
+              # Scan filesystem for vulnerabilities
+              docker run --rm \
+                -v ${{ github.workspace }}:/workspace \
+                aquasec/trivy:latest \
+                fs --format sarif --output /workspace/trivy-fs.sarif /workspace
+              ;;
+            dependencies)
+              # Scan for dependency vulnerabilities
+              docker run --rm \
+                -v ${{ github.workspace }}:/workspace \
+                aquasec/trivy:latest \
+                fs --scanners vuln --format sarif --output /workspace/trivy-deps.sarif /workspace
+              ;;
+            secrets)
+              # Scan for secrets
+              docker run --rm \
+                -v ${{ github.workspace }}:/workspace \
+                trufflesecurity/trufflehog:latest \
+                filesystem /workspace \
+                --json > ${{ github.workspace }}/trufflehog.json || true
+              ;;
+          esac
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-${{ matrix.scan-type }}
+          path: |
+            trivy-*.sarif
+            trufflehog.json
+
+      - name: Upload to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && (matrix.scan-type == 'filesystem' || matrix.scan-type == 'dependencies')
+        with:
+          sarif_file: trivy-${{ matrix.scan-type == 'filesystem' && 'fs' || 'deps' }}.sarif
+
+  # =============================================================================
+  # Performance Testing in Docker
+  # =============================================================================
+  performance-tests:
+    name: Performance Tests (Docker)
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start performance test environment
+        run: |
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            up -d \
+            postgres-test redis-test api frontend
+
+      - name: Wait for services
+        run: |
+          timeout 120 bash -c '
+            until curl -f http://localhost:8000/health && curl -f http://localhost:3002/api/health; do
+              sleep 5
+            done
+          '
+
+      - name: Run performance tests with k6
+        run: |
+          docker run --rm \
+            --network host \
+            -v ${{ github.workspace }}/tests/performance:/scripts \
+            grafana/k6:latest \
+            run /scripts/api-load-test.js \
+            --out json=/scripts/results.json
+
+      - name: Upload performance test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-test-results
+          path: tests/performance/results.json
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose \
+            -f docker-compose.yml \
+            -f docker-compose.test.yml \
+            down -v
+
+  # =============================================================================
+  # Quality Gate Summary
+  # =============================================================================
+  quality-gate-summary:
+    name: Quality Gate Summary
+    runs-on: ubuntu-latest
+    needs: [backend-quality, frontend-quality, backend-unit-tests, integration-tests, security-scan]
+    if: always()
+
+    steps:
+      - name: Check quality gate status
+        run: |
+          echo "🔍 Quality Gate Summary"
+          echo "====================="
+
+          # Check if all required jobs passed
+          if [[ "${{ needs.backend-quality.result }}" == "success" && \
+                "${{ needs.frontend-quality.result }}" == "success" && \
+                "${{ needs.backend-unit-tests.result }}" == "success" && \
+                "${{ needs.integration-tests.result }}" == "success" && \
+                "${{ needs.security-scan.result }}" == "success" ]]; then
+            echo "✅ All quality gates passed!"
+            echo "STATUS=PASSED" >> $GITHUB_ENV
+          else
+            echo "❌ Quality gate failures detected:"
+            echo "   Backend Quality: ${{ needs.backend-quality.result }}"
+            echo "   Frontend Quality: ${{ needs.frontend-quality.result }}"
+            echo "   Unit Tests: ${{ needs.backend-unit-tests.result }}"
+            echo "   Integration Tests: ${{ needs.integration-tests.result }}"
+            echo "   Security Scan: ${{ needs.security-scan.result }}"
+            echo "STATUS=FAILED" >> $GITHUB_ENV
+            exit 1
+          fi
+
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = process.env.STATUS;
+            const body = status === 'PASSED'
+              ? '✅ **Docker Quality Gates**: All checks passed!'
+              : '❌ **Docker Quality Gates**: Some checks failed. Please review the workflow results.';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

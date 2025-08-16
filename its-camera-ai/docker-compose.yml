@@ -1,338 +1,711 @@
+# Docker Compose configuration for ITS Camera AI local development environment
+# Provides full-stack development environment with hot-reload and debugging support
+# Usage: docker-compose up -d
+
 version: '3.8'
 
-# ITS Camera AI - Local Development Environment
-# Quick start: docker-compose up -d
-
 services:
-  # Core Database - PostgreSQL with TimescaleDB
-  postgres:
-    image: timescale/timescaledb:2.12.1-pg15
-    container_name: its-camera-ai-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: its_camera_ai
-      POSTGRES_USER: its_camera_ai
-      POSTGRES_PASSWORD: dev_password
-      PGDATA: /var/lib/postgresql/data/pgdata
+  # =============================================================================
+  # Frontend - Next.js Web Application
+  # =============================================================================
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      target: development
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai-frontend:dev
+    container_name: its-camera-ai-frontend
     ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-    command: |
-      postgres
-      -c shared_preload_libraries=timescaledb
-      -c max_connections=200
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=4MB
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U its_camera_ai -d its_camera_ai"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Cache and Session Store - Redis
-  redis:
-    image: redis:7.2-alpine
-    container_name: its-camera-ai-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
-    command: redis-server /usr/local/etc/redis/redis.conf
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Object Storage - MinIO (S3 Compatible)
-  minio:
-    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
-    container_name: its-camera-ai-minio
-    restart: unless-stopped
+      - "3000:3000"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-      MINIO_DOMAIN: localhost
-      MINIO_CONSOLE_ADDRESS: ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Next.js Environment
+      - NODE_ENV=development
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # API Configuration
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+      - NEXT_PUBLIC_API_BASE_URL=http://api:8000
+      # Authentication
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=dev-nextauth-secret-change-in-production
+      # Development Settings
+      - NEXT_TELEMETRY_DISABLED=1
+      - FAST_REFRESH=true
+      - DEBUG=its-camera-ai:*
     volumes:
-      - minio_data:/data
-    command: server /data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Message Queue - Apache Kafka (Development)
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: its-camera-ai-zookeeper
-    restart: unless-stopped
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    volumes:
-      - zookeeper_data:/var/lib/zookeeper/data
-      - zookeeper_logs:/var/lib/zookeeper/log
-
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: its-camera-ai-kafka
-    restart: unless-stopped
+      # Hot reload support for development
+      - ./web/app:/app/app:rw
+      - ./web/components:/app/components:rw
+      - ./web/lib:/app/lib:rw
+      - ./web/hooks:/app/hooks:rw
+      - ./web/stores:/app/stores:rw
+      - ./web/providers:/app/providers:rw
+      - ./web/public:/app/public:rw
+      - ./web/messages:/app/messages:rw
+      - ./web/i18n:/app/i18n:rw
+      - ./web/middleware.ts:/app/middleware.ts:rw
+      - ./web/next.config.ts:/app/next.config.ts:rw
+      - ./web/tailwind.config.ts:/app/tailwind.config.ts:rw
+      - ./web/tsconfig.json:/app/tsconfig.json:rw
+      # Exclude node_modules and .next for performance
+      - /app/node_modules
+      - /app/.next
     depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
-    ports:
-      - "9092:9092"
-    volumes:
-      - kafka_data:/var/lib/kafka/data
+      api:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
-  # Monitoring - Prometheus
-  prometheus:
-    image: prom/prometheus:v2.45.0
-    container_name: its-camera-ai-prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
-
-  # Monitoring - Grafana
-  grafana:
-    image: grafana/grafana:10.1.0
-    container_name: its-camera-ai-grafana
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin123
-      GF_INSTALL_PLUGINS: grafana-piechart-panel
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./config/grafana/provisioning:/etc/grafana/provisioning
-    depends_on:
-      - prometheus
-
-  # ITS Camera AI - Main Application
-  app:
+  # =============================================================================
+  # API Service - FastAPI application with dependency injection
+  # =============================================================================
+  api:
     build:
       context: .
       dockerfile: Dockerfile
       target: development
-    container_name: its-camera-ai-app
-    restart: unless-stopped
-    environment:
-      # Application Settings
-      ENVIRONMENT: development
-      API_HOST: 0.0.0.0
-      API_PORT: 8000
-      LOG_LEVEL: INFO
-
-      # Database Configuration
-      DATABASE_URL: postgresql+asyncpg://its_camera_ai:dev_password@postgres:5432/its_camera_ai
-
-      # Redis Configuration
-      REDIS_URL: redis://redis:6379/0
-
-      # MinIO Configuration
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
-      MINIO_BUCKET: its-camera-ai
-
-      # Kafka Configuration
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-
-      # ML Configuration
-      MODEL_CONFIDENCE_THRESHOLD: 0.5
-      BATCH_SIZE: 8
-      GPU_MEMORY_FRACTION: 0.8
-
-      # Security
-      SECRET_KEY: dev-secret-key-change-in-production
-      JWT_EXPIRATION_MINUTES: 60
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai:dev
+    container_name: its-camera-ai-api
     ports:
       - "8000:8000"
-    volumes:
-      - ./src:/app/src
-      - ./config:/app/config
-      - ./models:/app/models
-      - ./data:/app/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    command: |
-      sh -c "
-        echo 'Waiting for services to be ready...' &&
-        sleep 30 &&
-        echo 'Running database migrations...' &&
-        alembic upgrade head &&
-        echo 'Starting FastAPI server...' &&
-        uvicorn its_camera_ai.api.app:app --host 0.0.0.0 --port 8000 --reload
-      "
-
-  # ITS Camera AI - Worker (for background tasks)
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: development
-    container_name: its-camera-ai-worker
-    restart: unless-stopped
+      - "5678:5678"  # Debug port for remote debugging
     environment:
-      # Inherit same environment as app
-      ENVIRONMENT: development
-      DATABASE_URL: postgresql+asyncpg://its_camera_ai:dev_password@postgres:5432/its_camera_ai
-      REDIS_URL: redis://redis:6379/0
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      SECRET_KEY: dev-secret-key-change-in-production
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=debug
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - RELOAD=true
+      - WORKERS=1
+      # Database configuration
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - DATABASE_POOL_SIZE=5
+      - DATABASE_MAX_OVERFLOW=10
+      - DATABASE_POOL_TIMEOUT=30
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
+      - REDIS_SESSION_URL=redis://redis:6379/2
+      # Kafka configuration
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_PREFIX=its_dev
+      # MinIO configuration
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECURE=false
+      # ML configuration
+      - ML_MODEL_PATH=/app/models
+      - ML_BATCH_SIZE=8
+      - ML_INFERENCE_TIMEOUT=30
+      # Monitoring configuration
+      - PROMETHEUS_METRICS_ENABLED=true
+      - OPENTELEMETRY_ENABLED=true
+      - OPENTELEMETRY_ENDPOINT=http://otel-collector:4317
+      # Security
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - JWT_SECRET_KEY=dev-jwt-secret-key-change-in-production
     volumes:
-      - ./src:/app/src
-      - ./config:/app/config
-      - ./models:/app/models
-      - ./data:/app/data
+      # Hot-reload source code
+      - ./src:/app/src:rw
+      - ./tests:/app/tests:rw
+      - ./alembic:/app/alembic:rw
+      - ./alembic.ini:/app/alembic.ini:rw
+      # Persistent data
+      - api_logs:/app/logs
+      - model_storage:/app/models
+      - api_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       kafka:
-        condition: service_healthy
-    command: |
-      sh -c "
-        echo 'Starting background worker...' &&
-        python -m its_camera_ai.workers.main
-      "
-
-  # ITS Camera AI - Frontend (Next.js)
-  frontend:
-    build:
-      context: ./web
-      dockerfile: Dockerfile
-      target: development
-    container_name: its-camera-ai-frontend
-    restart: unless-stopped
-    environment:
-      # Next.js Environment
-      NODE_ENV: development
-      PORT: 3000
-      HOSTNAME: 0.0.0.0
-
-      # API Configuration
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws
-      NEXT_PUBLIC_API_BASE_URL: http://app:8000
-
-      # Authentication
-      NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: dev-nextauth-secret-change-in-production
-
-      # External Services
-      NEXT_PUBLIC_SENTRY_DSN: ""
-      NEXT_PUBLIC_ANALYTICS_ID: ""
-
-      # Development Settings
-      NEXT_TELEMETRY_DISABLED: 1
-      FAST_REFRESH: true
-
-      # Debugging
-      DEBUG: its-camera-ai:*
-    ports:
-      - "3000:3000"
-    volumes:
-      # Hot reload support for development
-      - ./web/app:/app/app
-      - ./web/components:/app/components
-      - ./web/lib:/app/lib
-      - ./web/hooks:/app/hooks
-      - ./web/stores:/app/stores
-      - ./web/providers:/app/providers
-      - ./web/public:/app/public
-      - ./web/messages:/app/messages
-      - ./web/i18n:/app/i18n
-      - ./web/middleware.ts:/app/middleware.ts
-      - ./web/next.config.ts:/app/next.config.ts
-      - ./web/tailwind.config.ts:/app/tailwind.config.ts
-      - ./web/tsconfig.json:/app/tsconfig.json
-
-      # Exclude node_modules and .next for performance
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      app:
         condition: service_started
+      minio:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # =============================================================================
+  # ML Inference Service - GPU-enabled ML processing
+  # =============================================================================
+  ml-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ml-development
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai:ml-dev
+    container_name: its-camera-ai-ml-inference
+    # Uncomment for GPU support
+    # runtime: nvidia
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    environment:
+      - ENVIRONMENT=development
+      - SERVICE_TYPE=ml_inference
+      - GRPC_HOST=0.0.0.0
+      - GRPC_PORT=50051
+      - ML_WORKERS=2
+      - ML_BATCH_SIZE=8
+      - ML_MAX_BATCH_DELAY=100
+      - ML_DEVICE=cpu  # Change to cuda for GPU
+      - ML_PRECISION=fp32
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/5
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - PROMETHEUS_METRICS_ENABLED=true
+    volumes:
+      - ./src:/app/src:rw
+      - model_storage:/app/models:rw
+      - ml_inference_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; grpc.insecure_channel('localhost:50051').get_state()"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  # =============================================================================
+  # Background Workers - Celery workers for data processing
+  # =============================================================================
+  worker-analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai:worker
+    container_name: its-camera-ai-worker-analytics
+    environment:
+      - ENVIRONMENT=development
+      - WORKER_TYPE=analytics
+      - WORKER_CONCURRENCY=2
+      - WORKER_QUEUE=analytics
+      - CELERY_BROKER_URL=redis://redis:6379/3
+      - CELERY_RESULT_BACKEND=redis://redis:6379/4
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_PREFIX=its_dev
+    volumes:
+      - ./src:/app/src:rw
+      - worker_logs:/app/logs
+      - model_storage:/app/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - its-network
+    restart: unless-stopped
+
+  worker-aggregation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    image: its-camera-ai:worker
+    container_name: its-camera-ai-worker-aggregation
+    environment:
+      - ENVIRONMENT=development
+      - WORKER_TYPE=aggregation
+      - WORKER_CONCURRENCY=2
+      - WORKER_QUEUE=aggregation
+      - CELERY_BROKER_URL=redis://redis:6379/3
+      - CELERY_RESULT_BACKEND=redis://redis:6379/4
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    volumes:
+      - ./src:/app/src:rw
+      - worker_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
+
+  worker-event:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    image: its-camera-ai:worker
+    container_name: its-camera-ai-worker-event
+    environment:
+      - ENVIRONMENT=development
+      - WORKER_TYPE=event
+      - WORKER_CONCURRENCY=4
+      - WORKER_QUEUE=event
+      - CELERY_BROKER_URL=redis://redis:6379/3
+      - CELERY_RESULT_BACKEND=redis://redis:6379/4
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    volumes:
+      - ./src:/app/src:rw
+      - worker_logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - its-network
+    restart: unless-stopped
+
+  worker-maintenance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    image: its-camera-ai:worker
+    container_name: its-camera-ai-worker-maintenance
+    environment:
+      - ENVIRONMENT=development
+      - WORKER_TYPE=maintenance
+      - WORKER_CONCURRENCY=1
+      - WORKER_QUEUE=maintenance
+      - CELERY_BROKER_URL=redis://redis:6379/3
+      - CELERY_RESULT_BACKEND=redis://redis:6379/4
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./src:/app/src:rw
+      - worker_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # Camera Stream Processing Service
+  # =============================================================================
+  stream-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: stream-processor
+    image: its-camera-ai:stream-processor
+    container_name: its-camera-ai-stream-processor
+    environment:
+      - ENVIRONMENT=development
+      - SERVICE_TYPE=stream_processor
+      - GRPC_HOST=0.0.0.0
+      - GRPC_PORT=50052
+      - STREAM_WORKERS=4
+      - MAX_CONCURRENT_STREAMS=50
+      - STREAM_BUFFER_SIZE=30
+      - QUALITY_CHECK_ENABLED=true
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/6
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - ML_INFERENCE_ENDPOINT=ml-inference:50051
+    volumes:
+      - ./src:/app/src:rw
+      - stream_logs:/app/logs
+      - stream_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ml-inference:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; grpc.insecure_channel('localhost:50052').get_state()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # =============================================================================
+  # Database Services
+  # =============================================================================
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    container_name: its-camera-ai-postgres
+    environment:
+      - POSTGRES_DB=its_camera_ai
+      - POSTGRES_USER=its_user
+      - POSTGRES_PASSWORD=its_password
+      - POSTGRES_INITDB_ARGS=--auth-host=md5
+      # TimescaleDB configuration
+      - TIMESCALEDB_TELEMETRY=off
+      # Performance tuning for development
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=512MB
+      - POSTGRES_WORK_MEM=16MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=64MB
+      - POSTGRES_WAL_BUFFERS=8MB
+      - POSTGRES_CHECKPOINT_COMPLETION_TARGET=0.9
+      - POSTGRES_RANDOM_PAGE_COST=1.1
+      - POSTGRES_MAX_CONNECTIONS=200
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/timescaledb_setup.sql:/docker-entrypoint-initdb.d/01-timescaledb-setup.sql:ro
+      - ./database/timescaledb_continuous_aggregates.sql:/docker-entrypoint-initdb.d/02-continuous-aggregates.sql:ro
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U its_user -d its_camera_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =============================================================================
+  # Cache Services
+  # =============================================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: its-camera-ai-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # =============================================================================
+  # Message Broker Services
+  # =============================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: its-camera-ai-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - its-network
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: its-camera-ai-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      # Performance tuning for development
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_SEGMENT_BYTES: 104857600
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # =============================================================================
+  # Object Storage Services
+  # =============================================================================
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: its-camera-ai-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_REGION_NAME: us-east-1
+    volumes:
+      - minio_data:/data
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+
+  # MinIO bucket initialization
+  minio-init:
+    image: minio/mc:RELEASE.2024-01-13T08-44-48Z
+    container_name: its-camera-ai-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set its-minio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb its-minio/models --ignore-existing;
+      /usr/bin/mc mb its-minio/videos --ignore-existing;
+      /usr/bin/mc mb its-minio/analytics --ignore-existing;
+      /usr/bin/mc mb its-minio/backups --ignore-existing;
+      /usr/bin/mc policy set public its-minio/models;
+      echo 'MinIO buckets initialized successfully';
+      "
+    networks:
+      - its-network
+
+  # =============================================================================
+  # Monitoring Services
+  # =============================================================================
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: its-camera-ai-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules.yaml:/etc/prometheus/rules.yaml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - its-network
+    restart: unless-stopped
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: its-camera-ai-grafana
+    ports:
+      - "3001:3000"  # Changed to 3001 to avoid conflict with frontend
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - its-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
-    networks:
-      - default
+      start_period: 30s
 
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: its-camera-ai-otel-collector
+    command: ["--config=/etc/otel-collector-config.yml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+    volumes:
+      - ./monitoring/opentelemetry/otel-collector.yaml:/etc/otel-collector-config.yml:ro
+    networks:
+      - its-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # =============================================================================
+  # Development Tools
+  # =============================================================================
+  # Redis Insight for Redis debugging
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: its-camera-ai-redis-insight
+    ports:
+      - "8001:8001"
+    environment:
+      - RIPORT=8001
+    volumes:
+      - redis_insight_data:/db
+    networks:
+      - its-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  # Kafka UI for Kafka debugging
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.1
+    container_name: its-camera-ai-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - its-network
+    restart: unless-stopped
+    depends_on:
+      - kafka
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  its-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =============================================================================
+# Volumes for persistent data
+# =============================================================================
 volumes:
+  # Database volumes
   postgres_data:
     driver: local
+
+  # Cache volumes
   redis_data:
     driver: local
-  minio_data:
+
+  # Message broker volumes
+  kafka_data:
     driver: local
   zookeeper_data:
     driver: local
   zookeeper_logs:
     driver: local
-  kafka_data:
+
+  # Object storage volumes
+  minio_data:
     driver: local
+
+  # Application volumes
+  api_logs:
+    driver: local
+  worker_logs:
+    driver: local
+  api_data:
+    driver: local
+  model_storage:
+    driver: local
+  ml_inference_logs:
+    driver: local
+  stream_logs:
+    driver: local
+  stream_data:
+    driver: local
+
+  # Monitoring volumes
   prometheus_data:
     driver: local
   grafana_data:
     driver: local
-  frontend_node_modules:
-    driver: local
-  frontend_next_cache:
-    driver: local
 
-networks:
-  default:
-    name: its-camera-ai-network
-    driver: bridge
+  # Development tool volumes
+  redis_insight_data:
+    driver: local

@@ -1,3 +1,4 @@
+import asyncio
 import statistics
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -18,7 +19,7 @@ from ..models.analytics import (
     ViolationType,
 )
 from ..models.detection_result import DetectionResult
-from .cache import CacheService
+from .cache import EnhancedCacheService
 
 logger = get_logger(__name__)
 
@@ -30,7 +31,7 @@ class IncidentDetectionEngine:
     prioritized alerts through multiple channels with deduplication.
     """
 
-    def __init__(self, cache_service: CacheService, settings: Settings = None):
+    def __init__(self, cache_service: EnhancedCacheService, settings: Settings = None):
         self.cache = cache_service
         self.settings = settings or Settings()
         self.active_incidents: dict[str, dict[str, Any]] = {}
@@ -449,7 +450,7 @@ class AnalyticsAggregationService:
     def __init__(
         self,
         analytics_repository=None,
-        cache_service: CacheService | None = None,
+        cache_service: EnhancedCacheService | None = None,
         settings=None,
     ):
         self.analytics_repository = analytics_repository
@@ -499,15 +500,18 @@ class AnalyticsAggregationService:
             if not start_time:
                 start_time = end_time - self.supported_windows[time_window]
 
-            # Check cache first (L2: Redis)
+            # Build cache key with tags for invalidation
             cache_key = self._build_cache_key(
                 camera_ids, time_window, aggregation_level, start_time, end_time
             )
+            cache_tags = self._build_cache_tags(camera_ids, time_window, aggregation_level)
 
+            # Check multi-level cache (L1 + L2)
             if self.cache_service:
                 cached_result = await self.cache_service.get_json(cache_key)
                 if cached_result:
                     logger.debug(f"Cache hit for aggregation: {cache_key}")
+                    # Update cache access for warm data
                     return [AggregatedMetrics(**item) for item in cached_result]
 
             # Execute aggregation query
@@ -546,12 +550,19 @@ class AnalyticsAggregationService:
                     # Continue with other cameras
                     continue
 
-            # Cache results
+            # Cache results with tags for intelligent invalidation
             if self.cache_service and aggregated_results:
                 cache_data = [result.__dict__ for result in aggregated_results]
                 ttl = self.cache_ttls.get(time_window, 3600)
-                await self.cache_service.set_json(cache_key, cache_data, ttl=ttl)
-                logger.debug(f"Cached aggregation result: {cache_key}")
+
+                # Store with tags for smart invalidation
+                await self.cache_service.set_json(
+                    cache_key,
+                    cache_data,
+                    ttl=ttl,
+                    tags=cache_tags
+                )
+                logger.debug(f"Cached aggregation result with tags: {cache_key}, tags: {cache_tags}")
 
             logger.info(
                 f"Aggregated metrics for {len(camera_ids)} cameras, "
@@ -581,12 +592,82 @@ class AnalyticsAggregationService:
         start_time: datetime,
         end_time: datetime,
     ) -> str:
-        """Build cache key for aggregation results."""
+        """Build optimized cache key for aggregation results."""
         cameras_str = ",".join(sorted(camera_ids))
+        # Use shorter timestamp format for key efficiency
+        start_str = start_time.strftime("%Y%m%d_%H%M")
+        end_str = end_time.strftime("%Y%m%d_%H%M")
         return (
-            f"agg:metrics:{cameras_str}:{time_window.value}:"
-            f"{aggregation_level.value}:{start_time.isoformat()}:{end_time.isoformat()}"
+            f"agg_v2:{cameras_str}:{time_window.value}:"
+            f"{aggregation_level.value}:{start_str}:{end_str}"
         )
+
+    def _build_cache_tags(self,
+                         camera_ids: list[str],
+                         time_window: TimeWindow,
+                         aggregation_level: AggregationLevel) -> set[str]:
+        """Build cache tags for intelligent invalidation."""
+        tags = set()
+
+        # Add camera-specific tags
+        for camera_id in camera_ids:
+            tags.add(f"camera:{camera_id}")
+
+        # Add time window and aggregation level tags
+        tags.add(f"window:{time_window.value}")
+        tags.add(f"level:{aggregation_level.value}")
+        tags.add("analytics:aggregated")
+
+        return tags
+
+    async def invalidate_camera_cache(self, camera_id: str) -> int:
+        """Invalidate all cached data for a specific camera."""
+        if not self.cache_service:
+            return 0
+
+        tags = {f"camera:{camera_id}"}
+        invalidated = await self.cache_service.invalidate_by_tags(tags)
+
+        logger.info(f"Invalidated {invalidated} cache entries for camera {camera_id}")
+        return invalidated
+
+    async def warm_cache_for_cameras(self, camera_ids: list[str],
+                                    hours_back: int = 24) -> int:
+        """Warm cache with recent analytics data for specified cameras."""
+        if not self.cache_service:
+            return 0
+
+        warmed_count = 0
+        end_time = datetime.now(UTC)
+        start_time = end_time - timedelta(hours=hours_back)
+
+        # Define common query patterns to warm
+        warm_patterns = [
+            (TimeWindow.FIVE_MIN, AggregationLevel.MINUTE),
+            (TimeWindow.FIFTEEN_MIN, AggregationLevel.MINUTE),
+            (TimeWindow.ONE_HOUR, AggregationLevel.HOURLY),
+        ]
+
+        for time_window, agg_level in warm_patterns:
+            try:
+                # Pre-compute and cache common queries
+                results = await self.aggregate_traffic_metrics(
+                    camera_ids=camera_ids,
+                    time_window=time_window,
+                    aggregation_level=agg_level,
+                    start_time=start_time,
+                    end_time=end_time,
+                    include_quality_check=False  # Skip quality check for warming
+                )
+                warmed_count += len(results)
+
+                logger.debug(f"Warmed cache: {len(results)} entries for {time_window.value}/{agg_level.value}")
+
+            except Exception as e:
+                logger.warning(f"Cache warming failed for {time_window.value}/{agg_level.value}: {e}")
+
+        logger.info(f"Cache warming completed: {warmed_count} entries for {len(camera_ids)} cameras")
+        return warmed_count
 
     async def _get_raw_metrics(
         self,
@@ -782,7 +863,7 @@ class RuleEngine:
         self,
         settings: Settings,
         analytics_repository=None,
-        cache_service: CacheService | None = None,
+        cache_service: EnhancedCacheService | None = None,
     ):
         self.settings = settings
         self.analytics_repository = analytics_repository
@@ -1351,7 +1432,7 @@ class EnhancedAnalyticsService:
         metrics_repository,
         detection_repository,
         settings: Settings,
-        cache_service: CacheService | None = None,
+        cache_service: EnhancedCacheService | None = None,
     ):
         self.analytics_repository = analytics_repository
         self.metrics_repository = metrics_repository
@@ -1361,7 +1442,120 @@ class EnhancedAnalyticsService:
         self.rule_engine = RuleEngine(settings, analytics_repository, cache_service)
         self.speed_calculator = SpeedCalculator()
         self.anomaly_detector = AnomalyDetector()
-        self._initialize_anomaly_detector()
+
+        # Initialize performance optimization components
+        self._cache_warm_scheduled = False
+        self._last_cache_warm = None
+
+        # Start initialization
+        asyncio.create_task(self._initialize_components())
+
+    async def _initialize_components(self) -> None:
+        """Initialize analytics service components."""
+        try:
+            # Initialize anomaly detector
+            await self._initialize_anomaly_detector()
+
+            # Schedule cache warming if enabled
+            if self.cache_service and not self._cache_warm_scheduled:
+                asyncio.create_task(self._schedule_cache_warming())
+                self._cache_warm_scheduled = True
+
+            logger.info("Analytics service components initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize analytics components: {e}")
+
+    async def _schedule_cache_warming(self) -> None:
+        """Schedule periodic cache warming for analytics queries."""
+        while True:
+            try:
+                # Warm cache every hour
+                await asyncio.sleep(3600)
+
+                # Get active cameras for warming
+                active_cameras = await self._get_active_cameras()
+
+                if active_cameras and self.cache_service:
+                    warmed = await self._warm_analytics_cache(active_cameras)
+                    self._last_cache_warm = datetime.now(UTC)
+                    logger.info(f"Cache warming completed: {warmed} entries")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Cache warming failed: {e}")
+
+    async def _get_active_cameras(self) -> list[str]:
+        """Get list of active cameras for cache warming."""
+        try:
+            if self.analytics_repository:
+                # Get cameras with recent activity (last 2 hours)
+                cutoff_time = datetime.now(UTC) - timedelta(hours=2)
+                cameras = await self.analytics_repository.get_active_cameras(cutoff_time)
+                return [camera.id for camera in cameras] if cameras else []
+            else:
+                # Return mock camera IDs for development
+                return ["camera_001", "camera_002", "camera_003"]
+        except Exception as e:
+            logger.error(f"Failed to get active cameras: {e}")
+            return []
+
+    async def _warm_analytics_cache(self, camera_ids: list[str]) -> int:
+        """Warm cache with common analytics queries."""
+        if not self.cache_service:
+            return 0
+
+        warmed_count = 0
+        end_time = datetime.now(UTC)
+
+        # Common time ranges to pre-warm
+        time_ranges = [
+            (end_time - timedelta(hours=1), end_time),      # Last hour
+            (end_time - timedelta(hours=6), end_time),      # Last 6 hours
+            (end_time - timedelta(hours=24), end_time),     # Last 24 hours
+        ]
+
+        # Common aggregation patterns
+        patterns = [
+            (TimeWindow.FIVE_MIN, AggregationLevel.MINUTE),
+            (TimeWindow.FIFTEEN_MIN, AggregationLevel.MINUTE),
+            (TimeWindow.ONE_HOUR, AggregationLevel.HOURLY),
+        ]
+
+        try:
+            # Create aggregation service instance for warming
+            agg_service = AnalyticsAggregationService(
+                self.analytics_repository,
+                self.cache_service,
+                self.settings
+            )
+
+            for start_time, end_time in time_ranges:
+                for time_window, agg_level in patterns:
+                    try:
+                        # Pre-compute and cache
+                        results = await agg_service.aggregate_traffic_metrics(
+                            camera_ids=camera_ids[:5],  # Limit to 5 cameras per warming
+                            time_window=time_window,
+                            aggregation_level=agg_level,
+                            start_time=start_time,
+                            end_time=end_time,
+                            include_quality_check=False
+                        )
+                        warmed_count += len(results)
+
+                        # Small delay to avoid overwhelming the system
+                        await asyncio.sleep(0.1)
+
+                    except Exception as e:
+                        logger.debug(f"Cache warming failed for pattern {time_window}/{agg_level}: {e}")
+
+            return warmed_count
+
+        except Exception as e:
+            logger.error(f"Analytics cache warming failed: {e}")
+            return 0
 
     async def _initialize_anomaly_detector(self) -> None:
         """Initialize anomaly detector with historical data."""

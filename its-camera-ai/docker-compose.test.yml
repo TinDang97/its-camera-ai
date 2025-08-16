@@ -1,0 +1,177 @@
+# Docker Compose override for testing environment
+# Extends docker-compose.yml with test-specific configurations
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Testing Overrides for Services
+  # =============================================================================
+
+  # Frontend with testing configuration
+  frontend:
+    build:
+      target: testing
+    environment:
+      - NODE_ENV=test
+      - PORT=3002
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+      - CI=true
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    ports:
+      - "3002:3002"
+    volumes:
+      # Test-specific volumes
+      - ./web/tests/e2e/screenshots:/app/tests/e2e/screenshots
+      - ./web/tests/e2e/videos:/app/tests/e2e/videos
+      - ./web/tests/reports:/app/tests/reports
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # API with test database and reduced resource limits
+  api:
+    environment:
+      - ENVIRONMENT=test
+      - LOG_LEVEL=info
+      - DATABASE_URL=postgresql+asyncpg://test_user:test_password@postgres-test:5432/its_camera_ai_test
+      - REDIS_URL=redis://redis-test:6379/0
+      - SECRET_KEY=test-secret-key-for-ci
+      - JWT_SECRET_KEY=test-jwt-secret-key-for-ci
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+
+  # =============================================================================
+  # Test-specific Services
+  # =============================================================================
+
+  # Test PostgreSQL Database
+  postgres-test:
+    image: timescale/timescaledb:latest-pg17
+    container_name: its-camera-ai-postgres-test
+    environment:
+      - POSTGRES_DB=its_camera_ai_test
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+      - POSTGRES_INITDB_ARGS=--auth-host=md5
+      - TIMESCALEDB_TELEMETRY=off
+      # Optimized for testing (faster startup, less memory)
+      - POSTGRES_SHARED_BUFFERS=128MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=256MB
+      - POSTGRES_WORK_MEM=4MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=32MB
+      - POSTGRES_MAX_CONNECTIONS=100
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./database/timescaledb_setup.sql:/docker-entrypoint-initdb.d/01-timescaledb-setup.sql:ro
+    networks:
+      - its-network
+    restart: "no"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d its_camera_ai_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Test Redis Cache
+  redis-test:
+    image: redis:7.2-alpine
+    container_name: its-camera-ai-redis-test
+    command: redis-server --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_test_data:/data
+    networks:
+      - its-network
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # Mock MinIO for testing (lightweight)
+  minio-test:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: its-camera-ai-minio-test
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: testuser
+      MINIO_ROOT_PASSWORD: testpassword
+      MINIO_REGION_NAME: us-east-1
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - minio_test_data:/data
+    networks:
+      - its-network
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # =============================================================================
+  # Test Monitoring Services (Lightweight)
+  # =============================================================================
+
+  # Lightweight Prometheus for test metrics
+  prometheus-test:
+    image: prom/prometheus:v2.48.1
+    container_name: its-camera-ai-prometheus-test
+    command:
+      - '--config.file=/etc/prometheus/prometheus-test.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=1h'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus-test.yml:/etc/prometheus/prometheus-test.yml:ro
+      - prometheus_test_data:/prometheus
+    networks:
+      - its-network
+    restart: "no"
+
+  # Test log aggregation
+  test-logger:
+    image: busybox:latest
+    container_name: its-camera-ai-test-logger
+    command: tail -f /dev/null
+    volumes:
+      - test_logs:/var/log/tests
+    networks:
+      - its-network
+    restart: "no"
+
+# =============================================================================
+# Test-specific Volumes
+# =============================================================================
+volumes:
+  postgres_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  minio_test_data:
+    driver: local
+  prometheus_test_data:
+    driver: local
+  test_logs:
+    driver: local

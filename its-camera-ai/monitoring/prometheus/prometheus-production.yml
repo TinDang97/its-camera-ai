@@ -1,0 +1,526 @@
+# Enhanced Prometheus Configuration for ITS Camera AI Production
+# Supports 1000+ camera streams, 10TB/day data processing, 99.9% uptime SLA
+# Production-ready monitoring with custom metrics for ML pipeline and business analytics
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'its-camera-ai'
+    environment: 'production'
+    region: 'us-west-2'
+    version: '2.0.0'
+  
+  # Enhanced configuration for high-volume metrics
+  query_log_file: '/prometheus/query.log'
+  
+# Feature flags for enhanced monitoring
+feature_flags:
+  - enable-auto-reload
+  - enable-otlp-write-receiver
+  - memory-snapshot-on-shutdown
+
+# Alertmanager configuration with high availability
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager-0.alertmanager:9093
+          - alertmanager-1.alertmanager:9093
+          - alertmanager-2.alertmanager:9093
+      timeout: 10s
+      api_version: v2
+      path_prefix: /
+
+# Load all recording and alerting rules
+rule_files:
+  - "rules.yaml"
+  - "slo-rules.yaml"
+  - "business-rules.yaml"
+  - "ml-pipeline-rules.yaml"
+  - "infrastructure-rules.yaml"
+
+# Comprehensive scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring with enhanced metrics
+  - job_name: 'prometheus'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'prometheus_.*'
+        target_label: 'component'
+        replacement: 'monitoring'
+
+  # ITS Camera AI Core Services with enhanced labels
+  - job_name: 'its-camera-ai-services'
+    scrape_interval: 10s  # Increased frequency for core services
+    scrape_timeout: 8s
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - its-camera-ai-production
+            - its-camera-ai-staging
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+        action: replace
+        target_label: __scheme__
+        regex: (https?)
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_service_name]
+        action: replace
+        target_label: kubernetes_name
+      # Add business impact labels
+      - source_labels: [__meta_kubernetes_service_label_business_impact]
+        action: replace
+        target_label: business_impact
+      - source_labels: [__meta_kubernetes_service_label_sla_tier]
+        action: replace
+        target_label: sla_tier
+
+  # ML Inference Engine with high-frequency monitoring
+  - job_name: 'ml-inference-engine'
+    scrape_interval: 5s  # High frequency for inference monitoring
+    scrape_timeout: 3s
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - its-camera-ai-production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: vision-engine
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:8081
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        action: replace
+        target_label: kubernetes_node
+    metric_relabel_configs:
+      # Enhance ML metrics with additional context
+      - source_labels: [__name__]
+        regex: 'inference_.*'
+        target_label: 'component'
+        replacement: 'ml-pipeline'
+      - source_labels: [model_name]
+        target_label: 'model_version'
+        regex: '(.*)_v(.*)'
+        replacement: '${2}'
+
+  # Business Analytics and Traffic Metrics
+  - job_name: 'traffic-analytics'
+    scrape_interval: 10s
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - its-camera-ai-production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: analytics-service
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:8084
+        target_label: __address__
+    scrape_interval: 10s
+    metrics_path: '/business/metrics'
+    metric_relabel_configs:
+      # Add business context to metrics
+      - source_labels: [__name__]
+        regex: 'traffic_.*|vehicle_.*|incident_.*'
+        target_label: 'metric_type'
+        replacement: 'business'
+
+  # Camera Stream Monitoring with detailed metrics
+  - job_name: 'camera-streams'
+    scrape_interval: 5s  # High frequency for stream monitoring
+    scrape_timeout: 3s
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - its-camera-ai-production
+            - its-camera-edge
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: camera-service|streaming-service
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:8080
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_pod_annotation_camera_location]
+        action: replace
+        target_label: camera_location
+      - source_labels: [__meta_kubernetes_pod_annotation_camera_type]
+        action: replace
+        target_label: camera_type
+    metric_relabel_configs:
+      # Add stream quality metrics
+      - source_labels: [__name__]
+        regex: 'camera_.*|stream_.*'
+        target_label: 'component'
+        replacement: 'camera-stream'
+
+  # GPU Monitoring with DCGM Enhanced Metrics
+  - job_name: 'gpu-monitoring'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - its-camera-ai-production
+            - monitoring
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: dcgm-exporter|nvidia-gpu-exporter
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:9400
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        action: replace
+        target_label: gpu_node
+    metric_relabel_configs:
+      # Enhance GPU metrics with ML context
+      - source_labels: [__name__]
+        regex: 'DCGM_.*'
+        target_label: 'component'
+        replacement: 'gpu'
+      # Add GPU utilization efficiency metrics
+      - source_labels: [__name__, gpu]
+        regex: 'DCGM_FI_DEV_GPU_UTIL;(.*)'
+        target_label: 'gpu_id'
+        replacement: '${1}'
+
+  # Database Performance Monitoring (PostgreSQL + TimescaleDB)
+  - job_name: 'database-performance'
+    scrape_interval: 30s
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - its-camera-ai-production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+        action: keep
+        regex: postgresql|timescaledb
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:9187
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - source_labels: [__meta_kubernetes_service_label_database_role]
+        action: replace
+        target_label: database_role
+    metric_relabel_configs:
+      # Add database performance context
+      - source_labels: [__name__]
+        regex: 'pg_.*|postgresql_.*'
+        target_label: 'component'
+        replacement: 'database'
+
+  # Cache Performance Monitoring (Redis)
+  - job_name: 'cache-performance'
+    scrape_interval: 30s
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - its-camera-ai-production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+        action: keep
+        regex: redis
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:9121
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+    metric_relabel_configs:
+      # Add cache performance context
+      - source_labels: [__name__]
+        regex: 'redis_.*'
+        target_label: 'component'
+        replacement: 'cache'
+
+  # Message Queue Monitoring (Kafka)
+  - job_name: 'messaging-performance'
+    scrape_interval: 30s
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - its-camera-ai-production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+        action: keep
+        regex: kafka
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__address__]
+        action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:9308
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+    metric_relabel_configs:
+      # Add messaging context
+      - source_labels: [__name__]
+        regex: 'kafka_.*'
+        target_label: 'component'
+        replacement: 'messaging'
+
+  # Kubernetes Control Plane Monitoring
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - default
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+
+  # Node Resource Monitoring
+  - job_name: 'kubernetes-nodes'
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+    metric_relabel_configs:
+      # Add node classification
+      - source_labels: [__meta_kubernetes_node_label_node_type]
+        target_label: 'node_type'
+      - source_labels: [__meta_kubernetes_node_label_gpu_type]
+        target_label: 'gpu_type'
+
+  # Container Resource Monitoring (cAdvisor)
+  - job_name: 'kubernetes-cadvisor'
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+    metric_relabel_configs:
+      # Filter container metrics to reduce cardinality
+      - source_labels: [__name__]
+        regex: 'container_(cpu|memory|network|fs)_.*'
+        action: keep
+      # Add business context to containers
+      - source_labels: [pod_name]
+        regex: '(.*-vision-engine-.*|.*-camera-.*|.*-analytics-.*)'
+        target_label: 'business_critical'
+        replacement: 'true'
+
+  # Service Mesh Monitoring (Istio)
+  - job_name: 'istio-mesh'
+    scrape_interval: 15s
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - istio-system
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: istio-proxy;http-envoy-prom
+
+  # Istio Proxy Metrics (Envoy)
+  - job_name: 'envoy-stats'
+    scrape_interval: 15s
+    metrics_path: /stats/prometheus
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - its-camera-ai-production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_container_name, __meta_kubernetes_pod_container_port_name]
+        action: keep
+        regex: istio-proxy;http-envoy-prom
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:15090
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod_name
+
+  # External API Dependencies Monitoring
+  - job_name: 'external-dependencies'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['weather-api-exporter:9090']
+        labels:
+          service: 'weather-api'
+          dependency_type: 'external'
+      - targets: ['traffic-data-exporter:9090']
+        labels:
+          service: 'traffic-data-api'
+          dependency_type: 'external'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'external_.*'
+        target_label: 'component'
+        replacement: 'external-dependency'
+
+# Enhanced storage configuration for production
+storage:
+  tsdb:
+    path: /prometheus/data
+    retention.time: 30d
+    retention.size: 500GB
+    wal-compression: true
+    min-block-duration: 2h
+    max-block-duration: 25h
+    no-lockfile: false
+    allow-overlapping-blocks: false
+
+# Remote write configuration for long-term storage and compliance
+remote_write:
+  # Primary long-term storage with Thanos
+  - url: "http://thanos-receive:19291/api/v1/receive"
+    name: "thanos-long-term"
+    queue_config:
+      max_samples_per_send: 10000
+      max_shards: 200
+      capacity: 25000
+      batch_send_deadline: 5s
+      min_shards: 1
+      retry_on_http_429: true
+    write_relabel_configs:
+      # Send important metrics for long-term storage
+      - source_labels: [__name__]
+        regex: '(inference_.*|camera_.*|its_camera_ai_.*|up|node_.*cpu.*|node_.*memory.*|DCGM_.*|postgresql_.*|redis_.*|kafka_.*|business_.*)'
+        action: keep
+    
+  # Secondary storage for compliance and audit
+  - url: "http://compliance-storage:8086/api/v1/prom/write"
+    name: "compliance-audit"
+    queue_config:
+      max_samples_per_send: 5000
+      max_shards: 100
+      capacity: 10000
+    write_relabel_configs:
+      # Send business and SLA metrics for compliance
+      - source_labels: [__name__]
+        regex: '(its_camera_ai_.*|business_.*|slo_.*|error_budget_.*|traffic_.*|incident_.*)'
+        action: keep
+      # Add compliance labels
+      - target_label: 'compliance_required'
+        replacement: 'true'
+
+  # Real-time analytics storage
+  - url: "http://analytics-storage:8428/api/v1/write"
+    name: "real-time-analytics"
+    queue_config:
+      max_samples_per_send: 15000
+      max_shards: 300
+      capacity: 50000
+      batch_send_deadline: 1s
+    write_relabel_configs:
+      # Send real-time business metrics
+      - source_labels: [__name__]
+        regex: '(traffic_.*|vehicle_.*|camera_.*|stream_.*)'
+        action: keep
+
+# Remote read configuration for federated queries
+remote_read:
+  - url: "http://thanos-query:9090/api/v1/read"
+    name: "thanos-historical"
+    read_recent: false
+    required_matchers:
+      - __name__=~"its_camera_ai_.*"
+
+# Tracing configuration for OpenTelemetry integration
+tracing:
+  endpoint: "jaeger-collector:14268/api/traces"
+  insecure: true
+  timeout: 5s
+  headers:
+    "X-Trace-Source": "prometheus"

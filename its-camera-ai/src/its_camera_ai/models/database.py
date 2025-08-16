@@ -72,7 +72,7 @@ class DatabaseConfigurationError(DatabaseError):
         super().__init__(message, details={"configuration_issue": message})
 
 
-class DatabaseManager(AsyncSession):
+class DatabaseManager:
     """Unified database manager with production optimizations and dependency injection support.
 
     This class combines high-performance database connection management with proper
@@ -112,8 +112,6 @@ class DatabaseManager(AsyncSession):
 
         # Validate configuration
         self._validate_configuration()
-
-        super().__init__()
 
     def _validate_configuration(self) -> None:
         """Validate database configuration.
@@ -350,11 +348,78 @@ class DatabaseManager(AsyncSession):
             raise DatabaseConnectionError("Table creation failed", e) from e
 
     @asynccontextmanager
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Get a database session with automatic transaction management.
+    async def initialize(self) -> None:
+        """Initialize the database manager.
 
-        This context manager provides a database session with automatic
-        transaction handling. It commits on success and rolls back on exceptions.
+        This must be called before using the database manager.
+        Creates the engine and session factory.
+
+        Raises:
+            DatabaseConnectionError: If initialization fails
+        """
+        if self._is_initialized:
+            logger.debug("Database manager already initialized")
+            return
+
+        try:
+            self._engine = await self._create_engine()
+            self._sessionmaker = async_sessionmaker(
+                bind=self._engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+                autoflush=True,
+                autocommit=False,
+            )
+
+            # Test connection
+            await self._test_connection()
+
+            # Create tables in non-production environments
+            if self.settings.environment != "production":
+                await self._ensure_tables_exist()
+
+            self._is_initialized = True
+
+            logger.info(
+                "Database manager initialized successfully",
+                environment=self.settings.environment,
+                pool_size=(
+                    getattr(self._engine.pool, "size", lambda: "unknown")()
+                    if hasattr(self._engine, "pool")
+                    else "unknown"
+                ),
+            )
+
+        except Exception as e:
+            logger.error("Failed to initialize database manager", error=str(e))
+            await self.cleanup()
+            raise DatabaseConnectionError(
+                f"Database initialization failed: {str(e)}", e
+            ) from e
+
+    async def cleanup(self) -> None:
+        """Clean up database resources.
+
+        Disposes of the engine and resets initialization state.
+        """
+        if self._engine:
+            try:
+                await self._engine.dispose()
+                logger.debug("Database engine disposed successfully")
+            except Exception as e:
+                logger.error("Error disposing database engine", error=str(e))
+
+        self._engine = None
+        self._sessionmaker = None
+        self._is_initialized = False
+
+    @asynccontextmanager
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+        """Get a database session with proper transaction management.
+
+        This context manager provides a database session that automatically
+        handles transactions. It uses SQLAlchemy's built-in transaction handling
+        which automatically commits on success and rolls back on exceptions.
 
         Yields:
             AsyncSession: Database session for query execution
@@ -367,51 +432,27 @@ class DatabaseManager(AsyncSession):
             async with database_manager.get_session() as session:
                 result = await session.execute(text("SELECT * FROM cameras"))
                 cameras = result.fetchall()
+                # Automatic commit happens here if no exception
         """
-        if not self._is_initialized or not self._sessionmaker:
-            raise DatabaseConnectionError("Database manager not initialized")
+        if not self._is_initialized:
+            await self.initialize()
 
-        session = None
-        try:
-            session = self._sessionmaker()
+        if not self._sessionmaker:
+            raise DatabaseConnectionError("Session factory not available")
 
-            # Begin transaction explicitly
-            await session.begin()
-
-            yield session
-
-            # Commit if no exception occurred
-            await session.commit()
-
-        except Exception as e:
-            # Rollback on any exception
-            if session:
-                try:
-                    await session.rollback()
-                    logger.debug("Transaction rolled back successfully")
-                except Exception as rollback_error:
-                    logger.error(
-                        "Error during transaction rollback",
-                        rollback_error=str(rollback_error),
-                        original_error=str(e),
-                    )
-                    raise DatabaseTransactionError(
-                        f"Transaction rollback failed: {str(rollback_error)}",
-                        rollback_error,
-                    ) from rollback_error
-
-            # Re-raise original exception with context
-            raise DatabaseTransactionError(
-                f"Database transaction failed: {str(e)}", e
-            ) from e
-
-        finally:
-            # Always close the session
-            if session:
-                try:
-                    await session.close()
-                except Exception as close_error:
-                    logger.error("Error closing session", error=str(close_error))
+        async with self._sessionmaker() as session:
+            try:
+                yield session
+                # SQLAlchemy's async context manager automatically handles commit/rollback
+            except Exception as e:
+                # Log the error for debugging
+                logger.error(
+                    "Database session error", error=str(e), error_type=type(e).__name__
+                )
+                # Re-raise the exception (rollback is handled by SQLAlchemy)
+                raise DatabaseTransactionError(
+                    f"Database operation failed: {str(e)}", e
+                ) from e
 
     async def get_raw_session(self) -> AsyncSession:
         """Get a raw database session without automatic transaction management.
@@ -428,8 +469,11 @@ class DatabaseManager(AsyncSession):
         Warning:
             The caller must ensure proper session cleanup and transaction management.
         """
-        if not self._is_initialized or not self._sessionmaker:
-            raise DatabaseConnectionError("Database manager not initialized")
+        if not self._is_initialized:
+            await self.initialize()
+
+        if not self._sessionmaker:
+            raise DatabaseConnectionError("Session factory not available")
 
         try:
             return self._sessionmaker()
@@ -437,6 +481,15 @@ class DatabaseManager(AsyncSession):
             raise DatabaseConnectionError(
                 f"Failed to create database session: {str(e)}", e
             ) from e
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.cleanup()
 
     async def health_check(self) -> dict[str, Any]:
         """Perform a comprehensive health check of the database.

@@ -1,0 +1,586 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "ITS Camera AI - Production Overview",
+    "tags": ["its-camera-ai", "overview", "production"],
+    "style": "dark",
+    "timezone": "UTC",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Health Score",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "its_camera_ai:system_health_score",
+            "legendFormat": "Health Score",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 70},
+                {"color": "green", "value": 90}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "displayName": "System Health"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "orientation": "horizontal"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Active Cameras",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(camera_active_total)",
+            "legendFormat": "Active Cameras",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 800},
+                {"color": "green", "value": 1000}
+              ]
+            },
+            "unit": "short",
+            "displayName": "Active Cameras"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "ML Inference Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(inference_requests_total[5m]))",
+            "legendFormat": "Inferences/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 100},
+                {"color": "green", "value": 500}
+              ]
+            },
+            "unit": "reqps",
+            "displayName": "Inference Rate"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Alert Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(ALERTS{alertstate=\"firing\"})",
+            "legendFormat": "Active Alerts",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 5}
+              ]
+            },
+            "unit": "short",
+            "displayName": "Active Alerts"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+      },
+      {
+        "id": 5,
+        "title": "ML Inference Latency",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "95th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "50th percentile",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "99th percentile",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Latency (seconds)",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "line"
+              }
+            },
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.05},
+                {"color": "red", "value": 0.1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "options": {
+          "legend": {
+            "calcs": ["lastNotNull", "max"],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "System Resource Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg(100 * (1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+            "legendFormat": "CPU Usage %",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)))",
+            "legendFormat": "Memory Usage %",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(DCGM_FI_DEV_GPU_UTIL)",
+            "legendFormat": "GPU Usage %",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "custom": {
+              "axisLabel": "Usage %",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 7,
+        "title": "Camera Stream Status",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(camera_frames_processed_total[5m]))",
+            "legendFormat": "Frames/sec Processed",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(camera_frames_dropped_total[5m]))",
+            "legendFormat": "Frames/sec Dropped",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(camera_active_total)",
+            "legendFormat": "Active Cameras",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Rate",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Active Cameras"
+              },
+              "properties": [
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "Database Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(postgresql_queries_total[5m])",
+            "legendFormat": "Queries/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(postgresql_query_duration_seconds)",
+            "legendFormat": "Avg Query Duration",
+            "refId": "B"
+          },
+          {
+            "expr": "postgresql_active_connections",
+            "legendFormat": "Active Connections",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Avg Query Duration"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "s"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 9,
+        "title": "Error Rates",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{code=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])) * 100",
+            "legendFormat": "HTTP 5xx Error Rate %",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(inference_requests_total{status=\"error\"}[5m])) / sum(rate(inference_requests_total[5m])) * 100",
+            "legendFormat": "Inference Error Rate %",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(camera_connection_errors_total[5m])) / sum(rate(camera_connection_attempts_total[5m])) * 100",
+            "legendFormat": "Camera Connection Error Rate %",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "percent",
+            "min": 0,
+            "custom": {
+              "axisLabel": "Error Rate %",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 10,
+        "title": "Business Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(traffic_vehicles_detected_total[5m]))",
+            "legendFormat": "Vehicles Detected/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(traffic_incidents_detected_total[5m]))",
+            "legendFormat": "Incidents Detected/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(traffic_average_speed_kmh)",
+            "legendFormat": "Average Speed (km/h)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Average Speed (km/h)"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "velocitykmh"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      },
+      {
+        "id": 11,
+        "title": "SLA Compliance",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "its_camera_ai:api_availability_sli * 100",
+            "legendFormat": "API Availability",
+            "refId": "A"
+          },
+          {
+            "expr": "its_camera_ai:inference_availability_sli * 100",
+            "legendFormat": "Inference Availability",
+            "refId": "B"
+          },
+          {
+            "expr": "(1 - (its_camera_ai:inference_latency_sli > 0.1)) * 100",
+            "legendFormat": "Latency SLA Compliance",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 99},
+                {"color": "green", "value": 99.9}
+              ]
+            },
+            "unit": "percent",
+            "min": 99,
+            "max": 100,
+            "decimals": 2
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32},
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "horizontal"
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "environment",
+          "type": "query",
+          "query": "label_values(up, environment)",
+          "current": {
+            "value": "production",
+            "text": "production"
+          },
+          "options": [],
+          "refresh": 1,
+          "includeAll": false,
+          "multi": false
+        },
+        {
+          "name": "namespace",
+          "type": "query",
+          "query": "label_values(up{environment=\"$environment\"}, kubernetes_namespace)",
+          "current": {
+            "value": "its-camera-ai-production",
+            "text": "its-camera-ai-production"
+          },
+          "options": [],
+          "refresh": 1,
+          "includeAll": false,
+          "multi": false
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "kube_deployment_status_replicas_updated{namespace=\"$namespace\"}",
+          "iconColor": "green",
+          "titleFormat": "Deployment: {{deployment}}",
+          "tagKeys": "deployment"
+        },
+        {
+          "name": "Alerts",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertstate=\"firing\", severity!=\"info\"}",
+          "iconColor": "red",
+          "titleFormat": "Alert: {{alertname}}",
+          "tagKeys": "alertname,severity"
+        }
+      ]
+    },
+    "links": [
+      {
+        "title": "ML Pipeline Dashboard",
+        "url": "/d/its-camera-ai-ml-pipeline",
+        "type": "dashboards"
+      },
+      {
+        "title": "Infrastructure Dashboard",
+        "url": "/d/its-camera-ai-infrastructure",
+        "type": "dashboards"
+      },
+      {
+        "title": "Business Analytics Dashboard",
+        "url": "/d/its-camera-ai-business",
+        "type": "dashboards"
+      }
+    ]
+  }
+}
