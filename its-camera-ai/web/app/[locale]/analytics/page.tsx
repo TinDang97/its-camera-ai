@@ -5,20 +5,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import {
-  TrendingUp,
-  BarChart3,
-  Activity,
-  Clock,
-  MapPin,
-  AlertTriangle,
-  Download,
-  Calendar,
-  Filter
-} from 'lucide-react'
+  IconTrendingUp,
+  IconChartBar,
+  IconActivity,
+  IconClock,
+  IconMapPin,
+  IconAlertTriangle,
+  IconDownload,
+  IconCalendar,
+  IconFilter
+} from '@tabler/icons-react'
 import { RealTimeMetrics } from '@/components/analytics/real-time-metrics'
 import { TrafficFlowChart } from '@/components/analytics/traffic-flow-chart'
 import { TrafficHeatmap } from '@/components/analytics/traffic-heatmap'
-import { IncidentManagement } from '@/components/analytics/incident-management'
+import { IncidentManagementDashboard } from '@/components/analytics/dashboard/IncidentManagementDashboard'
+import { CameraPerformanceDashboard } from '@/components/analytics/dashboard/CameraPerformanceDashboard'
+import { SystemMetricsDashboard } from '@/components/analytics/dashboard/SystemMetricsDashboard'
+import { CustomDashboardBuilder } from '@/components/analytics/dashboard/CustomDashboardBuilder'
+import { DataExportReporting } from '@/components/analytics/dashboard/DataExportReporting'
 import { useAnalyticsWebSocket } from '@/hooks/use-analytics-websocket'
 
 export default function AnalyticsPage() {
@@ -167,15 +171,15 @@ export default function AnalyticsPage() {
         </div>
         <div className="flex items-center space-x-2">
           <Button variant="outline">
-            <Filter className="h-4 w-4 mr-2" />
+            <IconFilter className="h-4 w-4 mr-2" />
             Filter
           </Button>
           <Button variant="outline">
-            <Calendar className="h-4 w-4 mr-2" />
+            <IconCalendar className="h-4 w-4 mr-2" />
             Date Range
           </Button>
           <Button>
-            <Download className="h-4 w-4 mr-2" />
+            <IconDownload className="h-4 w-4 mr-2" />
             Export
           </Button>
         </div>
@@ -186,10 +190,13 @@ export default function AnalyticsPage() {
 
       {/* Analytics Tabs */}
       <Tabs defaultValue="traffic-flow" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-8">
           <TabsTrigger value="traffic-flow">Traffic Flow</TabsTrigger>
+          <TabsTrigger value="cameras">Camera Performance</TabsTrigger>
+          <TabsTrigger value="system">System Metrics</TabsTrigger>
           <TabsTrigger value="heatmap">Density Heatmap</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
+          <TabsTrigger value="builder">Dashboard Builder</TabsTrigger>
           <TabsTrigger value="predictions">Predictions</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
@@ -274,6 +281,36 @@ export default function AnalyticsPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="cameras" className="space-y-4">
+          <CameraPerformanceDashboard
+            autoRefresh={true}
+            refreshInterval={15000}
+            showControls={true}
+            selectedTimeRange={timeRange as '1h' | '6h' | '24h' | '7d'}
+            onDataExport={() => {
+              console.log('Exporting camera performance data...');
+            }}
+            onCameraAction={(cameraId, action) => {
+              console.log(`Camera action: ${action} on ${cameraId}`);
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="system" className="space-y-4">
+          <SystemMetricsDashboard
+            autoRefresh={true}
+            refreshInterval={10000}
+            showControls={true}
+            selectedTimeRange="1h"
+            onDataExport={() => {
+              console.log('Exporting system metrics data...');
+            }}
+            onAlertAction={(alertId, action) => {
+              console.log(`Alert action: ${action} on ${alertId}`);
+            }}
+          />
+        </TabsContent>
+
         <TabsContent value="heatmap" className="space-y-4">
           <TrafficHeatmap
             data={heatmapData}
@@ -283,9 +320,78 @@ export default function AnalyticsPage() {
         </TabsContent>
 
         <TabsContent value="incidents" className="space-y-4">
-          <IncidentManagement
-            incidents={incidentData}
-            onIncidentResolve={handleIncidentResolve}
+          <IncidentManagementDashboard
+            autoRefresh={true}
+            refreshInterval={30000}
+            showControls={true}
+            onDataExport={() => {
+              console.log('Exporting incident management data...');
+            }}
+            onIncidentAction={(incidentId, action) => {
+              console.log(`Incident action: ${action} on ${incidentId}`);
+              if (action === 'resolve') {
+                handleIncidentResolve(incidentId);
+              }
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="builder" className="space-y-4">
+          <CustomDashboardBuilder
+            onSave={(layout) => {
+              console.log('Saving dashboard layout:', layout);
+              // In production, this would save to the backend
+            }}
+            onLoad={async (layoutId) => {
+              console.log('Loading dashboard layout:', layoutId);
+              // In production, this would load from the backend
+              return Promise.resolve({
+                id: layoutId,
+                name: 'Loaded Dashboard',
+                description: 'Dashboard loaded from backend',
+                widgets: [],
+                gridSize: { columns: 12, rows: 8 },
+                settings: {
+                  autoRefresh: true,
+                  refreshInterval: 30000,
+                  theme: 'auto',
+                  showGrid: true,
+                  snapToGrid: true
+                },
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                isTemplate: false,
+                tags: []
+              });
+            }}
+            onExport={(layout) => {
+              console.log('Exporting dashboard layout:', layout);
+              // Create and download JSON file
+              const dataStr = JSON.stringify(layout, null, 2);
+              const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+              const exportFileDefaultName = `dashboard-${layout.name.toLowerCase().replace(/\s+/g, '-')}.json`;
+
+              const linkElement = document.createElement('a');
+              linkElement.setAttribute('href', dataUri);
+              linkElement.setAttribute('download', exportFileDefaultName);
+              linkElement.click();
+            }}
+            onImport={async (file) => {
+              console.log('Importing dashboard layout from file:', file);
+              return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                  try {
+                    const layout = JSON.parse(e.target?.result as string);
+                    resolve(layout);
+                  } catch (error) {
+                    reject(new Error('Invalid JSON file'));
+                  }
+                };
+                reader.readAsText(file);
+              });
+            }}
+            availableDataSources={['traffic_data', 'camera_status', 'incidents', 'alerts', 'heatmap_data', 'camera_feed']}
           />
         </TabsContent>
 
@@ -335,72 +441,33 @@ export default function AnalyticsPage() {
         </TabsContent>
 
         <TabsContent value="reports" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Generate Reports</CardTitle>
-                <CardDescription>Create custom traffic analysis reports</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <Button className="w-full" variant="outline">
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                    Daily Traffic Summary
-                  </Button>
-                  <Button className="w-full" variant="outline">
-                    <TrendingUp className="h-4 w-4 mr-2" />
-                    Weekly Performance Report
-                  </Button>
-                  <Button className="w-full" variant="outline">
-                    <AlertTriangle className="h-4 w-4 mr-2" />
-                    Incident Analysis Report
-                  </Button>
-                  <Button className="w-full" variant="outline">
-                    <Activity className="h-4 w-4 mr-2" />
-                    Monthly Analytics Overview
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Reports</CardTitle>
-                <CardDescription>Previously generated reports</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
-                    <div>
-                      <p className="text-sm font-medium">Weekly Report - Week 45</p>
-                      <p className="text-xs text-muted-foreground">Generated 2 days ago</p>
-                    </div>
-                    <Button size="sm" variant="ghost">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
-                    <div>
-                      <p className="text-sm font-medium">October Performance</p>
-                      <p className="text-xs text-muted-foreground">Generated 1 week ago</p>
-                    </div>
-                    <Button size="sm" variant="ghost">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
-                    <div>
-                      <p className="text-sm font-medium">Q3 2024 Summary</p>
-                      <p className="text-xs text-muted-foreground">Generated 2 weeks ago</p>
-                    </div>
-                    <Button size="sm" variant="ghost">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <DataExportReporting
+            onExport={async (request) => {
+              console.log('Exporting data:', request);
+              // In production, this would trigger the export process
+            }}
+            onScheduleReport={async (report) => {
+              console.log('Scheduling report:', report);
+              // In production, this would save the scheduled report
+            }}
+            onUpdateSchedule={async (reportId, updates) => {
+              console.log('Updating schedule:', reportId, updates);
+              // In production, this would update the scheduled report
+            }}
+            onDeleteSchedule={async (reportId) => {
+              console.log('Deleting schedule:', reportId);
+              // In production, this would delete the scheduled report
+            }}
+            availableDataSources={['traffic_data', 'camera_status', 'incidents', 'alerts', 'system_metrics', 'heatmap_data']}
+            availableColumns={{
+              traffic_data: ['timestamp', 'cameraId', 'vehicleCount', 'averageSpeed', 'congestionLevel', 'occupancy'],
+              camera_status: ['cameraId', 'status', 'uptime', 'frameRate', 'lastPing', 'location', 'model'],
+              incidents: ['id', 'type', 'severity', 'status', 'timestamp', 'responseTime', 'resolutionTime', 'location'],
+              alerts: ['id', 'type', 'severity', 'message', 'timestamp', 'acknowledged', 'source'],
+              system_metrics: ['timestamp', 'cpuUsage', 'memoryUsage', 'diskUsage', 'networkLatency', 'apiResponseTime'],
+              heatmap_data: ['cameraId', 'location', 'vehicleCount', 'averageSpeed', 'congestionLevel', 'timestamp']
+            }}
+          />
         </TabsContent>
       </Tabs>
     </div>
