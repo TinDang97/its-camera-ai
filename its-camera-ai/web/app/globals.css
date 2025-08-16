@@ -15,49 +15,72 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 13% 18%;
 
-    /* Primary palette - Orange Peel */
-    --primary: 33 100% 55%; /* #ff9f1c */
+    /* Primary palette - ITS Blue */
+    --primary: 217 91% 60%; /* #3b82f6 */
     --primary-foreground: 0 0% 100%;
-    --primary-hover: 33 100% 48%;
-    --primary-light: 33 100% 90%;
+    --primary-hover: 221 83% 53%; /* #2563eb */
+    --primary-light: 214 95% 93%; /* #dbeafe */
 
-    /* Secondary palette - Light Sea Green */
-    --secondary: 177 58% 47%; /* #2ec4b6 */
+    /* Secondary palette - Professional Cyan */
+    --secondary: 188 86% 43%; /* #06b6d4 */
     --secondary-foreground: 0 0% 100%;
-    --secondary-hover: 177 58% 40%;
-    --secondary-light: 177 58% 90%;
+    --secondary-hover: 191 91% 36%; /* #0891b2 */
+    --secondary-light: 185 96% 97%; /* #ecfeff */
 
-    /* Accent palette - Hunyadi Yellow */
-    --accent: 37 100% 71%; /* #ffbf69 */
-    --accent-foreground: 220 13% 18%;
-    --accent-hover: 37 100% 64%;
-    --accent-light: 37 100% 95%;
+    /* Accent palette - Emerald Green */
+    --accent: 158 64% 52%; /* #10b981 */
+    --accent-foreground: 0 0% 100%;
+    --accent-hover: 160 84% 39%; /* #059669 */
+    --accent-light: 153 76% 95%; /* #d1fae5 */
 
-    /* Neutral palette - Mint Green */
-    --muted: 168 53% 93%; /* #cbf3f0 */
-    --muted-foreground: 220 13% 45%;
-    --muted-hover: 168 53% 88%;
+    /* Neutral palette - Slate */
+    --muted: 210 40% 98%; /* #f8fafc */
+    --muted-foreground: 215 16% 47%; /* #64748b */
+    --muted-hover: 214 32% 91%; /* #e2e8f0 */
 
     /* Status colors */
-    --success: 177 58% 47%; /* Light Sea Green */
+    --success: 158 64% 52%; /* Emerald Green */
     --success-foreground: 0 0% 100%;
-    --warning: 37 100% 71%; /* Hunyadi Yellow */
-    --warning-foreground: 220 13% 18%;
-    --destructive: 33 100% 55%; /* Orange Peel for alerts */
+    --warning: 43 96% 56%; /* Amber */
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%; /* Red */
     --destructive-foreground: 0 0% 100%;
 
     /* UI elements */
     --border: 220 13% 91%;
     --input: 220 13% 96%;
-    --ring: 33 100% 55%;
+    --ring: 217 91% 60%; /* ITS Blue */
     --radius: 0.75rem;
 
     /* Monitoring specific colors */
     --critical: 0 84% 60%;
     --critical-foreground: 0 0% 100%;
-    --online: 142 71% 45%;
-    --offline: 0 84% 60%;
-    --maintenance: 45 93% 47%;
+    --online: 158 64% 52%; /* Emerald Green - operational */
+    --offline: 0 84% 60%; /* Red - disconnected */
+    --maintenance: 43 96% 56%; /* Amber - maintenance mode */
+
+    /* Traffic status colors */
+    --traffic-optimal: 158 64% 52%; /* Green - free flow */
+    --traffic-moderate: 43 96% 56%; /* Amber - moderate congestion */
+    --traffic-congested: 0 84% 60%; /* Red - heavy congestion */
+    --traffic-blocked: 0 100% 45%; /* Dark red - stopped traffic */
+
+    /* AI confidence colors */
+    --ai-confidence-high: 158 64% 52%; /* Green - >85% confidence */
+    --ai-confidence-medium: 43 96% 56%; /* Amber - 70-85% confidence */
+    --ai-confidence-low: 0 84% 60%; /* Red - <70% confidence */
+
+    /* Performance colors */
+    --performance-excellent: 158 64% 52%; /* Green - <50ms */
+    --performance-good: 84 81% 44%; /* Light green - 50-75ms */
+    --performance-warning: 43 96% 56%; /* Amber - 75-100ms */
+    --performance-poor: 0 84% 60%; /* Red - >100ms */
+
+    /* Security status colors */
+    --security-secure: 158 64% 52%; /* Green - secure */
+    --security-monitoring: 188 86% 43%; /* Cyan - monitoring */
+    --security-warning: 43 96% 56%; /* Amber - warning */
+    --security-breach: 0 100% 45%; /* Dark red - breach */
   }
 
   .dark {
@@ -69,23 +92,23 @@
     --popover: 220 26% 10%;
     --popover-foreground: 0 0% 95%;
 
-    /* Primary palette - Orange Peel (adjusted for dark) */
-    --primary: 33 100% 60%; /* Slightly brighter */
+    /* Primary palette - ITS Blue (adjusted for dark) */
+    --primary: 217 91% 65%; /* Slightly brighter for contrast */
     --primary-foreground: 220 26% 8%;
-    --primary-hover: 33 100% 68%;
-    --primary-light: 33 100% 15%;
+    --primary-hover: 221 83% 73%;
+    --primary-light: 221 39% 11%;
 
-    /* Secondary palette - Light Sea Green (adjusted) */
-    --secondary: 177 58% 52%;
+    /* Secondary palette - Professional Cyan (adjusted) */
+    --secondary: 188 86% 53%;
     --secondary-foreground: 220 26% 8%;
-    --secondary-hover: 177 58% 60%;
-    --secondary-light: 177 58% 15%;
+    --secondary-hover: 191 91% 46%;
+    --secondary-light: 191 13% 10%;
 
-    /* Accent palette - Hunyadi Yellow (adjusted) */
-    --accent: 37 100% 76%;
+    /* Accent palette - Emerald Green (adjusted) */
+    --accent: 158 64% 62%;
     --accent-foreground: 220 26% 8%;
-    --accent-hover: 37 100% 84%;
-    --accent-light: 37 100% 12%;
+    --accent-hover: 160 84% 49%;
+    --accent-light: 156 22% 11%;
 
     /* Neutral palette */
     --muted: 220 26% 14%;
@@ -93,24 +116,47 @@
     --muted-hover: 220 26% 18%;
 
     /* Status colors (dark adjusted) */
-    --success: 177 58% 52%;
+    --success: 158 64% 62%;
     --success-foreground: 220 26% 8%;
-    --warning: 37 100% 76%;
+    --warning: 43 96% 66%;
     --warning-foreground: 220 26% 8%;
-    --destructive: 33 100% 60%;
+    --destructive: 0 84% 70%;
     --destructive-foreground: 220 26% 8%;
 
     /* UI elements */
     --border: 220 26% 18%;
     --input: 220 26% 14%;
-    --ring: 33 100% 60%;
+    --ring: 217 91% 65%;
 
     /* Monitoring specific colors (dark) */
-    --critical: 0 84% 65%;
+    --critical: 0 84% 70%;
     --critical-foreground: 220 26% 8%;
-    --online: 142 71% 50%;
-    --offline: 0 84% 65%;
-    --maintenance: 45 93% 52%;
+    --online: 158 64% 62%;
+    --offline: 0 84% 70%;
+    --maintenance: 43 96% 66%;
+
+    /* Traffic status colors (dark) */
+    --traffic-optimal: 158 64% 62%;
+    --traffic-moderate: 43 96% 66%;
+    --traffic-congested: 0 84% 70%;
+    --traffic-blocked: 0 100% 55%;
+
+    /* AI confidence colors (dark) */
+    --ai-confidence-high: 158 64% 62%;
+    --ai-confidence-medium: 43 96% 66%;
+    --ai-confidence-low: 0 84% 70%;
+
+    /* Performance colors (dark) */
+    --performance-excellent: 158 64% 62%;
+    --performance-good: 84 81% 54%;
+    --performance-warning: 43 96% 66%;
+    --performance-poor: 0 84% 70%;
+
+    /* Security status colors (dark) */
+    --security-secure: 158 64% 62%;
+    --security-monitoring: 188 86% 53%;
+    --security-warning: 43 96% 66%;
+    --security-breach: 0 100% 55%;
   }
 
   * {

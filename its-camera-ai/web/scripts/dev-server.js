@@ -32,7 +32,7 @@ function generateMockAlert() {
   const severities = ['low', 'medium', 'high', 'critical']
   const types = ['congestion', 'incident', 'speed_violation', 'camera_offline']
   const locations = ['Main St & 5th Ave', 'I-95 North Entry', 'Downtown Plaza', 'School Zone', 'Bridge Overpass']
-  
+
   return {
     id: Date.now().toString(),
     severity: severities[Math.floor(Math.random() * severities.length)],
@@ -87,12 +87,12 @@ app.get('/api/cameras', (req, res) => {
 // WebSocket handling
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected')
-  
+
   // Send periodic updates
   const interval = setInterval(() => {
     const messageTypes = ['traffic', 'alert', 'camera', 'model']
     const type = messageTypes[Math.floor(Math.random() * messageTypes.length)]
-    
+
     let data
     switch (type) {
       case 'traffic':
@@ -114,19 +114,19 @@ wss.on('connection', (ws) => {
         }
         break
     }
-    
+
     ws.send(JSON.stringify({
       type,
       data,
       timestamp: new Date().toISOString()
     }))
   }, 2000)
-  
+
   ws.on('close', () => {
     console.log('WebSocket client disconnected')
     clearInterval(interval)
   })
-  
+
   ws.on('error', (error) => {
     console.error('WebSocket error:', error)
     clearInterval(interval)

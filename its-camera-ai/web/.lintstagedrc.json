@@ -1,0 +1,24 @@
+{
+  "*.{js,jsx,ts,tsx}": [
+    "prettier --write",
+    "eslint --fix --max-warnings=0"
+  ],
+  "*.{json,md,mdx,yml,yaml}": [
+    "prettier --write"
+  ],
+  "*.{css,scss}": [
+    "prettier --write"
+  ],
+  "messages/*.json": [
+    "node scripts/validate-i18n.js"
+  ],
+  "components/**/*.{ts,tsx}": [
+    "node scripts/validate-components.js"
+  ],
+  "app/**/*.{ts,tsx}": [
+    "node scripts/validate-components.js"
+  ],
+  "**/*.{ts,tsx}": [
+    "bash -c 'tsc --noEmit'"
+  ]
+}

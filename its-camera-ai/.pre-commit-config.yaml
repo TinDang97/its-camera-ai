@@ -191,6 +191,77 @@ repos:
         always_run: true
         stages: [pre-push]
 
+      # ===========================================
+      # FRONTEND QUALITY CHECKS
+      # ===========================================
+
+      # Frontend pre-commit checks (fast)
+      - id: frontend-lint-staged
+        name: Frontend Lint Staged
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm run pre-commit']
+        files: ^web/.*\.(js|jsx|ts|tsx|json|css|md)$
+        pass_filenames: false
+
+      # Frontend type checking
+      - id: frontend-type-check
+        name: Frontend TypeScript Check
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm run type-check']
+        files: ^web/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      # Frontend i18n validation
+      - id: frontend-i18n-validation
+        name: Frontend i18n Validation
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm run validate:i18n']
+        files: ^web/(messages/.*\.json|.*\.(js|jsx|ts|tsx))$
+        pass_filenames: false
+
+      # Frontend accessibility check (pre-push)
+      - id: frontend-accessibility
+        name: Frontend Accessibility Check
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm run validate:accessibility']
+        files: ^web/.*\.(tsx|jsx)$
+        pass_filenames: false
+        stages: [pre-push]
+
+      # Frontend React patterns validation (pre-push)
+      - id: frontend-react-patterns
+        name: Frontend React Patterns Check
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm run validate:react-patterns']
+        files: ^web/.*\.(ts|tsx)$
+        pass_filenames: false
+        stages: [pre-push]
+
+      # Frontend security audit (pre-push)
+      - id: frontend-security-audit
+        name: Frontend Security Audit
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm audit --audit-level=moderate']
+        files: ^web/package.*\.json$
+        pass_filenames: false
+        stages: [pre-push]
+
+      # Frontend bundle size check (pre-push)
+      - id: frontend-bundle-size
+        name: Frontend Bundle Size Check
+        entry: bash
+        language: system
+        args: [-c, 'cd web && npm run build:check && npm run analyze:size']
+        files: ^web/.*\.(js|jsx|ts|tsx|css)$
+        pass_filenames: false
+        stages: [manual]
+
 # Global settings
 default_stages: [pre-commit]
 fail_fast: true

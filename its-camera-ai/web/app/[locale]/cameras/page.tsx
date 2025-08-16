@@ -22,6 +22,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { useOptimisticCameraState, Camera as CameraType } from '@/hooks/useOptimisticCameraState';
 import { useErrorRecovery } from '@/hooks/useErrorRecovery';
 import { useRealTimeAnalytics } from '@/hooks/useRealTimeAnalytics';
+import { ProtectedRoute, AuthenticatedLayout } from '@/components/features/auth';
 
 // Mock initial camera data
 const initialCameras: CameraType[] = [
@@ -516,7 +517,11 @@ const CamerasPage: React.FC = () => {
 export default function CamerasPageWrapper() {
   return (
     <ErrorBoundary level="page">
-      <CamerasPage />
+      <ProtectedRoute requiredPermissions={['camera:view']}>
+        <AuthenticatedLayout showUserMenu={false}>
+          <CamerasPage />
+        </AuthenticatedLayout>
+      </ProtectedRoute>
     </ErrorBoundary>
   );
 }

@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/config';
 import { Header } from '@/components/layout/header';
 import { Toaster } from '@/components/ui/toaster';
+import { Providers } from '@/components/providers/providers';
 import '../globals.css';
 
 export default async function LocaleLayout({
@@ -27,13 +28,15 @@ export default async function LocaleLayout({
   return (
     <html lang={locale}>
       <body>
-        <NextIntlClientProvider messages={messages}>
-          <Header />
-          <main className="min-h-screen bg-background">
-            {children}
-          </main>
-          <Toaster />
-        </NextIntlClientProvider>
+        <Providers>
+          <NextIntlClientProvider messages={messages}>
+            <Header />
+            <main className="min-h-screen bg-background">
+              {children}
+            </main>
+            <Toaster />
+          </NextIntlClientProvider>
+        </Providers>
       </body>
     </html>
   );

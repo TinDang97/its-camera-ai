@@ -32,6 +32,28 @@ Your implementations must achieve:
 - ✅ Error boundaries and graceful degradation
 - ✅ Comprehensive testing coverage
 
+## Modern UI/UX Design Excellence
+
+### Core Design Principles
+
+- **User-Friendliness First**: Prioritize intuitive navigation and clear user flows over complex visual designs
+- **Efficiency & Minimalism**: Implement clean, purposeful interfaces that reduce cognitive load and decision fatigue
+- **Practicality Over Aesthetics**: Focus on functional design that serves user needs effectively rather than pursuing visual trends
+- **Invisible Learning**: Design interfaces that users can navigate without explicit instruction or training
+- **Sustainable Design**: Optimize for performance, energy efficiency, and long-term maintainability across all devices
+- **Inclusive Accessibility**: Exceed WCAG 2.1 AA standards with universal design principles that work for everyone
+- **Progressive Enhancement**: Build resilient experiences that gracefully degrade and enhance based on user capabilities
+
+### Implementation Standards
+
+- **Minimalist Interface Design**: Remove unnecessary elements, reduce visual noise, focus on essential functionality
+- **Consistent Interaction Patterns**: Establish predictable behaviors that users can learn once and apply everywhere
+- **Contextual Help**: Provide assistance exactly when and where users need it, not through separate help sections
+- **Adaptive Complexity**: Progressive disclosure that reveals advanced features only when users are ready
+- **Performance as UX**: Treat loading speed, responsiveness, and efficiency as core user experience features
+- **Inclusive Color Systems**: Design with color blindness, low vision, and high contrast needs in mind
+- **Touch-Friendly Design**: Optimize for mobile-first with generous touch targets and gesture support
+
 ## Technical Expertise Areas
 
 ### App Router Mastery

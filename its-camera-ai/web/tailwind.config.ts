@@ -17,89 +17,105 @@ export default {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
 
-        // ITS Camera AI Brand Colors - Complete Palette
-        'orange-peel': {
-          DEFAULT: '#ff9f1c',
-          100: '#382100',
-          200: '#704100',
-          300: '#a86200',
-          400: '#e08300',
-          500: '#ff9f1c',
-          600: '#ffb347',
-          700: '#ffc675',
-          800: '#ffd9a3',
-          900: '#ffecd1',
+        // ITS Blue System - Professional Monitoring Colors
+        'its-blue': {
+          DEFAULT: '#3b82f6',
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
         },
-        'hunyadi-yellow': {
-          DEFAULT: '#ffbf69',
-          100: '#482900',
-          200: '#915200',
-          300: '#d97b00',
-          400: '#ffa023',
-          500: '#ffbf69',
-          600: '#ffcc89',
-          700: '#ffd9a6',
-          800: '#ffe5c4',
-          900: '#fff2e1',
+        'professional-cyan': {
+          DEFAULT: '#06b6d4',
+          50: '#ecfeff',
+          100: '#cffafe',
+          200: '#a5f3fc',
+          300: '#67e8f9',
+          400: '#22d3ee',
+          500: '#06b6d4',
+          600: '#0891b2',
+          700: '#0e7490',
+          800: '#155e75',
+          900: '#164e63',
         },
-        'mint-green': {
-          DEFAULT: '#cbf3f0',
-          100: '#114844',
-          200: '#229088',
-          300: '#3ad1c7',
-          400: '#81e2db',
-          500: '#cbf3f0',
-          600: '#d4f5f3',
-          700: '#dff7f6',
-          800: '#eafaf9',
-          900: '#f4fcfc',
+        'neutral-slate': {
+          DEFAULT: '#64748b',
+          50: '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          800: '#1e293b',
+          900: '#0f172a',
         },
-        'light-sea-green': {
-          DEFAULT: '#2ec4b6',
-          100: '#092724',
-          200: '#124e48',
-          300: '#1b746c',
-          400: '#249b8f',
-          500: '#2ec4b6',
-          600: '#50d6c9',
-          700: '#7ce0d6',
-          800: '#a7eae4',
-          900: '#d3f5f1',
+
+        // Traffic Status Colors
+        'traffic': {
+          optimal: '#10b981',     // Green - free flow >60 km/h
+          moderate: '#f59e0b',    // Amber - slow flow 30-60 km/h
+          congested: '#ef4444',   // Red - stop-and-go <30 km/h
+          blocked: '#dc2626',     // Dark red - stopped traffic
         },
-        'white': {
-          DEFAULT: '#ffffff',
-          100: '#333333',
-          200: '#666666',
-          300: '#999999',
-          400: '#cccccc',
-          500: '#ffffff',
-          600: '#ffffff',
-          700: '#ffffff',
-          800: '#ffffff',
-          900: '#ffffff',
+
+        // Alert Severity Colors
+        'alert': {
+          info: '#06b6d4',        // Cyan - informational
+          warning: '#f59e0b',     // Amber - warning
+          critical: '#ef4444',    // Red - critical
+          emergency: '#dc2626',   // Dark red - emergency
+        },
+
+        // AI & Performance Colors
+        'ai-confidence': {
+          high: '#10b981',        // Green - >90% confidence
+          medium: '#f59e0b',      // Amber - 70-90% confidence
+          low: '#ef4444',         // Red - <70% confidence
+        },
+        'performance': {
+          excellent: '#10b981',   // Green - <50ms latency
+          good: '#84cc16',        // Light green - 50-100ms latency
+          warning: '#f59e0b',     // Amber - 100-200ms latency
+          poor: '#ef4444',        // Red - >200ms latency
+        },
+
+        // Security Status Colors
+        'security': {
+          secure: '#10b981',      // Green - all systems secure
+          monitoring: '#06b6d4',  // Cyan - active monitoring
+          warning: '#f59e0b',     // Amber - potential issue
+          breach: '#dc2626',      // Dark red - security breach
         },
 
         // Semantic Color Mapping
         primary: {
-          DEFAULT: "hsl(var(--primary))", // Orange Peel #ff9f1c
+          DEFAULT: "hsl(var(--primary))", // ITS Blue #3b82f6
           foreground: "hsl(var(--primary-foreground))",
           hover: "hsl(var(--primary-hover))",
           light: "hsl(var(--primary-light))",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))", // Light Sea Green #2ec4b6
+          DEFAULT: "hsl(var(--secondary))", // Professional Cyan #06b6d4
           foreground: "hsl(var(--secondary-foreground))",
           hover: "hsl(var(--secondary-hover))",
           light: "hsl(var(--secondary-light))",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))", // Hunyadi Yellow #ffbf69
+          DEFAULT: "hsl(var(--accent))", // Emerald Green #10b981
           foreground: "hsl(var(--accent-foreground))",
           hover: "hsl(var(--accent-hover))",
           light: "hsl(var(--accent-light))",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))", // Mint Green #cbf3f0
+          DEFAULT: "hsl(var(--muted))", // Neutral Slate #f1f5f9
           foreground: "hsl(var(--muted-foreground))",
           hover: "hsl(var(--muted-hover))",
         },

@@ -6,8 +6,9 @@ import { CameraGridView } from '@/components/features/camera/CameraGridView'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { IconActivity, IconCamera, IconAlertTriangle, IconTrendingUp } from '@tabler/icons-react'
+import { ProtectedRoute, AuthenticatedLayout } from '@/components/features/auth'
 
-export default function DashboardPage() {
+function DashboardContent() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Page Header */}
@@ -115,5 +116,15 @@ export default function DashboardPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <ProtectedRoute>
+      <AuthenticatedLayout>
+        <DashboardContent />
+      </AuthenticatedLayout>
+    </ProtectedRoute>
   )
 }
