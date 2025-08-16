@@ -151,7 +151,9 @@ vehicle detection, traffic flow analysis, and predictive insights.
 ## Features
 - 🎥 **Real-time Camera Management** - Multi-protocol support (RTSP/HTTP/WebRTC)
 - 🤖 **ML Model Management** - YOLO11 deployment with <100ms inference
+- 🔍 **License Plate Recognition** - Sub-15ms LPR with multi-regional support
 - 📊 **Advanced Analytics** - Traffic patterns, predictions, and heatmaps
+- 🚨 **Watchlist Monitoring** - Real-time alerts for plates of interest
 - 🔒 **Enterprise Security** - JWT auth, MFA, RBAC, API keys
 - 📈 **Scalable Architecture** - Handles 1000+ cameras, 100K+ req/s
 

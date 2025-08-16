@@ -1,0 +1,386 @@
+# Vault Initialization Job for ITS Camera AI
+# Handles Vault initialization, unsealing, and initial secrets setup
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-init
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault-init
+    app.kubernetes.io/component: secrets-management
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vault-init
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault-init
+    app.kubernetes.io/component: secrets-management
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault-init
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault-init
+    app.kubernetes.io/component: secrets-management
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vault-init
+subjects:
+- kind: ServiceAccount
+  name: vault-init
+  namespace: its-camera-ai
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-init-scripts
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault-init
+    app.kubernetes.io/component: secrets-management
+data:
+  init-vault.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Starting Vault initialization for ITS Camera AI..."
+    
+    # Wait for Vault to be ready
+    echo "Waiting for Vault to be ready..."
+    until curl -k -s https://vault:8200/v1/sys/health | grep -q '"initialized":false'; do
+      echo "Waiting for Vault to be ready..."
+      sleep 5
+    done
+    
+    echo "Vault is ready. Checking initialization status..."
+    
+    # Check if Vault is already initialized
+    if curl -k -s https://vault:8200/v1/sys/health | grep -q '"initialized":true'; then
+      echo "Vault is already initialized."
+      exit 0
+    fi
+    
+    echo "Initializing Vault..."
+    
+    # Initialize Vault
+    INIT_OUTPUT=$(curl -k -s -X POST \
+      -H "Content-Type: application/json" \
+      -d '{
+        "secret_shares": 5,
+        "secret_threshold": 3,
+        "recovery_shares": 5,
+        "recovery_threshold": 3
+      }' \
+      https://vault:8200/v1/sys/init)
+    
+    echo "Vault initialized successfully."
+    
+    # Extract keys and root token
+    UNSEAL_KEYS=$(echo "$INIT_OUTPUT" | jq -r '.keys[]')
+    ROOT_TOKEN=$(echo "$INIT_OUTPUT" | jq -r '.root_token')
+    RECOVERY_KEYS=$(echo "$INIT_OUTPUT" | jq -r '.recovery_keys[]')
+    
+    # Store unseal keys and root token in Kubernetes secrets
+    kubectl create secret generic vault-unseal-keys \
+      --from-literal=key1=$(echo "$UNSEAL_KEYS" | sed -n '1p') \
+      --from-literal=key2=$(echo "$UNSEAL_KEYS" | sed -n '2p') \
+      --from-literal=key3=$(echo "$UNSEAL_KEYS" | sed -n '3p') \
+      --from-literal=key4=$(echo "$UNSEAL_KEYS" | sed -n '4p') \
+      --from-literal=key5=$(echo "$UNSEAL_KEYS" | sed -n '5p') \
+      --from-literal=root-token="$ROOT_TOKEN" \
+      -n its-camera-ai \
+      --dry-run=client -o yaml | kubectl apply -f -
+    
+    echo "Unseal keys and root token stored in Kubernetes secret."
+    
+    # Unseal Vault with first 3 keys
+    echo "Unsealing Vault..."
+    echo "$UNSEAL_KEYS" | head -3 | while read key; do
+      curl -k -s -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"key\": \"$key\"}" \
+        https://vault:8200/v1/sys/unseal
+    done
+    
+    echo "Vault unsealed successfully."
+    
+    # Wait for Vault to be fully ready
+    sleep 10
+    
+    # Configure Vault
+    echo "Configuring Vault..."
+    
+    export VAULT_ADDR="https://vault:8200"
+    export VAULT_TOKEN="$ROOT_TOKEN"
+    export VAULT_SKIP_VERIFY=true
+    
+    # Enable audit logging
+    vault audit enable file file_path=/vault/audit/audit.log
+    
+    # Enable KV v2 secrets engine for ITS Camera AI
+    vault secrets enable -path=its-camera-ai kv-v2
+    
+    # Enable Kubernetes auth method
+    vault auth enable kubernetes
+    
+    # Configure Kubernetes auth
+    vault write auth/kubernetes/config \
+      token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+      kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT" \
+      kubernetes_ca_cert="$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)"
+    
+    echo "Vault configuration completed successfully."
+
+  setup-policies.sh: |
+    #!/bin/bash
+    set -e
+    
+    export VAULT_ADDR="https://vault:8200"
+    export VAULT_SKIP_VERIFY=true
+    
+    # Get root token from secret
+    export VAULT_TOKEN=$(kubectl get secret vault-unseal-keys -n its-camera-ai -o jsonpath='{.data.root-token}' | base64 -d)
+    
+    echo "Setting up Vault policies for ITS Camera AI..."
+    
+    # Create policy for API services
+    vault policy write its-camera-ai-api - <<EOF
+    # Allow reading secrets for API services
+    path "its-camera-ai/data/api/*" {
+      capabilities = ["read"]
+    }
+    
+    # Allow reading database credentials
+    path "its-camera-ai/data/database/*" {
+      capabilities = ["read"]
+    }
+    
+    # Allow reading encryption keys
+    path "its-camera-ai/data/encryption/*" {
+      capabilities = ["read"]
+    }
+    
+    # Allow reading external API keys
+    path "its-camera-ai/data/external/*" {
+      capabilities = ["read"]
+    }
+    EOF
+    
+    # Create policy for ML services
+    vault policy write its-camera-ai-ml - <<EOF
+    # Allow reading ML model secrets
+    path "its-camera-ai/data/ml/*" {
+      capabilities = ["read"]
+    }
+    
+    # Allow reading shared encryption keys
+    path "its-camera-ai/data/encryption/*" {
+      capabilities = ["read"]
+    }
+    EOF
+    
+    # Create policy for analytics services
+    vault policy write its-camera-ai-analytics - <<EOF
+    # Allow reading analytics secrets
+    path "its-camera-ai/data/analytics/*" {
+      capabilities = ["read"]
+    }
+    
+    # Allow reading database credentials
+    path "its-camera-ai/data/database/*" {
+      capabilities = ["read"]
+    }
+    EOF
+    
+    # Create role for API services
+    vault write auth/kubernetes/role/its-camera-ai-api \
+      bound_service_account_names=api-service \
+      bound_service_account_namespaces=its-camera-ai \
+      policies=its-camera-ai-api \
+      ttl=24h
+    
+    # Create role for ML services
+    vault write auth/kubernetes/role/its-camera-ai-ml \
+      bound_service_account_names=ml-service \
+      bound_service_account_namespaces=its-camera-ai \
+      policies=its-camera-ai-ml \
+      ttl=24h
+    
+    # Create role for analytics services
+    vault write auth/kubernetes/role/its-camera-ai-analytics \
+      bound_service_account_names=analytics-service \
+      bound_service_account_namespaces=its-camera-ai \
+      policies=its-camera-ai-analytics \
+      ttl=24h
+    
+    echo "Vault policies configured successfully."
+
+  populate-secrets.sh: |
+    #!/bin/bash
+    set -e
+    
+    export VAULT_ADDR="https://vault:8200"
+    export VAULT_SKIP_VERIFY=true
+    
+    # Get root token from secret
+    export VAULT_TOKEN=$(kubectl get secret vault-unseal-keys -n its-camera-ai -o jsonpath='{.data.root-token}' | base64 -d)
+    
+    echo "Populating initial secrets for ITS Camera AI..."
+    
+    # Generate secure random secrets
+    JWT_SECRET=$(openssl rand -base64 32)
+    JWT_REFRESH_SECRET=$(openssl rand -base64 32)
+    ENCRYPTION_KEY=$(openssl rand -base64 32)
+    DB_PASSWORD=$(openssl rand -base64 24)
+    REDIS_PASSWORD=$(openssl rand -base64 24)
+    
+    # Store API secrets
+    vault kv put its-camera-ai/api/jwt \
+      secret_key="$JWT_SECRET" \
+      refresh_secret_key="$JWT_REFRESH_SECRET"
+    
+    # Store database credentials
+    vault kv put its-camera-ai/database/postgres \
+      username="its_user" \
+      password="$DB_PASSWORD" \
+      host="postgresql-cluster" \
+      port="5432" \
+      database="its_camera_ai" \
+      ssl_mode="require"
+    
+    # Store Redis credentials
+    vault kv put its-camera-ai/database/redis \
+      password="$REDIS_PASSWORD" \
+      host="redis-cluster" \
+      port="6379"
+    
+    # Store encryption keys
+    vault kv put its-camera-ai/encryption/master \
+      key="$ENCRYPTION_KEY" \
+      algorithm="AES-256-GCM"
+    
+    # Store ML model secrets (placeholders)
+    vault kv put its-camera-ai/ml/models \
+      model_registry_key="$(openssl rand -base64 24)" \
+      tensorrt_license_key="placeholder" \
+      model_encryption_key="$(openssl rand -base64 32)"
+    
+    # Store external API keys (placeholders)
+    vault kv put its-camera-ai/external/monitoring \
+      prometheus_api_key="placeholder" \
+      grafana_api_key="placeholder" \
+      pagerduty_integration_key="placeholder"
+    
+    # Store analytics secrets
+    vault kv put its-camera-ai/analytics/timescale \
+      username="analytics_user" \
+      password="$(openssl rand -base64 24)" \
+      connection_pool_size="20"
+    
+    echo "Initial secrets populated successfully."
+    echo "Please update placeholder values with actual credentials."
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-init
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault-init
+    app.kubernetes.io/component: secrets-management
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault-init
+        app.kubernetes.io/component: secrets-management
+    spec:
+      serviceAccountName: vault-init
+      restartPolicy: OnFailure
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: vault-init
+        image: alpine/curl:8.4.0
+        imagePullPolicy: IfNotPresent
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        
+        # Resource limits
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        
+        # Command to run initialization
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          # Install required tools
+          apk add --no-cache bash jq kubectl vault
+          
+          # Run initialization scripts
+          chmod +x /scripts/*.sh
+          /scripts/init-vault.sh
+          sleep 30
+          /scripts/setup-policies.sh
+          sleep 10
+          /scripts/populate-secrets.sh
+          
+          echo "Vault initialization completed successfully!"
+        
+        # Volume mounts
+        volumeMounts:
+        - name: vault-init-scripts
+          mountPath: /scripts
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      
+      # Volumes
+      volumes:
+      - name: vault-init-scripts
+        configMap:
+          name: vault-init-scripts
+          defaultMode: 0755
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 100Mi

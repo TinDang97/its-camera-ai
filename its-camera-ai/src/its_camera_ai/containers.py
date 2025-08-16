@@ -356,6 +356,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         settings=config,
     )
 
+    # License Plate Recognition Service - Factory for LPR pipeline
+    lpr_service = providers.Factory(
+        "its_camera_ai.ml.license_plate_recognition.create_lpr_pipeline",
+        region="AUTO",
+        use_gpu=True,
+        enable_caching=True,
+        target_latency_ms=15.0,
+    )
+
     # ML Pipeline Integration Services
 
     # ML Analytics Connector - Singleton for shared processing state

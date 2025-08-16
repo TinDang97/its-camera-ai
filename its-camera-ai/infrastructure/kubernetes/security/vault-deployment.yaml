@@ -1,0 +1,429 @@
+# HashiCorp Vault Deployment for ITS Camera AI
+# Provides secure secrets management with high availability and audit logging
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vault-auth
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+rules:
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["serviceaccounts/token"]
+  verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-auth-binding
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vault-auth
+subjects:
+- kind: ServiceAccount
+  name: vault
+  namespace: its-camera-ai
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+data:
+  vault.hcl: |
+    # Vault Configuration for ITS Camera AI
+    
+    # High Availability Setup
+    storage "postgresql" {
+      connection_url = "postgres://vault_user:${VAULT_DB_PASSWORD}@postgresql-cluster:5432/vault_db?sslmode=require"
+      table          = "vault_kv_store"
+      max_parallel   = 128
+      
+      # Connection pool settings
+      max_idle_connections = 10
+      max_connections      = 20
+      connection_timeout   = "30s"
+    }
+    
+    # Listener Configuration
+    listener "tcp" {
+      address       = "0.0.0.0:8200"
+      tls_cert_file = "/vault/tls/tls.crt"
+      tls_key_file  = "/vault/tls/tls.key"
+      
+      # Security headers
+      tls_min_version = "tls12"
+      tls_cipher_suites = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+      
+      # Performance settings
+      max_request_size = 33554432  # 32MB
+      max_request_duration = "90s"
+    }
+    
+    # Cluster Configuration
+    api_addr     = "https://vault.its-camera-ai.svc.cluster.local:8200"
+    cluster_addr = "https://vault.its-camera-ai.svc.cluster.local:8201"
+    
+    # Enable UI
+    ui = true
+    
+    # Logging
+    log_level = "INFO"
+    log_format = "json"
+    
+    # Disable memory lock for Kubernetes
+    disable_mlock = true
+    
+    # Telemetry
+    telemetry {
+      prometheus_retention_time = "30s"
+      disable_hostname = true
+    }
+    
+    # Entropy Augmentation (for better random number generation)
+    entropy "seal" {
+      mode = "augmentation"
+    }
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-tls
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+type: kubernetes.io/tls
+data:
+  # TLS certificate for Vault (replace with actual certificates)
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t  # placeholder
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t  # placeholder
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-db-credentials
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+type: Opaque
+data:
+  # Database credentials for Vault backend (replace with actual values)
+  VAULT_DB_PASSWORD: dmF1bHRfcGFzc3dvcmQ=  # vault_password (placeholder)
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+    app.kubernetes.io/version: "1.15.4"
+spec:
+  serviceName: vault
+  replicas: 3  # High availability setup
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/component: secrets-management
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8200"
+        prometheus.io/path: "/v1/sys/metrics"
+    spec:
+      serviceAccountName: vault
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+      
+      # Anti-affinity to distribute pods across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: vault
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: vault
+        image: hashicorp/vault:1.15.4
+        imagePullPolicy: IfNotPresent
+        
+        # Resource limits for production
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - IPC_LOCK  # Required for memory locking
+        
+        # Ports
+        ports:
+        - name: api
+          containerPort: 8200
+          protocol: TCP
+        - name: cluster
+          containerPort: 8201
+          protocol: TCP
+        
+        # Environment variables
+        env:
+        - name: VAULT_ADDR
+          value: "https://127.0.0.1:8200"
+        - name: VAULT_API_ADDR
+          value: "https://vault.its-camera-ai.svc.cluster.local:8200"
+        - name: VAULT_CLUSTER_ADDR
+          value: "https://$(POD_IP):8201"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: VAULT_LOG_LEVEL
+          value: "INFO"
+        - name: VAULT_LOG_FORMAT
+          value: "json"
+        - name: VAULT_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vault-db-credentials
+              key: VAULT_DB_PASSWORD
+        
+        # Volume mounts
+        volumeMounts:
+        - name: vault-config
+          mountPath: /vault/config
+          readOnly: true
+        - name: vault-tls
+          mountPath: /vault/tls
+          readOnly: true
+        - name: vault-data
+          mountPath: /vault/data
+        - name: vault-audit
+          mountPath: /vault/audit
+        - name: tmp
+          mountPath: /tmp
+        
+        # Startup command
+        command:
+        - "/bin/sh"
+        - "-ec"
+        args:
+        - |
+          cp /vault/config/vault.hcl /tmp/vault.hcl
+          sed -i "s/\${VAULT_DB_PASSWORD}/$VAULT_DB_PASSWORD/g" /tmp/vault.hcl
+          exec vault server -config=/tmp/vault.hcl
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+            port: 8200
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+            port: 8200
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      
+      # Volumes
+      volumes:
+      - name: vault-config
+        configMap:
+          name: vault-config
+      - name: vault-tls
+        secret:
+          secretName: vault-tls
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: vault-audit
+        emptyDir: {}
+  
+  # Persistent volume claim template
+  volumeClaimTemplates:
+  - metadata:
+      name: vault-data
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/component: secrets-management
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd  # Use high-performance storage
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8200"
+    prometheus.io/path: "/v1/sys/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: api
+    port: 8200
+    targetPort: 8200
+    protocol: TCP
+  - name: cluster
+    port: 8201
+    targetPort: 8201
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: vault
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-headless
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: api
+    port: 8200
+    targetPort: 8200
+    protocol: TCP
+  - name: cluster
+    port: 8201
+    targetPort: 8201
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: vault
+
+---
+# Network Policy for Vault
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-network-policy
+  namespace: its-camera-ai
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets-management
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  # Allow API access from application pods
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: its-camera-ai
+    ports:
+    - protocol: TCP
+      port: 8200
+  
+  # Allow cluster communication between Vault instances
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: vault
+    ports:
+    - protocol: TCP
+      port: 8201
+  
+  egress:
+  # Allow database connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgresql
+    ports:
+    - protocol: TCP
+      port: 5432
+  
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Allow cluster communication
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: vault
+    ports:
+    - protocol: TCP
+      port: 8201

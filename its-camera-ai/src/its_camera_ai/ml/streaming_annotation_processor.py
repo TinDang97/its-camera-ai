@@ -29,7 +29,11 @@ import cv2
 import numpy as np
 from pydantic import BaseModel, Field
 
+from ..core.exceptions import StreamProcessingError
+from ..core.logging import get_logger
 from .core_vision_engine import CoreVisionEngine, DetectionResult, VisionConfig
+
+logger = get_logger(__name__)
 
 # Optional import for ultra-fast engine (may not be available in all environments)
 try:
@@ -40,10 +44,6 @@ except ImportError as e:
     UltraFastYOLOEngine = None
     UltraFastYOLOConfig = None
     ULTRA_FAST_AVAILABLE = False
-from ..core.exceptions import StreamProcessingError
-from ..core.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 @dataclass

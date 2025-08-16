@@ -810,3 +810,23 @@ def get_background_task_manager(
         BackgroundTaskManager: Task manager instance
     """
     return BackgroundTaskManager(cache_service=cache_service)
+
+
+# ============================
+# ML Service Dependencies
+# ============================
+
+
+@inject
+async def get_lpr_pipeline(
+    lpr_service = Provide[ApplicationContainer.services.lpr_service],
+):
+    """Get License Plate Recognition pipeline with dependency injection.
+    
+    Args:
+        lpr_service: LPR service from DI container
+        
+    Returns:
+        LicensePlateRecognitionPipeline: LPR pipeline instance
+    """
+    return lpr_service

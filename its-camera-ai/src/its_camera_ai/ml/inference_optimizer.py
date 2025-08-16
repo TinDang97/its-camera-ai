@@ -37,6 +37,42 @@ import torch
 from torch.cuda.amp import autocast
 from ultralytics import YOLO
 
+# Import new optimization modules (with fallbacks)
+try:
+    from .tensorrt_production_optimizer import (
+        ProductionTensorRTEngine,
+        ProductionTensorRTOptimizer,
+        TensorRTConfig,
+    )
+    ENHANCED_TRT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced TensorRT optimizer not available: {e}")
+    ENHANCED_TRT_AVAILABLE = False
+    ProductionTensorRTEngine = None
+    ProductionTensorRTOptimizer = None
+    TensorRTConfig = None
+
+try:
+    from .enhanced_memory_manager import MultiGPUMemoryManager, TensorPoolConfig
+    ENHANCED_MEMORY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced memory manager not available: {e}")
+    ENHANCED_MEMORY_AVAILABLE = False
+    MultiGPUMemoryManager = None
+    TensorPoolConfig = None
+
+try:
+    from .advanced_batching_system import (
+        AdvancedDynamicBatcher as NewAdvancedDynamicBatcher,
+    )
+    from .advanced_batching_system import BatchConfiguration
+    ENHANCED_BATCHING_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced batching system not available: {e}")
+    ENHANCED_BATCHING_AVAILABLE = False
+    NewAdvancedDynamicBatcher = None
+    BatchConfiguration = None
+
 try:
     import pycuda.driver as cuda
     import tensorrt as trt
@@ -1777,21 +1813,71 @@ class OptimizedInferenceEngine:
     def __init__(self, config: InferenceConfig):
         self.config = config
         self.models: dict[int, Any] = {}
+        self.tensorrt_engines: dict[int, Any] = {}  # ProductionTensorRTEngine when available
         self.current_device: int = 0
 
-        # Performance components
+        # Enhanced performance components using new optimization modules
         if config.device_ids:
-            self.memory_manager = GPUMemoryManager(
-                config.device_ids, config.memory_fraction
-            )
+            # Use enhanced memory manager with tensor pools if available
+            if ENHANCED_MEMORY_AVAILABLE:
+                tensor_pool_config = TensorPoolConfig(
+                    max_tensors_per_shape=16,
+                    max_total_tensors=500,
+                    max_memory_fraction=config.memory_fraction,
+                    enable_pinned_memory=True,
+                    enable_memory_profiling=True
+                )
+                self.memory_manager = MultiGPUMemoryManager(config.device_ids, tensor_pool_config)
+            else:
+                # Fallback to legacy memory manager
+                self.memory_manager = GPUMemoryManager(
+                    config.device_ids, config.memory_fraction
+                )
+
+            # Keep legacy stream manager for compatibility
             self.stream_manager = CUDAStreamManager(config.device_ids)
         else:
             self.memory_manager = None
             self.stream_manager = None
 
+        # Use enhanced dynamic batcher if available
+        if ENHANCED_BATCHING_AVAILABLE:
+            batch_config = BatchConfiguration(
+                min_batch_size=1,  # Default min batch size
+                max_batch_size=config.max_batch_size,
+                optimal_batch_size=config.batch_size,
+                max_wait_time_ms=config.batch_timeout_ms,
+                enable_adaptive_batching=True,
+                latency_target_ms=75.0,  # Target sub-75ms latency
+                throughput_target_fps=100.0
+            )
+            self.enhanced_batcher = NewAdvancedDynamicBatcher(batch_config)
+        else:
+            self.enhanced_batcher = None
+
+        # Legacy batcher for compatibility
         self.batcher = AdvancedDynamicBatcher(config)
 
+        # Enhanced TensorRT optimizer
         if config.backend == OptimizationBackend.TENSORRT:
+            if ENHANCED_TRT_AVAILABLE:
+                self.tensorrt_config = TensorRTConfig(
+                    input_height=640,
+                    input_width=640,
+                    max_batch_size=config.max_batch_size,
+                    use_fp16=True,
+                    use_int8=False,  # Will be enabled with calibration data
+                    workspace_size_gb=8,
+                    enable_tactic_sources=True,
+                    enable_sparse_weights=True,
+                    enable_timing_cache=True
+                )
+                self.tensorrt_optimizer = ProductionTensorRTOptimizer(self.tensorrt_config)
+            else:
+                self.tensorrt_config = None
+                self.tensorrt_optimizer = None
+
+            # Legacy optimizer for compatibility
             self.optimizer = AdvancedTensorRTOptimizer(config)
 
         # Performance tracking
@@ -1816,16 +1902,20 @@ class OptimizedInferenceEngine:
 
     async def initialize(self, model_path: Path) -> None:
         """Initialize the inference engine with optimized models."""
-        logger.info("Initializing optimized inference engine...")
+        logger.info("Initializing optimized inference engine with enhanced components...")
 
         # Load models on each GPU
         for device_id in self.config.device_ids:
             await self._load_model_on_device(model_path, device_id)
 
-        # Start dynamic batcher
+        # Start enhanced dynamic batcher if available
+        if self.enhanced_batcher:
+            await self.enhanced_batcher.start()
+
+        # Start legacy batcher for compatibility
         await self.batcher.start()
 
-        logger.info(f"Inference engine initialized with {len(self.models)} models")
+        logger.info(f"Inference engine initialized with {len(self.models)} models and {len(self.tensorrt_engines)} TensorRT engines")
 
     async def _load_model_on_device(self, model_path: Path, device_id: int) -> None:
         """Load and optimize model on specific GPU device."""
@@ -1833,11 +1923,28 @@ class OptimizedInferenceEngine:
         torch.cuda.set_device(device_id)
 
         if self.config.backend == OptimizationBackend.TENSORRT and TRT_AVAILABLE:
-            # Load TensorRT optimized model
+            # Use enhanced TensorRT optimization
             trt_path = model_path.with_suffix(".trt")
-            if not trt_path.exists():
-                trt_path = self.optimizer.compile_model(model_path, trt_path)
 
+            if not trt_path.exists():
+                # First convert to ONNX if needed
+                onnx_path = model_path.with_suffix(".onnx")
+                if not onnx_path.exists():
+                    logger.info("Converting YOLO11 model to ONNX...")
+                    model = YOLO(str(model_path))
+                    model.export(format="onnx", imgsz=640, dynamic=True, opset=16, half=True)
+
+                # Optimize with production TensorRT optimizer
+                if self.tensorrt_optimizer:
+                    logger.info(f"Optimizing model with enhanced TensorRT for device {device_id}...")
+                    await self.tensorrt_optimizer.optimize_model(str(onnx_path), str(trt_path))
+
+            # Load enhanced TensorRT engine if available
+            if ENHANCED_TRT_AVAILABLE and self.tensorrt_config:
+                engine = ProductionTensorRTEngine(self.tensorrt_config, str(trt_path))
+                self.tensorrt_engines[device_id] = engine
+
+            # Also keep legacy TensorRT model for compatibility
             model = self._load_tensorrt_model(trt_path, device)
         else:
             # Load PyTorch model with optimization
@@ -1845,13 +1952,16 @@ class OptimizedInferenceEngine:
             model.to(device)
 
             # JIT compile for better performance
-            model.model = torch.jit.script(model.model)
+            try:
+                model.model = torch.jit.script(model.model)
+            except Exception as e:
+                logger.warning(f"JIT compilation failed: {e}, using regular model")
 
             # Set to evaluation mode
             model.model.eval()
 
         self.models[device_id] = model
-        logger.info(f"Model loaded on {device}")
+        logger.info(f"Enhanced model loaded on {device} with TensorRT engine: {device_id in self.tensorrt_engines}")
 
     def _load_tensorrt_model(self, engine_path: Path, device: str) -> Any:
         """Load TensorRT engine."""
@@ -1875,6 +1985,56 @@ class OptimizedInferenceEngine:
         context = engine.create_execution_context()
 
         return TensorRTModel(engine, context, device)
+
+    async def predict_single_enhanced(
+        self, frame: np.ndarray, frame_id: str, camera_id: str = "unknown"
+    ) -> DetectionResult:
+        """Enhanced single frame prediction using optimized TensorRT engines."""
+        start_time = time.time()
+
+        # Select optimal device based on load
+        device_id = self._select_optimal_device()
+        if device_id is None:
+            raise RuntimeError("No GPU devices available for inference")
+
+        # Use enhanced TensorRT engine if available
+        if device_id in self.tensorrt_engines:
+            engine = self.tensorrt_engines[device_id]
+
+            # Preprocessing with enhanced memory management
+            preprocess_start = time.time()
+            input_data = self._preprocess_frame_for_tensorrt(frame, device_id)
+            preprocess_time = (time.time() - preprocess_start) * 1000
+
+            # Enhanced TensorRT inference
+            inference_start = time.time()
+            predictions = await engine.infer_async(input_data)
+            inference_time = (time.time() - inference_start) * 1000
+
+            # Post-processing
+            postprocess_start = time.time()
+            result = self._postprocess_tensorrt_predictions(
+                predictions,
+                frame_id,
+                camera_id,
+                inference_time,
+                preprocess_time,
+                start_time,
+            )
+            postprocess_time = (time.time() - postprocess_start) * 1000
+
+            result.postprocessing_time_ms = postprocess_time
+            result.total_time_ms = (time.time() - start_time) * 1000
+
+            # Record performance for the enhanced TensorRT engine
+            self.inference_times.append(result.total_time_ms)
+            if len(self.inference_times) > 1000:
+                self.inference_times = self.inference_times[-1000:]
+
+            return result
+        else:
+            # Fallback to legacy prediction
+            return await self.predict_single(frame, frame_id, camera_id)
 
     async def predict_single(
         self, frame: np.ndarray, frame_id: str, camera_id: str = "unknown"
@@ -2070,6 +2230,125 @@ class OptimizedInferenceEngine:
         batch_tensor = torch.cat(batch_tensors, dim=0)
 
         return batch_tensor
+
+    def _preprocess_frame_for_tensorrt(
+        self, frame: np.ndarray, device_id: int
+    ) -> np.ndarray:
+        """Enhanced preprocessing for TensorRT engines with memory optimization."""
+        # Resize with letterboxing to maintain aspect ratio
+        h, w = frame.shape[:2]
+        target_h, target_w = 640, 640  # YOLO11 standard input size
+
+        scale = min(target_h / h, target_w / w)
+        new_h, new_w = int(h * scale), int(w * scale)
+
+        # Resize frame
+        if scale != 1:
+            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        # Create padded canvas
+        pad_h = (target_h - new_h) // 2
+        pad_w = (target_w - new_w) // 2
+
+        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+        padded[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = frame
+
+        # Convert to CHW format and normalize for TensorRT
+        processed = padded.transpose(2, 0, 1).astype(np.float32) / 255.0
+
+        # Add batch dimension for TensorRT engine
+        processed = np.expand_dims(processed, axis=0)
+
+        return processed
+
+    def _postprocess_tensorrt_predictions(
+        self,
+        predictions: np.ndarray,
+        frame_id: str,
+        camera_id: str,
+        inference_time: float,
+        preprocess_time: float,
+        start_time: float,
+    ) -> DetectionResult:
+        """Enhanced post-processing for TensorRT predictions."""
+        # TensorRT output format: [batch_size, num_detections, 85]
+        # Where 85 = [x, y, w, h, confidence, class_probabilities...]
+
+        detections = []
+
+        if predictions.size > 0:
+            # Remove batch dimension
+            batch_predictions = predictions[0] if len(predictions.shape) == 3 else predictions
+
+            # Apply confidence threshold
+            confidence_mask = batch_predictions[:, 4] > self.config.conf_threshold
+            filtered_predictions = batch_predictions[confidence_mask]
+
+            if len(filtered_predictions) > 0:
+                # Extract bounding boxes and scores
+                boxes = filtered_predictions[:, :4]  # x, y, w, h
+                scores = filtered_predictions[:, 4]  # confidence
+                class_scores = filtered_predictions[:, 5:]  # class probabilities
+
+                # Get class IDs
+                class_ids = np.argmax(class_scores, axis=1)
+
+                # Convert to Detection objects
+                for i, (box, score, class_id) in enumerate(zip(boxes, scores, class_ids, strict=False)):
+                    x, y, w, h = box
+
+                    # Convert from center format to corner format
+                    x1 = float(x - w / 2)
+                    y1 = float(y - h / 2)
+                    x2 = float(x + w / 2)
+                    y2 = float(y + h / 2)
+
+                    detection = Detection(
+                        bbox=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2),
+                        confidence=float(score),
+                        class_id=int(class_id),
+                        class_name=self._get_class_name(int(class_id)),
+                        track_id=None,  # Will be assigned by tracker
+                    )
+                    detections.append(detection)
+
+        return DetectionResult(
+            frame_id=frame_id,
+            camera_id=camera_id,
+            detections=detections,
+            inference_time_ms=inference_time,
+            preprocessing_time_ms=preprocess_time,
+            postprocessing_time_ms=0.0,  # Will be set by caller
+            total_time_ms=0.0,  # Will be set by caller
+            timestamp=start_time,
+            model_info={
+                "backend": "enhanced_tensorrt",
+                "precision": "fp16" if self.tensorrt_config.use_fp16 else "fp32",
+                "device": f"cuda:{self._select_optimal_device()}",
+            },
+        )
+
+    def _get_class_name(self, class_id: int) -> str:
+        """Get class name for given class ID."""
+        # YOLO11 COCO class names for traffic monitoring
+        class_names = [
+            "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
+            "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+            "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
+            "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+            "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
+            "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+            "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+            "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+            "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+            "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+            "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
+            "toothbrush"
+        ]
+
+        if 0 <= class_id < len(class_names):
+            return class_names[class_id]
+        return f"unknown_{class_id}"
 
     def _extract_single_prediction(
         self, batch_predictions: Any, index: int
@@ -2347,11 +2626,117 @@ class OptimizedInferenceEngine:
 
     async def cleanup(self) -> None:
         """Clean up resources."""
+        # Stop both enhanced and legacy batchers
+        if self.enhanced_batcher:
+            await self.enhanced_batcher.stop()
         await self.batcher.stop()
+
+        # Clean up enhanced TensorRT engines
+        for engine in self.tensorrt_engines.values():
+            engine.cleanup()
+
+        # Clean up memory and stream managers
         if self.memory_manager:
             self.memory_manager.cleanup()
         if self.stream_manager:
             self.stream_manager.cleanup()
+
+    async def get_enhanced_performance_stats(self) -> dict[str, Any]:
+        """Get comprehensive performance statistics for enhanced components."""
+        stats = {
+            'enhanced_tensorrt_engines': len(self.tensorrt_engines),
+            'total_models': len(self.models),
+            'enhanced_batcher_stats': self.enhanced_batcher.get_stats() if self.enhanced_batcher else None,
+        }
+
+        # Get TensorRT performance stats
+        tensorrt_stats = {}
+        for device_id, engine in self.tensorrt_engines.items():
+            device_stats = engine.get_performance_stats()
+            tensorrt_stats[f'device_{device_id}'] = device_stats
+
+        stats['tensorrt_performance'] = tensorrt_stats
+
+        # Get memory manager stats
+        if ENHANCED_MEMORY_AVAILABLE and isinstance(self.memory_manager, MultiGPUMemoryManager):
+            stats['memory_manager_stats'] = self.memory_manager.get_overall_stats()
+
+        # Overall performance summary
+        if self.inference_times:
+            stats['overall_performance'] = {
+                'avg_latency_ms': float(np.mean(self.inference_times)),
+                'min_latency_ms': float(np.min(self.inference_times)),
+                'max_latency_ms': float(np.max(self.inference_times)),
+                'p95_latency_ms': float(np.percentile(self.inference_times, 95)),
+                'p99_latency_ms': float(np.percentile(self.inference_times, 99)),
+                'total_inferences': len(self.inference_times),
+                'target_achieved': float(np.mean(self.inference_times)) < 75.0
+            }
+
+        return stats
+
+    async def benchmark_enhanced_vs_legacy(self, test_frames: list[np.ndarray], iterations: int = 100) -> dict[str, Any]:
+        """Benchmark enhanced vs legacy inference performance."""
+        logger.info(f"Benchmarking enhanced vs legacy inference over {iterations} iterations...")
+
+        enhanced_times = []
+        legacy_times = []
+
+        # Warmup
+        for i in range(10):
+            frame = test_frames[i % len(test_frames)]
+            if self.tensorrt_engines:
+                await self.predict_single_enhanced(frame, f"warmup_{i}")
+            await self.predict_single(frame, f"warmup_{i}")
+
+        # Benchmark enhanced inference
+        for i in range(iterations):
+            frame = test_frames[i % len(test_frames)]
+            start_time = time.time()
+
+            if self.tensorrt_engines:
+                await self.predict_single_enhanced(frame, f"enhanced_{i}")
+                enhanced_times.append((time.time() - start_time) * 1000)
+
+        # Benchmark legacy inference
+        for i in range(iterations):
+            frame = test_frames[i % len(test_frames)]
+            start_time = time.time()
+
+            await self.predict_single(frame, f"legacy_{i}")
+            legacy_times.append((time.time() - start_time) * 1000)
+
+        # Calculate improvements
+        enhanced_avg = np.mean(enhanced_times) if enhanced_times else float('inf')
+        legacy_avg = np.mean(legacy_times)
+        improvement_percent = ((legacy_avg - enhanced_avg) / legacy_avg * 100) if enhanced_times else 0
+
+        results = {
+            'enhanced_performance': {
+                'avg_latency_ms': enhanced_avg,
+                'min_latency_ms': float(np.min(enhanced_times)) if enhanced_times else 0,
+                'max_latency_ms': float(np.max(enhanced_times)) if enhanced_times else 0,
+                'p95_latency_ms': float(np.percentile(enhanced_times, 95)) if enhanced_times else 0,
+                'iterations': len(enhanced_times)
+            },
+            'legacy_performance': {
+                'avg_latency_ms': legacy_avg,
+                'min_latency_ms': float(np.min(legacy_times)),
+                'max_latency_ms': float(np.max(legacy_times)),
+                'p95_latency_ms': float(np.percentile(legacy_times, 95)),
+                'iterations': len(legacy_times)
+            },
+            'improvement_metrics': {
+                'latency_improvement_percent': improvement_percent,
+                'target_75ms_achieved': enhanced_avg < 75.0 if enhanced_times else False,
+                'speedup_factor': legacy_avg / enhanced_avg if enhanced_times and enhanced_avg > 0 else 1.0
+            }
+        }
+
+        logger.info(f"Benchmark complete: {improvement_percent:.1f}% improvement, "
+                   f"enhanced avg: {enhanced_avg:.2f}ms, legacy avg: {legacy_avg:.2f}ms")
+
+        return results
 
 
 # Model Selection Utility Functions

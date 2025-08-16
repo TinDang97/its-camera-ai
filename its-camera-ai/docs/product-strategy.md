@@ -216,56 +216,77 @@ The AI Camera Traffic Monitoring System represents a next-generation computer vi
 
 ## Revenue Model & Pricing Strategy
 
-### Tiered SaaS Pricing Model
+### Revised Tiered SaaS Pricing Model (2025 Update)
 
-#### Starter Edition - $299/camera/month
+#### Starter Edition - $49/camera/month
 - Real-time vehicle detection and tracking
 - Basic traffic density analysis
 - Standard dashboard and alerts
 - Email support
 - Up to 10 cameras per deployment
+- Mobile app access
 
-#### Professional Edition - $599/camera/month
+#### Professional Edition - $99/camera/month
 - All Starter features plus:
 - Advanced analytics and reporting
 - Speed calculation and PCU analysis
+- License plate recognition
 - Custom polygon zone configuration
 - API access and integrations
 - Priority phone/chat support
 - Up to 50 cameras per deployment
 
-#### Enterprise Edition - $1,299/camera/month
+#### Enterprise Edition - $199/camera/month
 - All Professional features plus:
 - Multi-site deployment management
 - Online learning and model customization
 - Advanced predictive analytics
+- Legacy system integrations
 - Dedicated customer success manager
 - 24/7 technical support
 - Unlimited cameras
 - Custom integrations and white-labeling
 
-#### Edge Deployment Add-on - $2,999/deployment
-- On-premises edge computing deployment
-- Reduced bandwidth requirements
+#### Platform Management Fee - $999-$4,999/month
+- Unlimited cameras (Enterprise only)
+- Multi-tenant management portal
+- Advanced user management
+- Custom reporting and analytics
+- Priority feature development
+
+#### Edge Deployment Package - $25,000/deployment
+- On-premises NVIDIA Jetson deployment
+- Reduced bandwidth requirements (90% reduction)
 - Enhanced privacy and security
 - Offline operation capabilities
+- Professional installation and training
 
-### Revenue Projections
+### Revised Revenue Projections (2025 Update)
 
-**Year 1**: $2.5M ARR
-- 150 cameras deployed across 25 customers
-- Average selling price: $450/camera/month
+**Year 1**: $1.2M ARR
+- 400 cameras deployed across 40 customers
+- Average selling price: $85/camera/month (weighted average)
+- Platform fees: $40K/month from Enterprise customers
 - 85% gross margin
 
-**Year 2**: $12M ARR
-- 800 cameras deployed across 100 customers
-- Average selling price: $525/camera/month (mix shift to higher tiers)
-- 88% gross margin
+**Year 2**: $5.5M ARR
+- 1,500 cameras deployed across 150 customers
+- Average selling price: $95/camera/month (mix shift to Professional)
+- Platform fees: $180K/month
+- 87% gross margin
 
-**Year 3**: $35M ARR
-- 2,200 cameras deployed across 250 customers
-- Average selling price: $580/camera/month
-- 90% gross margin
+**Year 3**: $12M ARR
+- 3,200 cameras deployed across 350 customers
+- Average selling price: $105/camera/month
+- Platform fees: $420K/month
+- Edge deployment revenue: $2M/year
+- 89% gross margin
+
+**Pricing Model Benefits**:
+- 70% price reduction increases addressable market by 3-5x
+- Platform fees provide recurring revenue from large deployments
+- Edge deployment creates high-value service revenue stream
+- More competitive with existing solutions (Axis, Genetec)
 
 ## Strategic Partnerships
 

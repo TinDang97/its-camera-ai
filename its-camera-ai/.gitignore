@@ -442,3 +442,4 @@ pretrained/
 reports/*
 web/node_modules/*
 web/.next/*
+*.pt

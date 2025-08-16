@@ -35,6 +35,7 @@ from .routers import (
     auth,
     cameras,
     health,
+    license_plate,
     models,
     realtime,
     system,
@@ -78,6 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "src.its_camera_ai.api.routers.health",
                 "src.its_camera_ai.api.routers.models",
                 "src.its_camera_ai.api.routers.realtime",
+                "src.its_camera_ai.api.routers.license_plate",
                 "src.its_camera_ai.api.dependencies",
                 "src.its_camera_ai.cli.commands.auth",
                 "src.its_camera_ai.cli.commands.services",
@@ -300,6 +302,8 @@ def _include_routers(app: FastAPI) -> None:
     app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 
     app.include_router(realtime.router, prefix="/api/v1/realtime", tags=["realtime"])
+
+    app.include_router(license_plate.router, prefix="/api/v1/lpr", tags=["license-plate"])
 
 
 # Create the main app instance with dependency injection
