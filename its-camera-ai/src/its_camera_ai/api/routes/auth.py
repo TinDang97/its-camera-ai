@@ -11,7 +11,7 @@ Provides comprehensive authentication endpoints:
 - Security audit endpoints
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis.asyncio as redis
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -94,6 +94,7 @@ class LoginResponse(BaseModel):
                 },
             }
         }
+    }
 
 
 class RegisterRequest(BaseModel):
@@ -126,6 +127,7 @@ class RegisterRequest(BaseModel):
                 "full_name": "John Doe",
             }
         }
+    }
 
 
 class RegisterResponse(BaseModel):
@@ -143,6 +145,7 @@ class RegisterResponse(BaseModel):
                 "user_id": "123e4567-e89b-12d3-a456-426614174000",
             }
         }
+    }
 
 
 class RefreshTokenRequest(BaseModel):
@@ -154,6 +157,7 @@ class RefreshTokenRequest(BaseModel):
         "json_schema_extra": {
             "example": {"refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."}
         }
+    }
 
 
 class ChangePasswordRequest(BaseModel):
@@ -182,6 +186,7 @@ class ChangePasswordRequest(BaseModel):
                 "new_password": "NewSecureP@ssw0rd2024!",
             }
         }
+    }
 
 
 class MFASetupRequest(BaseModel):
@@ -189,8 +194,7 @@ class MFASetupRequest(BaseModel):
 
     method: MFAMethod = Field(default=MFAMethod.TOTP)
 
-    model_config = {
-        "json_schema_extra": {"example": {"method": "totp"}}
+    model_config = {"json_schema_extra": {"example": {"method": "totp"}}}
 
 
 class MFAVerifyRequest(BaseModel):
@@ -201,6 +205,7 @@ class MFAVerifyRequest(BaseModel):
 
     model_config = {
         "json_schema_extra": {"example": {"code": "123456", "method": "totp"}}
+    }
 
 
 class UserProfileResponse(BaseModel):
@@ -234,6 +239,7 @@ class UserProfileResponse(BaseModel):
                 "created_at": "2024-01-01T00:00:00Z",
             }
         }
+    }
 
 
 # ============================
@@ -379,9 +385,9 @@ async def login(
                 success=True,
                 message="Login successful",
                 access_token=auth_result.access_token,
-                refresh_token=auth_result.refresh_token
-                if not request.remember_me
-                else None,
+                refresh_token=(
+                    auth_result.refresh_token if not request.remember_me else None
+                ),
                 expires_in=auth_result.expires_in,
                 user=user_info,
             )
@@ -458,35 +464,37 @@ async def register(
 
         # Send verification email
         from ...services.email_service import EmailService
-        
+
         settings = get_settings()
         email_service = EmailService(settings)
-        
+
         # Generate verification token
         import secrets
+
         verification_token = secrets.token_urlsafe(32)
-        
+
         # Store verification token in cache
         cache_key = f"email_verification:{verification_token}"
         verification_data = {
             "user_id": user.id,
             "email": request.email,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(UTC).isoformat(),
         }
-        
+
         # Store for 24 hours
         redis_client = redis.from_url(settings.redis.url)
         cache = CacheService(redis_client)
         await cache.set_json(cache_key, verification_data, 24 * 3600)
-        
+
         # Send email in background
         import asyncio
+
         asyncio.create_task(
             email_service.send_verification_email(
                 to_email=request.email,
                 username=request.username,
                 verification_token=verification_token,
-                full_name=request.full_name
+                full_name=request.full_name,
             )
         )
 
@@ -498,11 +506,11 @@ async def register(
 
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during registration",
-        )
+        ) from e
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -523,12 +531,14 @@ async def refresh_token(
         return token_pair
 
     except AuthenticationError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)
+        ) from e
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Token refresh failed",
-        )
+        ) from e
 
 
 @router.post("/logout")

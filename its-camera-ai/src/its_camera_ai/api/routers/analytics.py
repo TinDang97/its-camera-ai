@@ -11,18 +11,18 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
-from ...core.database import get_database_session
 from ...core.logging import get_logger
 from ...models.user import User
 from ...services.cache import CacheService
 from ..dependencies import (
-    RateLimiterDI,
     get_alert_service,
     get_analytics_service,
     get_cache_service,
     get_current_user,
-    get_prediction_service,
-    rate_limit_normal,
+    get_database_session,
+    get_historical_analytics_service,
+    get_incident_management_service,
+    get_realtime_analytics_service,
     require_permissions,
 )
 from ..schemas.analytics import (
@@ -36,36 +36,25 @@ from ..schemas.analytics import (
     HistoricalQuery,
     IncidentAlert,
     IncidentType,
-    PredictionData,
     PredictionResponse,
     ReportGenerationRequest,
     ReportRequest,
     ReportResponse,
     Severity,
-    TrafficMetrics,
     TrendAnalysisResponse,
     VehicleClass,
     VehicleCount,
 )
-from ..schemas.common import PaginatedResponse
+from ..schemas.common import PaginatedResponse, TimeRange
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Rate limiters
-report_rate_limit = RateLimiterDI(calls=10, period=3600)  # 10 reports per hour
-query_rate_limit = RateLimiterDI(calls=100, period=300)  # 100 queries per 5 min
-dashboard_rate_limit = RateLimiterDI(calls=200, period=300)  # 200 dashboard calls per 5 min
-prediction_rate_limit = RateLimiterDI(calls=50, period=300)  # 50 prediction calls per 5 min
-heatmap_rate_limit = RateLimiterDI(calls=30, period=300)  # 30 heatmap calls per 5 min
+# Rate limiting is handled by proper middleware configuration
 
-# Simulated data stores
+# Legacy data stores - TODO: Remove after full service migration
 incidents_db: dict[str, dict[str, Any]] = {}
 reports_db: dict[str, dict[str, Any]] = {}
-vehicle_counts_db: list[dict[str, Any]] = []
-traffic_metrics_db: dict[str, dict[str, Any]] = {}
-analytics_cache: dict[str, dict[str, Any]] = {}
-prediction_cache: dict[str, dict[str, Any]] = {}
 
 
 async def generate_mock_vehicle_counts(
@@ -178,87 +167,22 @@ async def generate_mock_incidents(
 async def get_real_time_analytics(
     camera_id: str,
     current_user: User = Depends(get_current_user),
-    cache: CacheService = Depends(get_cache_service),
+    realtime_analytics_service: Any = Depends(get_realtime_analytics_service),
 ) -> AnalyticsResponse:
-    """Get real-time analytics for a camera.
+    """Get real-time analytics for a camera using the service layer.
 
     Args:
         camera_id: Camera identifier
         current_user: Current user
-        cache: Cache service
+        realtime_analytics_service: Real-time analytics service
 
     Returns:
         AnalyticsResponse: Real-time analytics data
     """
     try:
-        # Check cache first
-        cache_key = f"analytics:realtime:{camera_id}"
-        cached_data = await cache.get_json(cache_key)
-        if cached_data:
-            return AnalyticsResponse(**cached_data)
-
-        # Generate current analytics (in production, this would query real data)
-        now = datetime.now(UTC)
-        last_5_min = now - timedelta(minutes=5)
-
-        # Get recent vehicle counts
-        vehicle_counts = await generate_mock_vehicle_counts(camera_id, last_5_min, now)
-
-        # Generate traffic metrics
-        import random
-
-        traffic_metrics = TrafficMetrics(
-            camera_id=camera_id,
-            period_start=last_5_min,
-            period_end=now,
-            total_vehicles=sum(vc.count for vc in vehicle_counts),
-            vehicle_breakdown={
-                VehicleClass.CAR: sum(
-                    vc.count
-                    for vc in vehicle_counts
-                    if vc.vehicle_class == VehicleClass.CAR
-                ),
-                VehicleClass.TRUCK: sum(
-                    vc.count
-                    for vc in vehicle_counts
-                    if vc.vehicle_class == VehicleClass.TRUCK
-                ),
-                VehicleClass.VAN: sum(
-                    vc.count
-                    for vc in vehicle_counts
-                    if vc.vehicle_class == VehicleClass.VAN
-                ),
-            },
-            directional_flow={
-                "north": random.randint(10, 50),
-                "south": random.randint(10, 50),
-                "east": random.randint(5, 30),
-                "west": random.randint(5, 30),
-            },
-            avg_speed=random.uniform(45, 75),
-            peak_hour=None,
-            occupancy_rate=random.uniform(20, 80),
-            congestion_level=random.choice(["low", "medium", "high"]),
-            queue_length=random.uniform(0, 50),
+        analytics_response = await realtime_analytics_service.get_realtime_analytics(
+            camera_id=camera_id
         )
-
-        # Get active incidents
-        active_incidents = await generate_mock_incidents(camera_id, last_5_min, now)
-        active_incidents = [inc for inc in active_incidents if inc.status == "active"]
-
-        analytics_response = AnalyticsResponse(
-            camera_id=camera_id,
-            timestamp=now,
-            vehicle_counts=vehicle_counts,
-            traffic_metrics=traffic_metrics,
-            active_incidents=active_incidents,
-            processing_time=random.uniform(50, 150),
-            frame_rate=random.uniform(25, 30),
-            detection_zones=["main_road", "intersection", "parking_area"],
-        )
-
-        # Cache for 10 seconds
-        await cache.set_json(cache_key, analytics_response.model_dump(), ttl=10)
 
         logger.debug(
             "Real-time analytics retrieved",
@@ -267,6 +191,18 @@ async def get_real_time_analytics(
         )
 
         return analytics_response
+
+    except ValueError as e:
+        logger.warning(
+            "Invalid request for real-time analytics",
+            camera_id=camera_id,
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
     except Exception as e:
         logger.error(
@@ -299,11 +235,10 @@ async def list_incidents(
     start_time: datetime | None = Query(None, description="Filter by start time"),
     end_time: datetime | None = Query(None, description="Filter by end time"),
     current_user: User = Depends(get_current_user),
-    cache: CacheService = Depends(get_cache_service),
-    _rate_limit: None = Depends(rate_limit_normal),
+    incident_management_service: Any = Depends(get_incident_management_service),
     db: Any = Depends(get_database_session),
 ) -> PaginatedResponse[IncidentAlert]:
-    """List incidents with pagination and filtering.
+    """List incidents with pagination and filtering using the service layer.
 
     Args:
         page: Page number
@@ -315,196 +250,45 @@ async def list_incidents(
         start_time: Filter by start time
         end_time: Filter by end time
         current_user: Current user
-        cache: Cache service
-        _rate_limit: Rate limiting dependency
+        incident_management_service: Incident management service
+        db: Database session
 
     Returns:
         PaginatedResponse[IncidentAlert]: Paginated incident list
     """
     try:
-        # Build cache key
-        cache_key = f"incidents:list:{page}:{size}:{camera_id}:{incident_type}:{severity}:{status}:{start_time}:{end_time}"
-
-        # Check cache
-        cached_result = await cache.get_json(cache_key)
-        if cached_result:
-            return PaginatedResponse[IncidentAlert](**cached_result)
-
-        # Query database for violations and anomalies to create incident alerts
-        from sqlalchemy import and_, select
-
-        from ...models.analytics import RuleViolation, TrafficAnomaly
-
-        incidents = []
-
-        # Query rule violations
-        violation_query = select(RuleViolation)
-
-        # Apply filters to violation query
-        filters = []
-        if camera_id:
-            filters.append(RuleViolation.camera_id == camera_id)
-        if start_time:
-            filters.append(RuleViolation.detection_time >= start_time)
-        if end_time:
-            filters.append(RuleViolation.detection_time <= end_time)
-        if status:
-            filters.append(RuleViolation.status == status)
-
-        if filters:
-            violation_query = violation_query.where(and_(*filters))
-
-        # Add severity filter if specified
-        if severity:
-            violation_query = violation_query.where(RuleViolation.severity == severity)
-
-        # Add incident type filter for violations
-        if incident_type and incident_type in ["speeding", "red_light", "wrong_way", "illegal_parking"]:
-            violation_query = violation_query.where(RuleViolation.violation_type == incident_type)
-        elif incident_type and incident_type not in ["traffic_anomaly"]:
-            # If specific violation type requested but not matching, skip violations
-            violation_query = violation_query.where(False)
-
-        violation_query = violation_query.order_by(RuleViolation.detection_time.desc())
-
-        # Query traffic anomalies
-        anomaly_query = select(TrafficAnomaly)
-
-        # Apply filters to anomaly query
-        anomaly_filters = []
-        if camera_id:
-            anomaly_filters.append(TrafficAnomaly.camera_id == camera_id)
-        if start_time:
-            anomaly_filters.append(TrafficAnomaly.detection_time >= start_time)
-        if end_time:
-            anomaly_filters.append(TrafficAnomaly.detection_time <= end_time)
-        if status:
-            # Map status to anomaly status
-            status_map = {"active": "detected", "resolved": "resolved", "dismissed": "resolved"}
-            anomaly_status = status_map.get(status, status)
-            anomaly_filters.append(TrafficAnomaly.status == anomaly_status)
-
-        if anomaly_filters:
-            anomaly_query = anomaly_query.where(and_(*anomaly_filters))
-
-        # Add severity filter if specified
-        if severity:
-            anomaly_query = anomaly_query.where(TrafficAnomaly.severity == severity)
-
-        # Add incident type filter for anomalies
-        if incident_type == "traffic_anomaly":
-            pass  # Include all anomalies
-        elif incident_type and incident_type not in ["speeding", "red_light", "wrong_way", "illegal_parking"]:
-            anomaly_query = anomaly_query.where(TrafficAnomaly.anomaly_type == incident_type)
-        elif incident_type:
-            # If specific violation type requested, skip anomalies
-            anomaly_query = anomaly_query.where(False)
-
-        anomaly_query = anomaly_query.order_by(TrafficAnomaly.detection_time.desc())
-
-        # Execute queries
-        try:
-            violation_result = await db.execute(violation_query.limit(size * 2))  # Get more for mixing
-            violations = violation_result.scalars().all()
-
-            anomaly_result = await db.execute(anomaly_query.limit(size * 2))  # Get more for mixing
-            anomalies = anomaly_result.scalars().all()
-
-            # Convert violations to incident alerts
-            for violation in violations:
-                incident = IncidentAlert(
-                    id=f"violation_{violation.id}",
-                    incident_type=violation.violation_type,
-                    severity=violation.severity,
-                    timestamp=violation.detection_time,
-                    camera_id=violation.camera_id,
-                    location=violation.location_description or f"Zone {violation.zone_id or 'Unknown'}",
-                    description=f"{violation.violation_type.replace('_', ' ').title()} violation detected",
-                    status=violation.status,
-                    confidence_score=violation.detection_confidence,
-                    vehicle_info={
-                        "license_plate": violation.license_plate,
-                        "vehicle_type": violation.vehicle_type,
-                        "track_id": violation.vehicle_track_id,
-                    } if any([violation.license_plate, violation.vehicle_type, violation.vehicle_track_id]) else None,
-                    evidence_urls=violation.evidence_images or [],
-                    detection_details={
-                        "rule_definition": violation.rule_definition,
-                        "measured_value": violation.measured_value,
-                        "threshold_value": violation.threshold_value,
-                        "violation_duration": violation.violation_duration,
-                    },
-                    alert_sent=True,  # Assume alerts are sent for all violations
-                    acknowledged_by=None,
-                    resolved_at=violation.resolution_time,
-                    resolution_notes=violation.resolution_action,
-                )
-                incidents.append(incident)
-
-            # Convert anomalies to incident alerts
-            for anomaly in anomalies:
-                incident = IncidentAlert(
-                    id=f"anomaly_{anomaly.id}",
-                    incident_type="traffic_anomaly",
-                    severity=anomaly.severity,
-                    timestamp=anomaly.detection_time,
-                    camera_id=anomaly.camera_id,
-                    location=f"Zone {anomaly.zone_id or 'Unknown'}",
-                    description=f"{anomaly.anomaly_type.replace('_', ' ').title()} anomaly detected",
-                    status="active" if anomaly.status == "detected" else anomaly.status,
-                    confidence_score=anomaly.confidence,
-                    vehicle_info=None,
-                    evidence_urls=[],
-                    detection_details={
-                        "anomaly_type": anomaly.anomaly_type,
-                        "anomaly_score": anomaly.anomaly_score,
-                        "detection_method": anomaly.detection_method,
-                        "probable_cause": anomaly.probable_cause,
-                        "baseline_value": anomaly.baseline_value,
-                        "observed_value": anomaly.observed_value,
-                        "affected_metrics": anomaly.affected_metrics,
-                    },
-                    alert_sent=True,  # Assume alerts are sent for high-score anomalies
-                    acknowledged_by=None,
-                    resolved_at=anomaly.resolution_time,
-                    resolution_notes=anomaly.resolution_action,
-                )
-                incidents.append(incident)
-
-        except Exception as e:
-            logger.error(f"Failed to query incidents from database: {e}")
-            # Fallback to empty list
-            incidents = []
-
-        # Sort incidents by timestamp (most recent first)
-        incidents.sort(key=lambda x: x.timestamp, reverse=True)
-
-        # Apply pagination
-        total = len(incidents)
-        offset = (page - 1) * size
-        paginated_incidents = incidents[offset : offset + size]
-
-        incident_responses = paginated_incidents
-
-        result = PaginatedResponse.create(
-            items=incident_responses,
-            total=total,
+        result = await incident_management_service.list_incidents(
             page=page,
             size=size,
+            camera_id=camera_id,
+            incident_type=incident_type,
+            severity=severity,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+            db_session=db,
         )
 
-        # Cache for 30 seconds
-        await cache.set_json(cache_key, result.model_dump(), ttl=30)
-
         logger.info(
-            "Incidents listed",
-            total=total,
+            "Incidents listed successfully",
+            total=result.total,
             page=page,
             size=size,
             user_id=current_user.id,
         )
 
         return result
+
+    except ValueError as e:
+        logger.warning(
+            "Invalid incident list request",
+            error=str(e),
+            user_id=current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
     except Exception as e:
         logger.error(
@@ -567,7 +351,6 @@ async def update_incident(
     status_update: str = Query(description="New incident status"),
     notes: str | None = Query(None, description="Additional notes"),
     current_user: User = Depends(require_permissions("incidents:update")),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> IncidentAlert:
     """Update incident status.
 
@@ -620,7 +403,6 @@ async def generate_report(
     report_request: ReportRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("reports:create")),
-    _rate_limit: None = Depends(report_rate_limit),
 ) -> ReportResponse:
     """Generate analytics report.
 
@@ -877,8 +659,7 @@ async def get_report(
 async def query_historical_data(
     query: HistoricalQuery,
     current_user: User = Depends(get_current_user),
-    cache: CacheService = Depends(get_cache_service),
-    _rate_limit: None = Depends(query_rate_limit),
+    historical_analytics_service: Any = Depends(get_historical_analytics_service),
     db: Any = Depends(get_database_session),
 ) -> PaginatedResponse[HistoricalData]:
     """Query historical analytics data.
@@ -896,10 +677,12 @@ async def query_historical_data(
         # Build cache key
         cache_key = f"historical:{hash(str(query.model_dump()))}"
 
-        # Check cache
-        cached_result = await cache.get_json(cache_key)
-        if cached_result:
-            return PaginatedResponse[HistoricalData](**cached_result)
+        # Use historical analytics service instead of direct cache access
+        result = await historical_analytics_service.query_historical_data(
+            query=query,
+            db_session=db,
+        )
+        return result
 
         # Query real historical data from TrafficMetrics table
         from sqlalchemy import and_, select
@@ -915,7 +698,7 @@ async def query_historical_data(
             # Apply filters
             filters = [
                 TrafficMetrics.timestamp >= query.time_range.start_time,
-                TrafficMetrics.timestamp <= query.time_range.end_time
+                TrafficMetrics.timestamp <= query.time_range.end_time,
             ]
 
             if query.camera_ids:
@@ -926,7 +709,7 @@ async def query_historical_data(
                 "minute": "1min",
                 "hourly": "1hour",
                 "daily": "1day",
-                "raw": "1min"  # Use 1min as finest granularity
+                "raw": "1min",  # Use 1min as finest granularity
             }
 
             db_aggregation = aggregation_map.get(query.aggregation, "1hour")
@@ -949,7 +732,9 @@ async def query_historical_data(
                     elif metric_type == "speed_data":
                         value = metric.average_speed
                     elif metric_type == "occupancy":
-                        value = (metric.occupancy_rate or 0.0) * 100  # Convert to percentage
+                        value = (
+                            metric.occupancy_rate or 0.0
+                        ) * 100  # Convert to percentage
                     elif metric_type == "traffic_density":
                         value = metric.traffic_density
                     elif metric_type == "flow_rate":
@@ -961,7 +746,7 @@ async def query_historical_data(
                             "light": 1,
                             "moderate": 2,
                             "heavy": 3,
-                            "severe": 4
+                            "severe": 4,
                         }
                         value = congestion_map.get(metric.congestion_level, 0)
 
@@ -1008,8 +793,7 @@ async def query_historical_data(
             size=limit,
         )
 
-        # Cache for 5 minutes
-        await cache.set_json(cache_key, result.model_dump(), ttl=300)
+        # Caching is handled by the service layer
 
         logger.info(
             "Historical data queried",
@@ -1043,7 +827,6 @@ async def get_dashboard_data(
     current_user: User = Depends(get_current_user),
     analytics_service=Depends(get_analytics_service),
     cache: CacheService = Depends(get_cache_service),
-    _rate_limit: None = Depends(dashboard_rate_limit),
 ) -> DashboardResponse:
     """Get comprehensive dashboard data for a camera.
 
@@ -1076,16 +859,12 @@ async def get_dashboard_data(
 
         # Get recent anomalies
         recent_anomalies = await analytics_service.get_traffic_anomalies(
-            camera_id=camera_id,
-            time_range=(yesterday, now),
-            limit=5
+            camera_id=camera_id, time_range=(yesterday, now), limit=5
         )
 
         # Get hourly trends for the last 24 hours
         hourly_trends = await analytics_service.calculate_traffic_metrics(
-            camera_id=camera_id,
-            time_range=(yesterday, now),
-            aggregation_period="1hour"
+            camera_id=camera_id, time_range=(yesterday, now), aggregation_period="1hour"
         )
 
         # Camera status (mock data)
@@ -1109,9 +888,13 @@ async def get_dashboard_data(
         # Alerts summary
         alerts_summary = {
             "total_today": len(recent_violations) + len(recent_anomalies),
-            "critical": len([v for v in recent_violations if v.get("severity") == "critical"]),
+            "critical": len(
+                [v for v in recent_violations if v.get("severity") == "critical"]
+            ),
             "resolved_today": random.randint(5, 15),
-            "pending": len([v for v in recent_violations if v.get("status") == "active"]),
+            "pending": len(
+                [v for v in recent_violations if v.get("status") == "active"]
+            ),
         }
 
         # Convert hourly trends to simple format
@@ -1175,7 +958,6 @@ async def create_alert_rule(
     rule_request: AlertRuleRequest,
     current_user: User = Depends(require_permissions("alerts:create")),
     alert_service=Depends(get_alert_service),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> AlertRuleResponse:
     """Create a new alert rule.
 
@@ -1245,7 +1027,6 @@ async def list_alert_rules(
     severity: Severity | None = Query(None, description="Filter by severity"),
     current_user: User = Depends(get_current_user),
     alert_service=Depends(get_alert_service),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> PaginatedResponse[AlertRuleResponse]:
     """List alert rules with pagination and filtering.
 
@@ -1286,7 +1067,11 @@ async def list_alert_rules(
                 "id": str(uuid4()),
                 "name": "High Traffic Congestion",
                 "description": "Alert during severe traffic congestion",
-                "condition": {"metric": "congestion_level", "operator": "==", "threshold": "severe"},
+                "condition": {
+                    "metric": "congestion_level",
+                    "operator": "==",
+                    "threshold": "severe",
+                },
                 "severity": "critical",
                 "cameras": None,
                 "zones": None,
@@ -1315,9 +1100,7 @@ async def list_alert_rules(
         paginated_rules = filtered_rules[offset : offset + size]
 
         # Convert to response models
-        rule_responses = [
-            AlertRuleResponse(**rule) for rule in paginated_rules
-        ]
+        rule_responses = [AlertRuleResponse(**rule) for rule in paginated_rules]
 
         result = PaginatedResponse.create(
             items=rule_responses,
@@ -1359,7 +1142,6 @@ async def update_alert_rule(
     rule_request: AlertRuleRequest,
     current_user: User = Depends(require_permissions("alerts:update")),
     alert_service=Depends(get_alert_service),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> AlertRuleResponse:
     """Update an existing alert rule.
 
@@ -1416,7 +1198,6 @@ async def delete_alert_rule(
     rule_id: str,
     current_user: User = Depends(require_permissions("alerts:delete")),
     alert_service=Depends(get_alert_service),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> dict[str, str]:
     """Delete an alert rule.
 
@@ -1468,7 +1249,6 @@ async def generate_analytics_report(
     include_charts: bool = Query(False, description="Include charts"),
     current_user: User = Depends(require_permissions("reports:create")),
     analytics_service=Depends(get_analytics_service),
-    _rate_limit: None = Depends(report_rate_limit),
 ) -> ReportResponse:
     """Generate a custom analytics report.
 
@@ -1491,9 +1271,6 @@ async def generate_analytics_report(
         # Parse camera IDs
         camera_list = camera_ids.split(",") if camera_ids else None
 
-        # Create report request
-        from ..schemas.common import TimeRange
-
         report_request = ReportGenerationRequest(
             report_type=report_type,
             time_range=TimeRange(start_time=start_time, end_time=end_time),
@@ -1503,7 +1280,7 @@ async def generate_analytics_report(
         )
 
         # Generate report (reuse existing logic)
-        return await generate_report(report_request, background_tasks, current_user, _rate_limit)
+        return await generate_report(report_request, background_tasks, current_user)
 
     except Exception as e:
         logger.error(
@@ -1525,12 +1302,13 @@ async def generate_analytics_report(
 )
 async def get_traffic_predictions(
     camera_id: str,
-    forecast_hours: int = Query(24, ge=1, le=168, description="Forecast period in hours"),
+    forecast_hours: int = Query(
+        24, ge=1, le=168, description="Forecast period in hours"
+    ),
     model_version: str | None = Query(None, description="Specific model version"),
     current_user: User = Depends(get_current_user),
     analytics_service=Depends(get_analytics_service),
     cache: CacheService = Depends(get_cache_service),
-    _rate_limit: None = Depends(prediction_rate_limit),
 ) -> PredictionResponse:
     """Get traffic predictions for a camera.
 
@@ -1548,7 +1326,9 @@ async def get_traffic_predictions(
     """
     try:
         # Check cache first
-        cache_key = f"predictions:{camera_id}:{forecast_hours}:{model_version or 'latest'}"
+        cache_key = (
+            f"predictions:{camera_id}:{forecast_hours}:{model_version or 'latest'}"
+        )
         cached_data = await cache.get_json(cache_key)
         if cached_data:
             return PredictionResponse(**cached_data)
@@ -1570,32 +1350,36 @@ async def get_traffic_predictions(
             predicted_count = base_count + rush_hour_boost + random.randint(-5, 10)
             predicted_speed = random.uniform(35, 65)
 
-            predictions.append({
-                "timestamp": current_time,
-                "predicted_vehicle_count": max(0, predicted_count),
-                "predicted_avg_speed": predicted_speed,
-                "predicted_congestion_level": (
-                    "severe" if predicted_count > 40
-                    else "heavy" if predicted_count > 30
-                    else "moderate" if predicted_count > 15
-                    else "light"
-                ),
-                "confidence": random.uniform(0.7, 0.95),
-            })
+            predictions.append(
+                {
+                    "timestamp": current_time,
+                    "predicted_vehicle_count": max(0, predicted_count),
+                    "predicted_avg_speed": predicted_speed,
+                    "predicted_congestion_level": (
+                        "severe"
+                        if predicted_count > 40
+                        else (
+                            "heavy"
+                            if predicted_count > 30
+                            else "moderate" if predicted_count > 15 else "light"
+                        )
+                    ),
+                    "confidence": random.uniform(0.7, 0.95),
+                }
+            )
 
             current_time += timedelta(hours=1)
 
         # Get historical baseline
         yesterday = now - timedelta(days=1)
         historical_metrics = await analytics_service.calculate_traffic_metrics(
-            camera_id=camera_id,
-            time_range=(yesterday, now),
-            aggregation_period="1hour"
+            camera_id=camera_id, time_range=(yesterday, now), aggregation_period="1hour"
         )
 
         avg_historical_count = (
             sum(m.total_vehicles for m in historical_metrics) / len(historical_metrics)
-            if historical_metrics else 20
+            if historical_metrics
+            else 20
         )
 
         prediction_response = PredictionResponse(
@@ -1657,7 +1441,6 @@ async def trigger_anomaly_detection(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permissions("analytics:analyze")),
     analytics_service=Depends(get_analytics_service),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> dict[str, Any]:
     """Trigger manual anomaly detection.
 
@@ -1749,12 +1532,13 @@ async def get_traffic_heatmap(
     camera_id: str,
     start_time: datetime = Query(description="Heatmap start time"),
     end_time: datetime = Query(description="Heatmap end time"),
-    resolution: str = Query("medium", description="Spatial resolution (low/medium/high)"),
+    resolution: str = Query(
+        "medium", description="Spatial resolution (low/medium/high)"
+    ),
     metric: str = Query("vehicle_count", description="Metric to visualize"),
     current_user: User = Depends(get_current_user),
     analytics_service=Depends(get_analytics_service),
     cache: CacheService = Depends(get_cache_service),
-    _rate_limit: None = Depends(heatmap_rate_limit),
 ) -> HeatmapResponse:
     """Get traffic heatmap data for a camera.
 
@@ -1795,21 +1579,29 @@ async def get_traffic_heatmap(
         for y in range(spatial_res["height"]):
             for x in range(spatial_res["width"]):
                 # Generate intensity based on position (mock logic)
-                center_x, center_y = spatial_res["width"] // 2, spatial_res["height"] // 2
-                distance_from_center = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-                max_distance = (center_x ** 2 + center_y ** 2) ** 0.5
+                center_x, center_y = (
+                    spatial_res["width"] // 2,
+                    spatial_res["height"] // 2,
+                )
+                distance_from_center = (
+                    (x - center_x) ** 2 + (y - center_y) ** 2
+                ) ** 0.5
+                max_distance = (center_x**2 + center_y**2) ** 0.5
 
                 # Higher intensity near center (main road), with some randomness
                 base_intensity = 1.0 - (distance_from_center / max_distance)
                 intensity = max(0.0, base_intensity + random.uniform(-0.3, 0.3))
 
-                heatmap_data.append({
-                    "x": x,
-                    "y": y,
-                    "intensity": intensity,
-                    "value": intensity * random.uniform(50, 200),  # Actual metric value
-                    "sample_count": random.randint(5, 50),
-                })
+                heatmap_data.append(
+                    {
+                        "x": x,
+                        "y": y,
+                        "intensity": intensity,
+                        "value": intensity
+                        * random.uniform(50, 200),  # Actual metric value
+                        "sample_count": random.randint(5, 50),
+                    }
+                )
 
         # Define zones
         zones = [
@@ -1885,7 +1677,6 @@ async def get_traffic_trends(
     current_user: User = Depends(get_current_user),
     analytics_service=Depends(get_analytics_service),
     cache: CacheService = Depends(get_cache_service),
-    _rate_limit: None = Depends(rate_limit_normal),
 ) -> TrendAnalysisResponse:
     """Get comprehensive traffic trend analysis.
 
@@ -2040,492 +1831,4 @@ async def get_traffic_trends(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve traffic trends",
-        ) from e
-
-
-# ============================================================================
-# ENHANCED ANALYTICS ENDPOINTS FOR P0 TASKS (BE-ANA-001, 002, 003, 005)
-# ============================================================================
-
-
-@router.get("/realtime", response_model=AnalyticsResponse)
-@rate_limit_normal
-@require_permissions(["analytics.read"])
-async def get_realtime_analytics(
-    camera_id: str | None = Query(None, description="Specific camera ID"),
-    include_predictions: bool = Query(False, description="Include prediction data"),
-    cache: CacheService = Depends(get_cache_service),
-    analytics_service = Depends(get_analytics_service),
-    current_user: User = Depends(get_current_user),
-) -> AnalyticsResponse:
-    """Get real-time analytics data with sub-100ms response time.
-    
-    Enhanced endpoint for BE-ANA-001 supporting:
-    - Real-time traffic metrics
-    - Vehicle counts and classifications
-    - Active incidents
-    - Optional ML predictions
-    - Redis caching for performance
-    """
-    start_time = datetime.now(UTC)
-
-    try:
-        # Generate cache key
-        cache_key = f"analytics:realtime:{camera_id or 'all'}:{include_predictions}"
-
-        # Try cache first for sub-100ms response
-        cached_data = await cache.get_json(cache_key)
-        if cached_data:
-            logger.debug(f"Cache hit for realtime analytics: {camera_id}")
-            return AnalyticsResponse(**cached_data)
-
-        # Get current time window (last 1 minute)
-        end_time = datetime.now(UTC)
-        start_window = end_time - timedelta(minutes=1)
-
-        # Generate mock real-time data (replace with actual data fetching)
-        vehicle_counts = await generate_mock_vehicle_counts(camera_id or "camera_001", start_window, end_time)
-
-        # Create traffic metrics
-        total_vehicles = sum(vc.count for vc in vehicle_counts)
-        avg_speed = sum(vc.speed for vc in vehicle_counts if vc.speed) / max(len([vc for vc in vehicle_counts if vc.speed]), 1)
-
-        traffic_metrics = TrafficMetrics(
-            camera_id=camera_id or "system",
-            period_start=start_window,
-            period_end=end_time,
-            total_vehicles=total_vehicles,
-            vehicle_breakdown={vc.vehicle_class: vc.count for vc in vehicle_counts},
-            directional_flow={vc.direction or "unknown": vc.count for vc in vehicle_counts},
-            avg_speed=avg_speed,
-            peak_hour=end_time,
-            occupancy_rate=random.uniform(0.1, 0.8) * 100,
-            congestion_level="medium" if total_vehicles > 10 else "low",
-            queue_length=random.uniform(0, 50) if total_vehicles > 15 else 0,
-        )
-
-        # Get active incidents
-        active_incidents = []
-        for incident_id, incident_data in incidents_db.items():
-            if (
-                incident_data.get("status") == "active"
-                and (not camera_id or incident_data.get("camera_id") == camera_id)
-            ):
-                active_incidents.append(IncidentAlert(**incident_data))
-
-        # Calculate processing metrics
-        processing_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
-        frame_rate = random.uniform(25, 30)  # Mock frame rate
-
-        response = AnalyticsResponse(
-            camera_id=camera_id or "system",
-            timestamp=end_time,
-            vehicle_counts=vehicle_counts,
-            traffic_metrics=traffic_metrics,
-            active_incidents=active_incidents,
-            processing_time=processing_time,
-            frame_rate=frame_rate,
-            detection_zones=["zone_1", "zone_2", "zone_3"],
-        )
-
-        # Cache for 5 seconds for real-time performance
-        await cache.set_json(cache_key, response.model_dump(), ttl=5)
-
-        logger.info(
-            "Real-time analytics retrieved",
-            camera_id=camera_id,
-            processing_time_ms=processing_time,
-            vehicles=total_vehicles,
-            incidents=len(active_incidents),
-        )
-
-        return response
-
-    except Exception as e:
-        logger.error(f"Failed to get real-time analytics: {e}", camera_id=camera_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve real-time analytics",
-        ) from e
-
-
-@router.post("/query", response_model=HistoricalData)
-@query_rate_limit
-@require_permissions(["analytics.read"])
-async def query_historical_data(
-    query: HistoricalQuery,
-    analytics_service = Depends(get_analytics_service),
-    cache: CacheService = Depends(get_cache_service),
-    current_user: User = Depends(get_current_user),
-) -> HistoricalData:
-    """Query historical analytics data with optimized performance.
-    
-    Enhanced endpoint for BE-ANA-002 supporting:
-    - TimescaleDB aggregation
-    - Multiple time windows (5min, 15min, 1hour, 1day)
-    - Redis caching
-    - Export capabilities
-    """
-    start_time = datetime.now(UTC)
-
-    try:
-        # Generate cache key for query
-        query_hash = hash(str(query.model_dump()))
-        cache_key = f"analytics:historical:{query_hash}"
-
-        # Check cache for recent queries
-        cached_result = await cache.get_json(cache_key)
-        if cached_result:
-            logger.debug(f"Cache hit for historical query: {query_hash}")
-            return HistoricalData(**cached_result)
-
-        # Validate query parameters
-        if query.end_time <= query.start_time:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="End time must be after start time"
-            )
-
-        query_duration = query.end_time - query.start_time
-        if query_duration > timedelta(days=90):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Query range cannot exceed 90 days"
-            )
-
-        # Generate historical data (replace with actual database queries)
-        metrics = []
-        incidents = []
-        vehicle_counts = []
-        predictions = []
-
-        # Mock data generation for each camera
-        for camera_id in (query.camera_ids or ["camera_001", "camera_002"]):
-            # Generate time series data based on aggregation window
-            window_minutes = {
-                "raw": 1,
-                "minute": 1,
-                "hourly": 60,
-                "daily": 1440,
-            }.get(query.aggregation_window, 60)
-
-            current_time = query.start_time
-            while current_time < query.end_time:
-                next_time = current_time + timedelta(minutes=window_minutes)
-
-                # Generate traffic metrics
-                total_vehicles = random.randint(5, 50)
-                metrics.append(TrafficMetrics(
-                    camera_id=camera_id,
-                    period_start=current_time,
-                    period_end=next_time,
-                    total_vehicles=total_vehicles,
-                    vehicle_breakdown={
-                        VehicleClass.CAR: random.randint(0, total_vehicles // 2),
-                        VehicleClass.TRUCK: random.randint(0, total_vehicles // 4),
-                        VehicleClass.VAN: random.randint(0, total_vehicles // 6),
-                    },
-                    directional_flow={
-                        "north": random.randint(0, total_vehicles // 3),
-                        "south": random.randint(0, total_vehicles // 3),
-                        "east": random.randint(0, total_vehicles // 3),
-                    },
-                    avg_speed=random.uniform(30, 80),
-                    occupancy_rate=random.uniform(0.1, 0.9) * 100,
-                    congestion_level=random.choice(["low", "medium", "high"]),
-                ))
-
-                # Generate vehicle counts
-                counts = await generate_mock_vehicle_counts(camera_id, current_time, next_time)
-                vehicle_counts.extend(counts)
-
-                current_time = next_time
-
-        # Generate mock incidents if requested
-        if query.include_incidents:
-            for _ in range(random.randint(0, 3)):
-                incident_time = query.start_time + timedelta(
-                    seconds=random.randint(0, int(query_duration.total_seconds()))
-                )
-
-                incident = IncidentAlert(
-                    id=str(uuid4()),
-                    camera_id=random.choice(query.camera_ids or ["camera_001"]),
-                    incident_type=random.choice(list(IncidentType)),
-                    severity=random.choice(list(Severity)),
-                    description="Historical incident from query",
-                    location="Mock Location",
-                    timestamp=incident_time,
-                    detected_at=incident_time,
-                    confidence=random.uniform(0.7, 0.99),
-                    status="resolved",
-                )
-                incidents.append(incident)
-
-        # Calculate data quality metrics
-        data_quality = {
-            "completeness": random.uniform(0.85, 0.99),
-            "accuracy": random.uniform(0.80, 0.95),
-            "consistency": random.uniform(0.90, 0.99),
-            "timeliness": random.uniform(0.95, 1.0),
-        }
-
-        # Create response
-        processing_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
-        query_id = str(uuid4())
-
-        response = HistoricalData(
-            query_id=query_id,
-            camera_ids=query.camera_ids or ["camera_001", "camera_002"],
-            time_range={
-                "start": query.start_time,
-                "end": query.end_time,
-            },
-            metrics=metrics,
-            incidents=incidents,
-            vehicle_counts=vehicle_counts,
-            predictions=predictions,
-            data_quality=data_quality,
-            export_url=f"/api/v1/analytics/export/{query_id}" if query.export_format != "json" else None,
-        )
-
-        # Cache result for 10 minutes
-        await cache.set_json(cache_key, response.model_dump(), ttl=600)
-
-        logger.info(
-            "Historical query completed",
-            query_id=query_id,
-            cameras=len(query.camera_ids or []),
-            duration_hours=query_duration.total_seconds() / 3600,
-            processing_time_ms=processing_time,
-            metrics_count=len(metrics),
-        )
-
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to execute historical query: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to execute historical data query",
-        ) from e
-
-
-@router.get("/predictions", response_model=PredictionResponse)
-@prediction_rate_limit
-@require_permissions(["analytics.read"])
-async def get_traffic_predictions(
-    camera_id: str = Query(..., description="Camera ID for predictions"),
-    horizon_hours: int = Query(1, description="Prediction horizon in hours", ge=1, le=24),
-    confidence_level: float = Query(0.95, description="Confidence level", ge=0.8, le=0.99),
-    include_features: bool = Query(False, description="Include feature explanations"),
-    prediction_service = Depends(get_prediction_service),
-    cache: CacheService = Depends(get_cache_service),
-    current_user: User = Depends(get_current_user),
-) -> PredictionResponse:
-    """Get traffic predictions using ML models.
-    
-    Enhanced endpoint for BE-ANA-003 supporting:
-    - YOLO11 model integration
-    - Multiple prediction horizons (1h, 4h, 24h)
-    - Confidence intervals
-    - Model performance tracking
-    """
-    start_time = datetime.now(UTC)
-
-    try:
-        # Generate cache key
-        cache_key = f"predictions:{camera_id}:{horizon_hours}:{confidence_level}"
-
-        # Check cache first
-        cached_predictions = await cache.get_json(cache_key)
-        if cached_predictions:
-            logger.debug(f"Cache hit for predictions: {camera_id}")
-            cached_predictions["cache_hit"] = True
-            return PredictionResponse(**cached_predictions)
-
-        # Generate prediction time points
-        current_time = datetime.now(UTC)
-        prediction_points = []
-
-        # Create predictions for each hour in the horizon
-        for hour_offset in range(1, horizon_hours + 1):
-            target_time = current_time + timedelta(hours=hour_offset)
-
-            # Mock prediction data (replace with actual ML model)
-            base_count = random.randint(20, 80)
-            noise = random.uniform(-10, 10)
-            predicted_count = max(0, base_count + noise)
-
-            # Calculate confidence interval
-            std_dev = predicted_count * 0.15
-            z_score = 1.96 if confidence_level == 0.95 else 1.645
-            margin = z_score * std_dev
-
-            prediction = PredictionData(
-                camera_id=camera_id,
-                prediction_time=current_time,
-                target_time=target_time,
-                horizon_minutes=hour_offset * 60,
-                predicted_vehicle_count=predicted_count,
-                predicted_speed=random.uniform(40, 70),
-                predicted_congestion=random.choice(["low", "medium", "high"]),
-                confidence_interval={
-                    "lower": max(0, predicted_count - margin),
-                    "upper": predicted_count + margin,
-                    "mean": predicted_count,
-                    "std": std_dev,
-                },
-                model_version="yolo11-v1.2.3",
-                features_used=[
-                    "historical_traffic",
-                    "time_of_day",
-                    "day_of_week",
-                    "weather",
-                    "events",
-                ] if include_features else [],
-            )
-            prediction_points.append(prediction)
-
-        # Model performance metrics
-        model_performance = {
-            "accuracy": random.uniform(0.85, 0.95),
-            "mae": random.uniform(2.5, 5.0),
-            "rmse": random.uniform(4.0, 8.0),
-            "r2_score": random.uniform(0.80, 0.92),
-        }
-
-        # Confidence metrics
-        confidence_metrics = {
-            "prediction_certainty": random.uniform(0.80, 0.95),
-            "model_stability": random.uniform(0.85, 0.98),
-            "data_quality": random.uniform(0.90, 0.99),
-            "feature_importance": random.uniform(0.75, 0.90),
-        }
-
-        processing_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
-        request_id = str(uuid4())
-
-        # Calculate next update time (predictions refresh every 15 minutes)
-        next_update = current_time + timedelta(minutes=15)
-
-        response = PredictionResponse(
-            request_id=request_id,
-            predictions=prediction_points,
-            model_performance=model_performance,
-            confidence_metrics=confidence_metrics,
-            processing_time_ms=processing_time,
-            cache_hit=False,
-            next_update_time=next_update,
-        )
-
-        # Cache predictions for 10 minutes
-        await cache.set_json(cache_key, response.model_dump(), ttl=600)
-
-        logger.info(
-            "Traffic predictions generated",
-            camera_id=camera_id,
-            horizon_hours=horizon_hours,
-            processing_time_ms=processing_time,
-            predictions_count=len(prediction_points),
-        )
-
-        return response
-
-    except Exception as e:
-        logger.error(f"Failed to generate predictions: {e}", camera_id=camera_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate traffic predictions",
-        ) from e
-
-
-@router.get("/incidents", response_model=PaginatedResponse[IncidentAlert])
-@rate_limit_normal
-@require_permissions(["analytics.read"])
-async def get_incidents(
-    camera_id: str | None = Query(None, description="Filter by camera ID"),
-    status: str | None = Query(None, description="Filter by status"),
-    severity: str | None = Query(None, description="Filter by severity"),
-    incident_type: str | None = Query(None, description="Filter by incident type"),
-    limit: int = Query(50, description="Page size", ge=1, le=100),
-    offset: int = Query(0, description="Page offset", ge=0),
-    cache: CacheService = Depends(get_cache_service),
-    current_user: User = Depends(get_current_user),
-) -> PaginatedResponse[IncidentAlert]:
-    """Get incident alerts with filtering and pagination.
-    
-    Enhanced endpoint for BE-ANA-005 supporting:
-    - Real-time incident detection
-    - Priority-based filtering
-    - Multi-channel notifications
-    """
-    try:
-        # Generate cache key for filtered results
-        filter_params = f"{camera_id}:{status}:{severity}:{incident_type}:{limit}:{offset}"
-        cache_key = f"incidents:filtered:{hash(filter_params)}"
-
-        # Check cache
-        cached_result = await cache.get_json(cache_key)
-        if cached_result:
-            return PaginatedResponse[IncidentAlert](**cached_result)
-
-        # Filter incidents from in-memory store
-        filtered_incidents = []
-
-        for incident_data in incidents_db.values():
-            # Apply filters
-            if camera_id and incident_data.get("camera_id") != camera_id:
-                continue
-            if status and incident_data.get("status") != status:
-                continue
-            if severity and incident_data.get("severity") != severity:
-                continue
-            if incident_type and incident_data.get("incident_type") != incident_type:
-                continue
-
-            try:
-                incident = IncidentAlert(**incident_data)
-                filtered_incidents.append(incident)
-            except Exception as e:
-                logger.warning(f"Invalid incident data: {e}")
-                continue
-
-        # Sort by timestamp (newest first) and priority
-        filtered_incidents.sort(
-            key=lambda x: (x.timestamp, x.severity == "critical", x.severity == "high"),
-            reverse=True
-        )
-
-        # Apply pagination
-        total_count = len(filtered_incidents)
-        paginated_incidents = filtered_incidents[offset:offset + limit]
-
-        response = PaginatedResponse[IncidentAlert](
-            items=paginated_incidents,
-            total=total_count,
-            page=offset // limit + 1,
-            size=limit,
-            pages=(total_count + limit - 1) // limit,
-        )
-
-        # Cache for 1 minute
-        await cache.set_json(cache_key, response.model_dump(), ttl=60)
-
-        logger.info(
-            "Incidents retrieved",
-            total=total_count,
-            returned=len(paginated_incidents),
-            filters={"camera_id": camera_id, "status": status, "severity": severity},
-        )
-
-        return response
-
-    except Exception as e:
-        logger.error(f"Failed to get incidents: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve incidents",
         ) from e

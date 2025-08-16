@@ -32,7 +32,6 @@ from ...models.user import User
 from ...services.cache import CacheService
 from ...storage.model_registry import MinIOModelRegistry
 from ..dependencies import (
-    RateLimiter,
     get_cache_service,
     get_current_user,
     rate_limit_strict,
@@ -62,11 +61,17 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # Rate limiters for P0 business requirements
-deployment_rate_limit = RateLimiter(calls=100, period=3600)  # 100 deployments per hour for P0
-optimization_rate_limit = RateLimiter(calls=50, period=3600)  # 50 optimizations per hour
+deployment_rate_limit = RateLimiter(
+    calls=100, period=3600
+)  # 100 deployments per hour for P0
+optimization_rate_limit = RateLimiter(
+    calls=50, period=3600
+)  # 50 optimizations per hour
 upload_rate_limit = RateLimiter(calls=20, period=3600)  # 20 uploads per hour
 enhanced_upload_rate_limit = RateLimiter(calls=10, period=3600)  # 10 enhanced uploads
-model_operations_rate_limit = RateLimiter(calls=200, period=60)  # 200 operations per minute
+model_operations_rate_limit = RateLimiter(
+    calls=200, period=60
+)  # 200 operations per minute
 
 # Model storage configuration
 MODEL_STORAGE_BASE_PATH = Path(os.getenv("MODEL_STORAGE_PATH", "./models"))
@@ -541,7 +546,9 @@ async def register_model(
             )
 
         # Generate unique model ID
-        model_id = f"{model_request.name.lower().replace(' ', '-')}-{model_request.version}"
+        model_id = (
+            f"{model_request.name.lower().replace(' ', '-')}-{model_request.version}"
+        )
 
         # Check if model already exists
         if model_id in models_db:
@@ -552,7 +559,10 @@ async def register_model(
 
         # Save model file temporarily for registration
         import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(model_file.filename).suffix) as temp_file:
+
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=Path(model_file.filename).suffix
+        ) as temp_file:
             content = await model_file.read()
             temp_file.write(content)
             temp_model_path = Path(temp_file.name)
@@ -565,7 +575,7 @@ async def register_model(
         }
 
         # Initialize registry if needed
-        if not hasattr(model_registry, '_initialized'):
+        if not hasattr(model_registry, "_initialized"):
             await model_registry.initialize()
             model_registry._initialized = True
         model_version = await model_registry.register_model(
@@ -574,7 +584,9 @@ async def register_model(
             version=model_request.version,
             metrics=metrics,
             training_config=model_request.training_config,
-            tags=dict(zip(model_request.tags, model_request.tags, strict=False)),  # Convert list to dict
+            tags=dict(
+                zip(model_request.tags, model_request.tags, strict=False)
+            ),  # Convert list to dict
         )
 
         # Create model record in local database
@@ -613,11 +625,8 @@ async def register_model(
             )
             # Schedule background deployment
             import asyncio
-            asyncio.create_task(
-                perform_deployment(
-                    str(uuid4()), model_id, deployment
-                )
-            )
+
+            asyncio.create_task(perform_deployment(str(uuid4()), model_id, deployment))
 
         # Invalidate cache for model listings
         await cache.delete("models:list:*")
@@ -1701,11 +1710,17 @@ async def list_deployments(
     filtered_deployments = list(deployments_db.values())
 
     if model_id:
-        filtered_deployments = [d for d in filtered_deployments if d.get("model_id") == model_id]
+        filtered_deployments = [
+            d for d in filtered_deployments if d.get("model_id") == model_id
+        ]
     if stage:
-        filtered_deployments = [d for d in filtered_deployments if d.get("stage") == stage]
+        filtered_deployments = [
+            d for d in filtered_deployments if d.get("stage") == stage
+        ]
     if status:
-        filtered_deployments = [d for d in filtered_deployments if d.get("status") == status]
+        filtered_deployments = [
+            d for d in filtered_deployments if d.get("status") == status
+        ]
 
     # Sort by creation time (newest first)
     filtered_deployments.sort(
@@ -1719,7 +1734,9 @@ async def list_deployments(
             deployment["deployment_time_ms"] = (
                 time.time() - deployment["deployment_start_time"]
             ) * 1000
-            deployment["performance_target_met"] = deployment["deployment_time_ms"] < 200
+            deployment["performance_target_met"] = (
+                deployment["deployment_time_ms"] < 200
+            )
 
     # Pagination
     total = len(filtered_deployments)
@@ -1908,9 +1925,7 @@ async def list_model_versions(
     versions = generate_mock_versions(model_id, model["current_version"])
 
     # Cache versions for 10 minutes
-    await cache.set_json(
-        cache_key, [v.model_dump() for v in versions], ttl=600
-    )
+    await cache.set_json(cache_key, [v.model_dump() for v in versions], ttl=600)
 
     logger.info(
         "Model versions listed",
@@ -1994,22 +2009,34 @@ async def compare_models(
                 else None
             ),
             "latency_improvement": (
-                (metrics_a.inference_time - metrics_b.inference_time) / metrics_a.inference_time * 100
+                (metrics_a.inference_time - metrics_b.inference_time)
+                / metrics_a.inference_time
+                * 100
                 if metrics_a.inference_time and metrics_b.inference_time
                 else None
             ),
             "throughput_improvement": (
-                (metrics_b.throughput - metrics_a.throughput) / metrics_a.throughput * 100
+                (metrics_b.throughput - metrics_a.throughput)
+                / metrics_a.throughput
+                * 100
                 if metrics_a.throughput and metrics_b.throughput
                 else None
             ),
             "memory_efficiency": (
-                (metrics_a.memory_usage - metrics_b.memory_usage) / metrics_a.memory_usage * 100
+                (metrics_a.memory_usage - metrics_b.memory_usage)
+                / metrics_a.memory_usage
+                * 100
                 if metrics_a.memory_usage and metrics_b.memory_usage
                 else None
             ),
         },
-        "recommendation": "Use Model B" if metrics_b.accuracy and metrics_a.accuracy and metrics_b.accuracy > metrics_a.accuracy else "Use Model A",
+        "recommendation": (
+            "Use Model B"
+            if metrics_b.accuracy
+            and metrics_a.accuracy
+            and metrics_b.accuracy > metrics_a.accuracy
+            else "Use Model A"
+        ),
         "confidence": "high",
         "comparison_timestamp": datetime.now(UTC),
     }
