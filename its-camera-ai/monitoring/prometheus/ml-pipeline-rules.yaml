@@ -1,0 +1,382 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: its-camera-ai-ml-pipeline-rules
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: ml-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  groups:
+  - name: its-camera-ai.ml.performance-sli
+    interval: 15s
+    rules:
+    # ML Performance Service Level Indicators
+    
+    # Inference Latency SLI (95th percentile)
+    - record: its_camera_ai:ml_inference_latency_p95_sli
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(inference_duration_seconds_bucket[5m])) by (le, model_version)
+        )
+      labels:
+        sli_type: "latency"
+        target: "100ms"
+        business_critical: "true"
+    
+    # Inference Latency SLI (99th percentile)
+    - record: its_camera_ai:ml_inference_latency_p99_sli
+      expr: |
+        histogram_quantile(0.99,
+          sum(rate(inference_duration_seconds_bucket[5m])) by (le, model_version)
+        )
+      labels:
+        sli_type: "latency"
+        target: "200ms"
+        business_critical: "true"
+    
+    # Inference Throughput SLI
+    - record: its_camera_ai:ml_inference_throughput_sli
+      expr: |
+        sum(rate(inference_requests_total[5m])) by (model_version)
+      labels:
+        sli_type: "throughput"
+        target: "500rps"
+    
+    # Inference Success Rate SLI
+    - record: its_camera_ai:ml_inference_success_rate_sli
+      expr: |
+        (
+          sum(rate(inference_requests_total{status="success"}[5m])) by (model_version) /
+          sum(rate(inference_requests_total[5m])) by (model_version)
+        )
+      labels:
+        sli_type: "availability"
+        target: "99.9%"
+        business_critical: "true"
+    
+    # Model Accuracy SLI
+    - record: its_camera_ai:ml_model_accuracy_sli
+      expr: |
+        avg(inference_confidence_score) by (model_version)
+      labels:
+        sli_type: "accuracy"
+        target: "85%"
+    
+    # GPU Utilization Efficiency SLI
+    - record: its_camera_ai:ml_gpu_utilization_efficiency_sli
+      expr: |
+        (
+          avg(DCGM_FI_DEV_GPU_UTIL) / 100 *
+          (sum(rate(inference_requests_total[5m])) / 1000)
+        )
+      labels:
+        sli_type: "efficiency"
+        target: "70%"
+
+  - name: its-camera-ai.ml.model-quality
+    interval: 60s
+    rules:
+    # Model Quality and Drift Detection
+    
+    # Model Confidence Distribution
+    - record: its_camera_ai:ml_model_confidence_distribution
+      expr: |
+        histogram_quantile(0.5,
+          sum(rate(inference_confidence_score_bucket[5m])) by (le, model_version)
+        )
+      labels:
+        metric_type: "model_quality"
+        percentile: "50"
+    
+    # Low Confidence Detection Rate
+    - record: its_camera_ai:ml_low_confidence_rate
+      expr: |
+        (
+          sum(rate(inference_low_confidence_total[5m])) by (model_version) /
+          sum(rate(inference_requests_total[5m])) by (model_version) * 100
+        )
+      labels:
+        metric_type: "model_quality"
+        threshold: "60%"
+    
+    # Model Drift Score (24h window)
+    - record: its_camera_ai:ml_model_drift_score_24h
+      expr: |
+        (
+          abs(
+            avg_over_time(inference_confidence_score[24h]) -
+            avg_over_time(inference_confidence_score[7d] offset 7d)
+          ) / avg_over_time(inference_confidence_score[7d] offset 7d)
+        ) by (model_version)
+      labels:
+        metric_type: "drift_detection"
+        window: "24h"
+    
+    # Data Distribution Shift Detection
+    - record: its_camera_ai:ml_data_distribution_shift
+      expr: |
+        stddev_over_time(inference_confidence_score[1h]) /
+        avg_over_time(inference_confidence_score[1h])
+      labels:
+        metric_type: "drift_detection"
+        detection_type: "distribution_shift"
+    
+    # Model Performance Degradation Rate
+    - record: its_camera_ai:ml_performance_degradation_rate
+      expr: |
+        (
+          (avg_over_time(inference_confidence_score[7d] offset 7d) - 
+           avg_over_time(inference_confidence_score[24h])) /
+          avg_over_time(inference_confidence_score[7d] offset 7d) * 100
+        )
+      labels:
+        metric_type: "performance_tracking"
+        comparison_period: "7d_vs_24h"
+
+  - name: its-camera-ai.ml.resource-optimization
+    interval: 30s
+    rules:
+    # ML Resource Optimization Metrics
+    
+    # GPU Memory Efficiency
+    - record: its_camera_ai:ml_gpu_memory_efficiency
+      expr: |
+        (
+          (DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) *
+          (DCGM_FI_DEV_GPU_UTIL / 100)
+        )
+      labels:
+        metric_type: "resource_efficiency"
+        resource: "gpu_memory"
+    
+    # Batch Processing Efficiency
+    - record: its_camera_ai:ml_batch_efficiency
+      expr: |
+        (
+          avg(inference_batch_size) *
+          avg(inference_batch_utilization_ratio)
+        )
+      labels:
+        metric_type: "resource_efficiency"
+        resource: "batch_processing"
+    
+    # Inference Queue Efficiency
+    - record: its_camera_ai:ml_queue_efficiency
+      expr: |
+        (
+          sum(rate(inference_requests_total[5m])) /
+          (inference_queue_length + 1)
+        )
+      labels:
+        metric_type: "resource_efficiency"
+        resource: "queue_processing"
+    
+    # Model Loading Efficiency
+    - record: its_camera_ai:ml_model_loading_efficiency
+      expr: |
+        (
+          sum(rate(model_loading_duration_seconds_total[5m])) /
+          sum(rate(model_loading_requests_total[5m]))
+        )
+      labels:
+        metric_type: "resource_efficiency"
+        resource: "model_loading"
+
+  - name: its-camera-ai.ml.alerts
+    interval: 30s
+    rules:
+    # ML Pipeline Critical Alerts
+    
+    - alert: MLInferenceLatencyP95High
+      expr: its_camera_ai:ml_inference_latency_p95_sli > 0.1
+      for: 2m
+      labels:
+        severity: warning
+        business_impact: high
+        component: ml-inference
+        sla_violation: "true"
+      annotations:
+        summary: "ML inference P95 latency exceeds 100ms target"
+        description: "95th percentile inference latency is {{ $value }}s, above the 100ms SLA target"
+        business_impact: "Traffic detection latency increased, affecting real-time monitoring"
+        model_version: "{{ $labels.model_version }}"
+        performance_degradation: "{{ with query \"(its_camera_ai:ml_inference_latency_p95_sli - 0.1) / 0.1 * 100\" }}{{ . | first | value | printf \"%.1f\" }}{{ end }}% above target"
+        runbook_url: "https://runbooks.its-camera-ai.com/ml-latency-high"
+    
+    - alert: MLInferenceLatencyP99Critical
+      expr: its_camera_ai:ml_inference_latency_p99_sli > 0.2
+      for: 1m
+      labels:
+        severity: critical
+        business_impact: high
+        component: ml-inference
+        sla_violation: "true"
+        escalation_required: "true"
+      annotations:
+        summary: "ML inference P99 latency critical - exceeds 200ms"
+        description: "99th percentile inference latency is {{ $value }}s, above the 200ms critical threshold"
+        business_impact: "Severe traffic detection delays, emergency response may be compromised"
+        model_version: "{{ $labels.model_version }}"
+        immediate_action: "Scale GPU inference resources or enable model optimization"
+        runbook_url: "https://runbooks.its-camera-ai.com/ml-latency-critical"
+    
+    - alert: MLInferenceSuccessRateLow
+      expr: its_camera_ai:ml_inference_success_rate_sli < 0.999
+      for: 3m
+      labels:
+        severity: critical
+        business_impact: high
+        component: ml-inference
+        sla_violation: "true"
+      annotations:
+        summary: "ML inference success rate below 99.9%"
+        description: "Inference success rate is {{ $value | humanizePercentage }}, below the 99.9% SLA"
+        business_impact: "Traffic detection reliability compromised"
+        model_version: "{{ $labels.model_version }}"
+        error_rate: "{{ with query \"(1 - its_camera_ai:ml_inference_success_rate_sli) * 100\" }}{{ . | first | value | printf \"%.3f\" }}{{ end }}%"
+        runbook_url: "https://runbooks.its-camera-ai.com/ml-success-rate-low"
+    
+    - alert: MLModelAccuracyDegraded
+      expr: its_camera_ai:ml_model_accuracy_sli < 0.85
+      for: 10m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: model-quality
+        model_team: "true"
+      annotations:
+        summary: "ML model accuracy below 85% threshold"
+        description: "Model accuracy is {{ $value | humanizePercentage }}, below the 85% target"
+        business_impact: "Traffic detection accuracy reduced, may affect incident detection"
+        model_version: "{{ $labels.model_version }}"
+        recommended_action: "Review model performance and consider retraining"
+        runbook_url: "https://runbooks.its-camera-ai.com/model-accuracy-low"
+    
+    - alert: MLModelDriftDetected
+      expr: its_camera_ai:ml_model_drift_score_24h > 0.15
+      for: 5m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: model-drift
+        model_team: "true"
+        data_science_team: "true"
+      annotations:
+        summary: "ML model drift detected"
+        description: "Model drift score is {{ $value }}, indicating {{ $value | humanizePercentage }} change from baseline"
+        business_impact: "Model performance may degrade over time"
+        model_version: "{{ $labels.model_version }}"
+        drift_magnitude: "{{ with query \"its_camera_ai:ml_model_drift_score_24h * 100\" }}{{ . | first | value | printf \"%.1f\" }}{{ end }}% drift from baseline"
+        recommended_action: "Investigate data distribution changes and consider model retraining"
+        runbook_url: "https://runbooks.its-camera-ai.com/model-drift"
+    
+    - alert: MLLowConfidenceRateHigh
+      expr: its_camera_ai:ml_low_confidence_rate > 20
+      for: 5m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: model-quality
+        model_team: "true"
+      annotations:
+        summary: "High rate of low-confidence predictions"
+        description: "{{ $value }}% of predictions have confidence below 60%"
+        business_impact: "Model uncertainty increased, may affect detection reliability"
+        model_version: "{{ $labels.model_version }}"
+        confidence_threshold: "60%"
+        recommended_action: "Review model training data and consider confidence threshold adjustment"
+        runbook_url: "https://runbooks.its-camera-ai.com/low-confidence-high"
+    
+    - alert: MLGPUMemoryUtilizationHigh
+      expr: its_camera_ai:ml_gpu_memory_efficiency > 0.9
+      for: 3m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: gpu-resources
+        infrastructure_team: "true"
+      annotations:
+        summary: "GPU memory utilization very high"
+        description: "GPU memory efficiency at {{ $value | humanizePercentage }}, risk of OOM errors"
+        business_impact: "Risk of inference failures due to memory exhaustion"
+        recommended_action: "Scale GPU resources or optimize model memory usage"
+        runbook_url: "https://runbooks.its-camera-ai.com/gpu-memory-high"
+    
+    - alert: MLBatchEfficiencyLow
+      expr: its_camera_ai:ml_batch_efficiency < 0.5
+      for: 10m
+      labels:
+        severity: info
+        business_impact: low
+        component: resource-optimization
+        performance_team: "true"
+      annotations:
+        summary: "ML batch processing efficiency low"
+        description: "Batch efficiency at {{ $value | humanizePercentage }}, opportunity for optimization"
+        business_impact: "Suboptimal resource utilization, higher costs"
+        potential_improvement: "{{ with query \"(0.8 - its_camera_ai:ml_batch_efficiency) / its_camera_ai:ml_batch_efficiency * 100\" }}{{ . | first | value | printf \"%.1f\" }}{{ end }}% efficiency gain possible"
+        recommended_action: "Optimize batch sizes and GPU utilization"
+        runbook_url: "https://runbooks.its-camera-ai.com/batch-optimization"
+    
+    - alert: MLInferenceQueueBacklog
+      expr: inference_queue_length > 100
+      for: 2m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: inference-queue
+        infrastructure_team: "true"
+      annotations:
+        summary: "ML inference queue backlog building"
+        description: "Inference queue has {{ $value }} pending requests, above 100 threshold"
+        business_impact: "Inference latency will increase, affecting real-time processing"
+        queue_wait_time: "{{ with query \"inference_queue_wait_time_seconds\" }}{{ . | first | value | printf \"%.1f\" }}{{ end }}s"
+        recommended_action: "Scale inference workers or optimize processing pipeline"
+        runbook_url: "https://runbooks.its-camera-ai.com/queue-backlog"
+
+  - name: its-camera-ai.ml.model-lifecycle
+    interval: 300s  # 5 minutes
+    rules:
+    # Model Lifecycle Management
+    
+    # Model Version Distribution
+    - record: its_camera_ai:ml_model_version_distribution
+      expr: |
+        count by (model_version) (
+          {__name__=~"inference_.*", model_version!=""}
+        )
+      labels:
+        metric_type: "model_lifecycle"
+    
+    # Model Deployment Success Rate
+    - record: its_camera_ai:ml_model_deployment_success_rate
+      expr: |
+        (
+          sum(rate(model_deployment_success_total[5m])) /
+          sum(rate(model_deployment_attempts_total[5m]))
+        )
+      labels:
+        metric_type: "model_lifecycle"
+    
+    # A/B Testing Performance Comparison
+    - record: its_camera_ai:ml_ab_test_performance_ratio
+      expr: |
+        (
+          avg(inference_confidence_score{model_version=~".*-b"}) /
+          avg(inference_confidence_score{model_version=~".*-a"})
+        )
+      labels:
+        metric_type: "ab_testing"
+    
+    # Model Rollback Rate
+    - record: its_camera_ai:ml_model_rollback_rate
+      expr: |
+        (
+          sum(rate(model_rollback_total[5m])) /
+          sum(rate(model_deployment_attempts_total[5m]))
+        )
+      labels:
+        metric_type: "model_lifecycle"

@@ -3,6 +3,8 @@
 
 .PHONY: help install install-dev install-ml install-gpu install-edge install-all
 .PHONY: test test-unit test-integration test-ml test-gpu test-slow test-coverage test-infra
+.PHONY: test-e2e test-performance test-load test-security test-benchmark
+.PHONY: quick-test full-test ci-pipeline local-ci performance-report validate-deployment
 .PHONY: lint format type-check security-check code-quality pre-commit
 .PHONY: docker-build docker-build-gpu docker-build-prod docker-build-edge
 .PHONY: docker-up docker-down docker-logs docker-shell docker-clean
@@ -10,7 +12,7 @@
 .PHONY: db-migrate db-seed db-reset db-backup db-restore db-init
 .PHONY: deploy-dev deploy-prod monitoring jupyter
 .PHONY: clean clean-cache clean-logs clean-models clean-all
-.PHONY: docs docs-serve benchmark profile status
+.PHONY: docs docs-serve benchmark profile status models-download models-validate
 
 # Platform Detection
 OS := $(shell uname -s)
@@ -77,11 +79,18 @@ help:
 	@echo "  test            Run all tests"
 	@echo "  test-unit       Run unit tests only"
 	@echo "  test-integration Run integration tests"
+	@echo "  test-e2e        Run end-to-end tests"
+	@echo "  test-performance Run performance tests"
+	@echo "  test-load       Run load tests"
+	@echo "  test-security   Run security tests"
 	@echo "  test-ml         Run ML model tests"
 	@echo "  test-gpu        Run GPU tests (requires CUDA)"
 	@echo "  test-slow       Run slow tests"
 	@echo "  test-coverage   Generate coverage report"
 	@echo "  test-infra      Test infrastructure components"
+	@echo "  quick-test      Run quick test suite (unit + basic integration)"
+	@echo "  full-test       Run full test suite"
+	@echo "  test-benchmark  Run all benchmark tests"
 	@echo "  lint            Run all linters"
 	@echo "  format          Format code with black and isort"
 	@echo "  type-check      Run mypy type checking"
@@ -136,6 +145,12 @@ help:
 	@echo "  db-restore      Restore database from backup"
 	@echo "  db-init         Initialize all databases with schemas"
 	@echo ""
+	@echo "$(YELLOW)CI/CD Pipeline:$(NC)"
+	@echo "  ci-pipeline     Run complete CI pipeline"
+	@echo "  local-ci        Run local CI pipeline simulation"
+	@echo "  performance-report Generate performance report"
+	@echo "  validate-deployment Validate deployment readiness"
+	@echo ""
 	@echo "$(YELLOW)Deployment & Services:$(NC)"
 	@echo "  deploy-dev      Deploy to development environment"
 	@echo "  deploy-prod     Deploy to production environment"
@@ -152,6 +167,8 @@ help:
 	@echo "  docs-serve      Serve documentation locally"
 	@echo "  benchmark       Run performance benchmarks"
 	@echo "  profile         Profile application performance"
+	@echo "  models-download Download test models"
+	@echo "  models-validate Validate test models"
 	@echo "  status          Show project implementation status"
 
 # Environment Setup
@@ -226,6 +243,38 @@ test-infra:
 	$(UV) run python test_infrastructure.py
 	@echo "$(GREEN)Infrastructure tests completed!$(NC)"
 
+test-e2e:
+	@echo "$(BLUE)Running end-to-end tests...$(NC)"
+	$(UV) run pytest tests/e2e/ -v --junitxml=junit-e2e.xml --timeout=600 -m "e2e"
+
+test-performance:
+	@echo "$(BLUE)Running performance tests...$(NC)"
+	$(UV) run pytest tests/performance/ -v --junitxml=junit-performance.xml --timeout=600 -m "performance"
+
+test-load:
+	@echo "$(BLUE)Running load tests...$(NC)"
+	$(UV) run pytest tests/load/ -v --junitxml=junit-load.xml --timeout=600 -m "benchmark"
+
+test-security:
+	@echo "$(BLUE)Running security tests...$(NC)"
+	$(UV) run pytest tests/security/ -v --junitxml=junit-security.xml --timeout=600
+
+test-benchmark: test-performance test-load
+	@echo "$(GREEN)All benchmark tests completed!$(NC)"
+
+quick-test:
+	@echo "$(BLUE)Running quick test suite...$(NC)"
+	$(UV) run pytest tests/unit/ tests/integration/ -v \
+		--cov=src/its_camera_ai \
+		--cov-report=html:htmlcov/quick \
+		--cov-report=xml:coverage-quick.xml \
+		--junitxml=junit-quick.xml \
+		--timeout=300 \
+		-m "not slow and not benchmark"
+
+full-test: test-unit test-integration test-e2e test-security
+	@echo "$(GREEN)Full test suite completed!$(NC)"
+
 lint:
 	@echo "$(BLUE)Running linters...$(NC)"
 	$(UV) run ruff check src/ tests/
@@ -253,6 +302,62 @@ code-quality: lint type-check security-check
 pre-commit:
 	@echo "$(BLUE)Running pre-commit hooks...$(NC)"
 	$(UV) run pre-commit run --all-files
+
+# CI/CD Pipeline Commands
+local-ci: code-quality quick-test
+	@echo "$(GREEN)Local CI pipeline completed successfully!$(NC)"
+
+ci-pipeline: code-quality full-test performance-report
+	@echo "$(GREEN)CI pipeline completed successfully!$(NC)"
+
+performance-report:
+	@echo "$(BLUE)Generating performance report...$(NC)"
+	mkdir -p reports/
+	python scripts/generate_performance_report.py \
+		--output reports/performance-report.html \
+		--json-output reports/performance-summary.json \
+		--junit-dir .
+	@echo "$(GREEN)Performance report available at reports/performance-report.html$(NC)"
+
+validate-deployment:
+	@echo "$(BLUE)Validating deployment readiness...$(NC)"
+	@echo "Checking test coverage..."
+	@grep -o 'TOTAL.*[0-9]*%' coverage-*.xml | tail -1 || echo "No coverage data found"
+	@echo "Checking test results..."
+	@python -c "
+	import xml.etree.ElementTree as ET
+	import glob
+	import sys
+	
+	total_tests = 0
+	total_failures = 0
+	
+	for file in glob.glob('junit-*.xml'):
+		try:
+			tree = ET.parse(file)
+			root = tree.getroot()
+			tests = int(root.get('tests', 0))
+			failures = int(root.get('failures', 0))
+			errors = int(root.get('errors', 0))
+			
+			total_tests += tests
+			total_failures += failures + errors
+		except:
+			pass
+	
+	if total_tests == 0:
+		print('❌ No test results found')
+		sys.exit(1)
+	
+	success_rate = ((total_tests - total_failures) / total_tests) * 100
+	print(f'Test Results: {total_tests} tests, {success_rate:.1f}% success rate')
+	
+	if success_rate < 95.0:
+		print(f'❌ Success rate {success_rate:.1f}% below 95% threshold')
+		sys.exit(1)
+	
+	print('✅ Deployment validation passed')
+	"
 
 # Platform Setup Commands
 setup-platform: platform-info
@@ -511,6 +616,14 @@ profile:
 	@echo "$(BLUE)Profiling application performance...$(NC)"
 	$(UV) run python -m cProfile -o profile.stats main.py
 	$(UV) run python -c "import pstats; pstats.Stats('profile.stats').sort_stats('cumulative').print_stats(20)"
+
+models-download:
+	@echo "$(BLUE)Downloading test models...$(NC)"
+	python scripts/download_test_models.py --download-all
+
+models-validate:
+	@echo "$(BLUE)Validating test models...$(NC)"
+	python scripts/download_test_models.py --validate
 
 # Inference Optimization Commands
 setup-triton:

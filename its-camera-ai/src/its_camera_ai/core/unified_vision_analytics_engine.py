@@ -20,6 +20,7 @@ Performance Targets:
 
 import asyncio
 import contextlib
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,6 +31,13 @@ import numpy as np
 import torch
 from dependency_injector.wiring import Provide
 
+# Kafka integration for real-time event streaming
+try:
+    from aiokafka import AIOKafkaProducer
+    KAFKA_AVAILABLE = True
+except ImportError:
+    KAFKA_AVAILABLE = False
+
 from ..core.config import Settings
 from ..core.cuda_streams_manager import CudaStreamsManager, StreamPriority
 from ..core.logging import get_logger
@@ -38,6 +46,10 @@ from ..ml.batch_processor import (
     AdaptiveBatchSizer,
     BatchMetrics,
     RequestPriority,
+)
+from ..ml.core_vision_engine import CoreVisionEngine, VisionConfig
+from ..ml.inference_optimizer import (
+    DetectionResult,
 )
 from ..ml.quality_score_calculator import QualityScoreCalculator
 from ..services.analytics_dtos import (
@@ -322,6 +334,24 @@ class UnifiedVisionAnalyticsEngine:
         self.cache_service = cache_service
         self.settings = settings
 
+        # ML Pipeline Components - Core Vision Engine for YOLO11 inference
+        self.core_vision_engine = None  # Will be initialized in start()
+
+        # Kafka producer for real-time event streaming
+        self.kafka_producer = None
+        self.kafka_enabled = getattr(settings, "kafka_enabled", False)
+        self.kafka_bootstrap_servers = getattr(settings, "kafka_bootstrap_servers", ["localhost:9092"])
+
+        # Event streaming topics
+        self.detection_topic = "detection_events"
+        self.analytics_topic = "analytics_events"
+        self.metrics_topic = "metrics_events"
+
+        # Performance tracking
+        self.total_frames_processed = 0
+        self.processing_times = deque(maxlen=1000)
+        self.error_count = 0
+
         # Device configuration
         self.device_ids = getattr(settings, "gpu_device_ids", [0])
 
@@ -384,6 +414,13 @@ class UnifiedVisionAnalyticsEngine:
             # Initialize CUDA streams manager
             await self.streams_manager.start()
 
+            # Initialize Core Vision Engine (YOLO11 ML Pipeline)
+            await self._initialize_core_vision_engine()
+
+            # Initialize Kafka producer for event streaming
+            if self.kafka_enabled and KAFKA_AVAILABLE:
+                await self._initialize_kafka_producer()
+
             # Initialize inference engine
             if hasattr(self.inference_engine, "start"):
                 await self.inference_engine.start()
@@ -397,7 +434,7 @@ class UnifiedVisionAnalyticsEngine:
             self.metrics_task = asyncio.create_task(self._collect_metrics())
 
             self.state = ProcessingState.RUNNING
-            logger.info(f"Engine started with {len(self.processing_tasks)} GPU workers and streams manager")
+            logger.info(f"Engine started with {len(self.processing_tasks)} GPU workers, streams manager, and {'Kafka streaming' if self.kafka_producer else 'local processing'}")
 
         except Exception as e:
             self.state = ProcessingState.ERROR
@@ -434,6 +471,11 @@ class UnifiedVisionAnalyticsEngine:
 
         # Stop memory manager
         await self.memory_manager.stop()
+
+        self.state = ProcessingState.STOPPED
+        # Stop Kafka producer
+        if self.kafka_producer:
+            await self.kafka_producer.stop()
 
         self.state = ProcessingState.STOPPED
         logger.info("Engine stopped")
@@ -488,6 +530,50 @@ class UnifiedVisionAnalyticsEngine:
         except TimeoutError:
             self.metrics.requests_expired += 1
             raise RuntimeError("Request timeout - system overloaded")
+
+    async def _initialize_core_vision_engine(self):
+        """Initialize the Core Vision Engine for YOLO11 ML inference."""
+        try:
+            # Create vision configuration
+            vision_config = VisionConfig(
+                model_path=getattr(self.settings, "model_path", "models/yolo11s.pt"),
+                confidence_threshold=getattr(self.settings, "confidence_threshold", 0.5),
+                iou_threshold=getattr(self.settings, "iou_threshold", 0.4),
+                max_detections=getattr(self.settings, "max_detections", 1000),
+                target_fps=getattr(self.settings, "target_fps", 30),
+                enable_tensorrt=getattr(self.settings, "enable_tensorrt", True),
+                batch_size=getattr(self.settings, "inference_batch_size", 8),
+                num_workers=len(self.device_ids),
+                device_ids=self.device_ids,
+            )
+
+            # Initialize Core Vision Engine
+            self.core_vision_engine = CoreVisionEngine(vision_config)
+            await self.core_vision_engine.start()
+
+            logger.info(f"Core Vision Engine initialized with {len(self.device_ids)} GPUs")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize Core Vision Engine: {e}")
+            raise
+
+    async def _initialize_kafka_producer(self):
+        """Initialize Kafka producer for real-time event streaming."""
+        try:
+            self.kafka_producer = AIOKafkaProducer(
+                bootstrap_servers=self.kafka_bootstrap_servers,
+                value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+                compression_type='snappy',
+                max_batch_size=16384,
+                linger_ms=10,  # Small delay for batching
+            )
+
+            await self.kafka_producer.start()
+            logger.info(f"Kafka producer initialized with servers: {self.kafka_bootstrap_servers}")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize Kafka producer: {e}")
+            self.kafka_producer = None
 
     async def process_batch(
         self,
@@ -669,10 +755,16 @@ class UnifiedVisionAnalyticsEngine:
                 tier=MemoryTier.HOT,
             )
 
-            # Process inference
-            inference_results = await self.inference_engine.predict_batch(
-                frames, frame_ids, camera_ids, device_id=device_id
-            )
+            # Process inference using Core Vision Engine
+            if self.core_vision_engine:
+                inference_results = await self._run_vision_inference(
+                    frames, frame_ids, camera_ids, device_id
+                )
+            else:
+                # Fallback to direct inference engine
+                inference_results = await self.inference_engine.predict_batch(
+                    frames, frame_ids, camera_ids, device_id=device_id
+                )
 
             inference_time = (time.time() - inference_start) * 1000
 
@@ -790,6 +882,16 @@ class UnifiedVisionAnalyticsEngine:
                     )
                 )
 
+                # Stream detection event for real-time processing
+                await self._stream_detection_event(
+                    detection_results, request.camera_id, request.frame_id
+                )
+
+                # Stream analytics event for dashboard updates
+                await self._stream_analytics_event(
+                    analytics_result, request.camera_id, request.frame_id
+                )
+
             analytics_time = (time.time() - analytics_start) * 1000
 
             # Create metadata track for MP4 encoding
@@ -845,6 +947,138 @@ class UnifiedVisionAnalyticsEngine:
             total_processing_time_ms=0.0,
             batch_size=1,
         )
+
+    async def _run_vision_inference(
+        self,
+        frames: list[np.ndarray],
+        frame_ids: list[str],
+        camera_ids: list[str],
+        device_id: int
+    ) -> list[DetectionResult]:
+        """Run ML inference using Core Vision Engine."""
+        try:
+            # Process frames through Core Vision Engine
+            results = []
+
+            for frame, frame_id, camera_id in zip(frames, frame_ids, camera_ids, strict=False):
+                # Run YOLO11 inference
+                vision_result = await self.core_vision_engine.process_frame(
+                    frame=frame,
+                    camera_id=camera_id,
+                    frame_id=frame_id
+                )
+
+                # Convert vision result to DetectionResult format
+                detection_result = DetectionResult(
+                    detections=vision_result.detections,
+                    inference_time_ms=vision_result.processing_time_ms,
+                    model_version=vision_result.model_version,
+                    confidence_threshold=vision_result.confidence_threshold,
+                    frame_id=frame_id,
+                    camera_id=camera_id,
+                    device_id=device_id,
+                )
+
+                results.append(detection_result)
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Core Vision Engine inference failed: {e}")
+            # Return empty results for failed inference
+            return [
+                DetectionResult(
+                    detections=[],
+                    inference_time_ms=0.0,
+                    model_version="error",
+                    confidence_threshold=0.5,
+                    frame_id=frame_id,
+                    camera_id=camera_id,
+                    device_id=device_id,
+                )
+                for frame_id, camera_id in zip(frame_ids, camera_ids, strict=False)
+            ]
+
+    async def _stream_detection_event(
+        self,
+        detections: list[DetectionResultDTO],
+        camera_id: str,
+        frame_id: str
+    ):
+        """Stream detection event to Kafka for real-time processing."""
+        if not self.kafka_producer:
+            return
+
+        try:
+            # Create detection event
+            event = {
+                "event_type": "detection",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "camera_id": camera_id,
+                "frame_id": frame_id,
+                "detections": [
+                    {
+                        "class_name": det.class_name,
+                        "confidence": det.confidence,
+                        "bbox": {
+                            "x_min": det.x_min,
+                            "y_min": det.y_min,
+                            "x_max": det.x_max,
+                            "y_max": det.y_max
+                        },
+                        "tracking_id": det.tracking_id,
+                        "vehicle_type": det.vehicle_type,
+                        "speed": det.speed,
+                        "direction": det.direction,
+                        "is_vehicle": det.is_vehicle,
+                    }
+                    for det in detections
+                ],
+                "vehicle_count": len([d for d in detections if d.is_vehicle]),
+            }
+
+            # Send to Kafka
+            await self.kafka_producer.send(
+                self.detection_topic,
+                value=event,
+                key=camera_id.encode('utf-8')
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to stream detection event: {e}")
+
+    async def _stream_analytics_event(
+        self,
+        analytics_result: Any,
+        camera_id: str,
+        frame_id: str
+    ):
+        """Stream analytics event to Kafka for dashboard updates."""
+        if not self.kafka_producer or not analytics_result:
+            return
+
+        try:
+            # Create analytics event
+            event = {
+                "event_type": "analytics",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "camera_id": camera_id,
+                "frame_id": frame_id,
+                "violations": len(analytics_result.violations) if hasattr(analytics_result, 'violations') else 0,
+                "anomalies": len(analytics_result.anomalies) if hasattr(analytics_result, 'anomalies') else 0,
+                "incidents": len(getattr(analytics_result, 'incidents', [])),
+                "processing_time_ms": analytics_result.processing_time_ms if hasattr(analytics_result, 'processing_time_ms') else 0,
+            }
+
+            # Send to Kafka
+            await self.kafka_producer.send(
+                self.analytics_topic,
+                value=event,
+                key=camera_id.encode('utf-8')
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to stream analytics event: {e}")
 
     async def _convert_inference_to_dtos(
         self, inference_result: Any, request: UnifiedBatchRequest, frame: np.ndarray

@@ -1,0 +1,653 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "ITS Camera AI - ML Pipeline Performance",
+    "tags": ["its-camera-ai", "ml-pipeline", "performance", "gpu"],
+    "style": "dark",
+    "timezone": "UTC",
+    "refresh": "15s",
+    "time": {
+      "from": "now-30m",
+      "to": "now"
+    },
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Inference Performance Overview",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+        "collapsed": false
+      },
+      {
+        "id": 2,
+        "title": "Inference Latency Distribution",
+        "type": "histogram",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "50th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "95th percentile",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "99th percentile",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.999, sum(rate(inference_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "99.9th percentile",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "s",
+            "custom": {
+              "axisLabel": "Latency (seconds)",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.05},
+                {"color": "red", "value": 0.1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1}
+      },
+      {
+        "id": 3,
+        "title": "Inference Throughput",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(inference_requests_total[5m]))",
+            "legendFormat": "Total Requests/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(inference_requests_total{status=\"success\"}[5m]))",
+            "legendFormat": "Successful Requests/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(inference_requests_total{status=\"error\"}[5m]))",
+            "legendFormat": "Failed Requests/sec",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "reqps",
+            "custom": {
+              "axisLabel": "Requests/sec",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1}
+      },
+      {
+        "id": 4,
+        "title": "Model Performance by Version",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg by (model_version) (histogram_quantile(0.95, rate(inference_duration_seconds_bucket[5m])))",
+            "legendFormat": "Model {{model_version}} - 95th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(inference_requests_total[5m]) by (model_version)",
+            "legendFormat": "Model {{model_version}} - RPS",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*RPS.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "reqps"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*percentile.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "s"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 9}
+      },
+      {
+        "id": 5,
+        "title": "GPU Resource Utilization",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17},
+        "collapsed": false
+      },
+      {
+        "id": 6,
+        "title": "GPU Utilization",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "DCGM_FI_DEV_GPU_UTIL",
+            "legendFormat": "GPU {{gpu}} Utilization %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "custom": {
+              "axisLabel": "GPU Utilization %",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18}
+      },
+      {
+        "id": 7,
+        "title": "GPU Memory Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "(DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) * 100",
+            "legendFormat": "GPU {{gpu}} Memory %",
+            "refId": "A"
+          },
+          {
+            "expr": "DCGM_FI_DEV_FB_USED",
+            "legendFormat": "GPU {{gpu}} Used (MB)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Memory %.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percent"
+                },
+                {
+                  "id": "min",
+                  "value": 0
+                },
+                {
+                  "id": "max",
+                  "value": 100
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Used \\(MB\\).*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "decbytes"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18}
+      },
+      {
+        "id": 8,
+        "title": "GPU Temperature & Power",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "DCGM_FI_DEV_GPU_TEMP",
+            "legendFormat": "GPU {{gpu}} Temperature (°C)",
+            "refId": "A"
+          },
+          {
+            "expr": "DCGM_FI_DEV_POWER_USAGE",
+            "legendFormat": "GPU {{gpu}} Power Usage (W)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Temperature.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "celsius"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "steps": [
+                      {"color": "green", "value": null},
+                      {"color": "yellow", "value": 70},
+                      {"color": "red", "value": 80}
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Power.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "watt"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26}
+      },
+      {
+        "id": 9,
+        "title": "Batch Processing Efficiency",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg(inference_batch_size)",
+            "legendFormat": "Average Batch Size",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(inference_batch_utilization_ratio)",
+            "legendFormat": "Batch Utilization Ratio",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(inference_batches_processed_total[5m])",
+            "legendFormat": "Batches/sec",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Batch Utilization Ratio"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percentunit"
+                },
+                {
+                  "id": "min",
+                  "value": 0
+                },
+                {
+                  "id": "max",
+                  "value": 1
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26}
+      },
+      {
+        "id": 10,
+        "title": "Model Accuracy & Drift Detection",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 34},
+        "collapsed": false
+      },
+      {
+        "id": 11,
+        "title": "Detection Accuracy",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg(inference_confidence_score)",
+            "legendFormat": "Average Confidence Score",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(inference_confidence_score_bucket[5m])) by (le))",
+            "legendFormat": "95th Percentile Confidence",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(inference_low_confidence_total[5m]) / rate(inference_requests_total[5m]) * 100",
+            "legendFormat": "Low Confidence Rate %",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "min": 0,
+            "max": 1,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Rate %.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percent"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                },
+                {
+                  "id": "max",
+                  "value": 100
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 35}
+      },
+      {
+        "id": 12,
+        "title": "Model Drift Indicators",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "model_drift_score",
+            "legendFormat": "Model {{model_version}} Drift Score",
+            "refId": "A"
+          },
+          {
+            "expr": "model_accuracy_degradation_rate",
+            "legendFormat": "Accuracy Degradation Rate",
+            "refId": "B"
+          },
+          {
+            "expr": "data_distribution_shift_score",
+            "legendFormat": "Data Distribution Shift",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.3},
+                {"color": "red", "value": 0.7}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 35}
+      },
+      {
+        "id": 13,
+        "title": "Detection Categories",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum by (detection_type) (rate(detections_total[5m]))",
+            "legendFormat": "{{detection_type}}/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "reqps",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "stacking": {
+                "mode": "normal"
+              }
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 43}
+      },
+      {
+        "id": 14,
+        "title": "Inference Queue Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "inference_queue_length",
+            "legendFormat": "Queue Length",
+            "refId": "A"
+          },
+          {
+            "expr": "inference_queue_wait_time_seconds",
+            "legendFormat": "Queue Wait Time",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(inference_queue_timeouts_total[5m])",
+            "legendFormat": "Queue Timeouts/sec",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Queue Wait Time"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "s"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 43}
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "gpu_node",
+          "type": "query",
+          "query": "label_values(DCGM_FI_DEV_GPU_UTIL, instance)",
+          "current": {
+            "value": "All",
+            "text": "All"
+          },
+          "options": [],
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        },
+        {
+          "name": "model_version",
+          "type": "query",
+          "query": "label_values(inference_requests_total, model_version)",
+          "current": {
+            "value": "All",
+            "text": "All"
+          },
+          "options": [],
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Model Deployments",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "changes(inference_model_version[1h]) > 0",
+          "iconColor": "blue",
+          "titleFormat": "Model Deployment: {{model_version}}",
+          "tagKeys": "model_version"
+        },
+        {
+          "name": "Drift Alerts",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertname=~\".*Drift.*\", alertstate=\"firing\"}",
+          "iconColor": "orange",
+          "titleFormat": "Drift Alert: {{alertname}}",
+          "tagKeys": "alertname"
+        }
+      ]
+    }
+  }
+}

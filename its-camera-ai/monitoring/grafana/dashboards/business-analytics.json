@@ -1,0 +1,689 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "ITS Camera AI - Business Analytics & Traffic Intelligence",
+    "tags": ["its-camera-ai", "business", "analytics", "traffic"],
+    "style": "dark",
+    "timezone": "UTC",
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Traffic Overview",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+        "collapsed": false
+      },
+      {
+        "id": 2,
+        "title": "Vehicle Detection Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(traffic_vehicles_detected_total[5m]))",
+            "legendFormat": "Vehicles/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 10},
+                {"color": "green", "value": 50}
+              ]
+            },
+            "unit": "short",
+            "displayName": "Vehicles Detected/sec"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 1}
+      },
+      {
+        "id": 3,
+        "title": "Active Camera Coverage",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(camera_active_total)",
+            "legendFormat": "Active Cameras",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 800},
+                {"color": "green", "value": 1000}
+              ]
+            },
+            "unit": "short",
+            "displayName": "Active Cameras"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 1}
+      },
+      {
+        "id": 4,
+        "title": "Incident Detection Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(traffic_incidents_detected_total[5m]))",
+            "legendFormat": "Incidents/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 0.1},
+                {"color": "red", "value": 1}
+              ]
+            },
+            "unit": "short",
+            "displayName": "Incidents/sec"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 1}
+      },
+      {
+        "id": 5,
+        "title": "Data Processing Volume",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(data_processed_bytes_total[5m])) * 86400 / 1e12",
+            "legendFormat": "TB/day",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 8},
+                {"color": "red", "value": 12}
+              ]
+            },
+            "unit": "short",
+            "decimals": 2,
+            "displayName": "Data Processing (TB/day)"
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 1}
+      },
+      {
+        "id": 6,
+        "title": "Traffic Flow Analysis",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum by (location) (rate(traffic_vehicles_detected_total[5m]))",
+            "legendFormat": "{{location}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short",
+            "custom": {
+              "axisLabel": "Vehicles/sec",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9}
+      },
+      {
+        "id": 7,
+        "title": "Vehicle Classification",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (vehicle_type) (increase(traffic_vehicles_detected_total[1h]))",
+            "legendFormat": "{{vehicle_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 9},
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "pieType": "pie",
+          "tooltip": {
+            "mode": "single"
+          },
+          "legend": {
+            "displayMode": "table",
+            "placement": "right",
+            "values": ["value", "percent"]
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Speed Analytics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17},
+        "collapsed": false
+      },
+      {
+        "id": 9,
+        "title": "Average Traffic Speed",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg by (location) (traffic_average_speed_kmh)",
+            "legendFormat": "{{location}}",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(traffic_average_speed_kmh)",
+            "legendFormat": "System Average",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "velocitykmh",
+            "custom": {
+              "axisLabel": "Speed (km/h)",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 30},
+                {"color": "green", "value": 60}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18}
+      },
+      {
+        "id": 10,
+        "title": "Speed Distribution",
+        "type": "histogram",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.25, sum(rate(traffic_speed_kmh_bucket[5m])) by (le))",
+            "legendFormat": "25th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(traffic_speed_kmh_bucket[5m])) by (le))",
+            "legendFormat": "50th percentile",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.75, sum(rate(traffic_speed_kmh_bucket[5m])) by (le))",
+            "legendFormat": "75th percentile",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(traffic_speed_kmh_bucket[5m])) by (le))",
+            "legendFormat": "95th percentile",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "velocitykmh",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18}
+      },
+      {
+        "id": 11,
+        "title": "Traffic Density Heatmap",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "sum by (location, hour) (increase(traffic_vehicles_detected_total[1h]))",
+            "legendFormat": "{{location}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "spectrum"
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+        "options": {
+          "calculate": false,
+          "cellGap": 1,
+          "cellValues": {},
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-orange",
+            "mode": "spectrum",
+            "reverse": false,
+            "scale": "exponential",
+            "scheme": "Spectral",
+            "steps": 64
+          },
+          "exemplars": {
+            "color": "rgba(255,0,255,0.7)"
+          },
+          "filterValues": {
+            "le": 1e-9
+          },
+          "legend": {
+            "show": true
+          },
+          "rowsFrame": {
+            "layout": "auto"
+          },
+          "tooltip": {
+            "show": true,
+            "yHistogram": false
+          },
+          "yAxis": {
+            "axisPlacement": "left",
+            "reverse": false,
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Incident Management",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 34},
+        "collapsed": false
+      },
+      {
+        "id": 13,
+        "title": "Incident Types",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum by (incident_type) (rate(traffic_incidents_detected_total[5m]))",
+            "legendFormat": "{{incident_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short",
+            "custom": {
+              "axisLabel": "Incidents/sec",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "stacking": {
+                "mode": "normal"
+              }
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 35}
+      },
+      {
+        "id": 14,
+        "title": "Incident Response Times",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg(incident_detection_time_seconds)",
+            "legendFormat": "Detection Time",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(incident_response_time_seconds)",
+            "legendFormat": "Response Time",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(incident_resolution_time_seconds)",
+            "legendFormat": "Resolution Time",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "s",
+            "custom": {
+              "axisLabel": "Time (seconds)",
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 300},
+                {"color": "red", "value": 600}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 35}
+      },
+      {
+        "id": 15,
+        "title": "System Performance Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 43},
+        "collapsed": false
+      },
+      {
+        "id": 16,
+        "title": "Data Quality Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "avg(data_quality_score)",
+            "legendFormat": "Overall Data Quality",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(camera_image_quality_score)",
+            "legendFormat": "Image Quality",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(data_validation_failures_total[5m]) / rate(data_processed_total[5m]) * 100",
+            "legendFormat": "Validation Failure Rate %",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "min": 0,
+            "max": 1,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Rate %.*"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percent"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                },
+                {
+                  "id": "max",
+                  "value": 100
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44}
+      },
+      {
+        "id": 17,
+        "title": "Cost Optimization Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(infrastructure_cost_per_hour)",
+            "legendFormat": "Infrastructure Cost/hour",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(traffic_vehicles_detected_total[5m])) / sum(infrastructure_cost_per_hour)",
+            "legendFormat": "Detections per $ per hour",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(resource_utilization_efficiency)",
+            "legendFormat": "Resource Efficiency",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Infrastructure Cost/hour"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "currencyUSD"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Resource Efficiency"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percentunit"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44}
+      },
+      {
+        "id": 18,
+        "title": "SLA Compliance Dashboard",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "its_camera_ai:api_availability_sli * 100",
+            "legendFormat": "API Availability (%)",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "its_camera_ai:inference_availability_sli * 100",
+            "legendFormat": "Inference Availability (%)",
+            "refId": "B",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "(1 - (its_camera_ai:inference_latency_sli > 0.1)) * 100",
+            "legendFormat": "Latency SLA Compliance (%)",
+            "refId": "C",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "avg(uptime_percentage_24h)",
+            "legendFormat": "24h Uptime (%)",
+            "refId": "D",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 99},
+                {"color": "green", "value": 99.9}
+              ]
+            },
+            "unit": "percent",
+            "decimals": 3,
+            "min": 99,
+            "max": 100
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 52},
+        "options": {
+          "showHeader": true
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "location",
+          "type": "query",
+          "query": "label_values(traffic_vehicles_detected_total, location)",
+          "current": {
+            "value": "All",
+            "text": "All"
+          },
+          "options": [],
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        },
+        {
+          "name": "time_range",
+          "type": "custom",
+          "options": [
+            {"value": "1h", "text": "Last 1 hour"},
+            {"value": "6h", "text": "Last 6 hours"},
+            {"value": "24h", "text": "Last 24 hours"},
+            {"value": "7d", "text": "Last 7 days"}
+          ],
+          "current": {
+            "value": "6h",
+            "text": "Last 6 hours"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Traffic Incidents",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "increase(traffic_incidents_detected_total[1m]) > 0",
+          "iconColor": "red",
+          "titleFormat": "Traffic Incident: {{incident_type}}",
+          "tagKeys": "incident_type,location"
+        },
+        {
+          "name": "System Alerts",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertstate=\"firing\", severity!=\"info\"}",
+          "iconColor": "orange",
+          "titleFormat": "Alert: {{alertname}}",
+          "tagKeys": "alertname,severity"
+        }
+      ]
+    },
+    "links": [
+      {
+        "title": "System Overview",
+        "url": "/d/its-camera-ai-overview",
+        "type": "dashboards"
+      },
+      {
+        "title": "ML Pipeline Performance",
+        "url": "/d/its-camera-ai-ml-pipeline",
+        "type": "dashboards"
+      },
+      {
+        "title": "Infrastructure Monitoring",
+        "url": "/d/its-camera-ai-infrastructure",
+        "type": "dashboards"
+      }
+    ]
+  }
+}

@@ -1,0 +1,317 @@
+# Docker Compose override for GPU-enabled ML inference services
+# This extends the base docker-compose.yml with GPU-specific configurations
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # GPU-enabled ML Inference Service
+  # =============================================================================
+  ml-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu-development
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+        NVIDIA_CUDA_VERSION: "12.1"
+    image: its-camera-ai:gpu-dev
+    container_name: its-camera-ai-ml-inference
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    runtime: nvidia
+    environment:
+      # GPU configuration
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=all
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      # Service configuration
+      - ENVIRONMENT=development
+      - SERVICE_TYPE=ml_inference
+      - GRPC_HOST=0.0.0.0
+      - GRPC_PORT=50051
+      - ML_WORKERS=2
+      - ML_BATCH_SIZE=8
+      - ML_MAX_BATCH_DELAY=10
+      # Model configuration
+      - ML_MODEL_PATH=/app/models
+      - ML_MODEL_NAME=yolo11n.pt
+      - ML_DEVICE=cuda
+      - ML_PRECISION=fp16
+      - ML_OPTIMIZATION_LEVEL=2
+      - ML_TENSORRT_ENABLED=true
+      # Performance configuration
+      - ML_WARMUP_ITERATIONS=10
+      - ML_BENCHMARK_MODE=false
+      - ML_MEMORY_FRACTION=0.8
+      - ML_ALLOW_GROWTH=true
+      # Database configuration
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      # Redis configuration for model caching
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_MODEL_CACHE_DB=5
+      # Kafka configuration for event streaming
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_ML_TOPIC=ml_inference_results
+      # Monitoring configuration
+      - PROMETHEUS_METRICS_ENABLED=true
+      - OPENTELEMETRY_ENABLED=true
+      - OPENTELEMETRY_ENDPOINT=http://otel-collector:4317
+    ports:
+      - "50051:50051"  # gRPC inference server
+      - "8002:8002"    # HTTP metrics endpoint
+    volumes:
+      # Source code for development
+      - ./src:/app/src:rw
+      - ./models:/app/models:rw
+      # GPU drivers and libraries
+      - /usr/local/cuda:/usr/local/cuda:ro
+      # Persistent data
+      - ml_inference_logs:/app/logs
+      - model_cache:/app/.cache
+      - tensorrt_cache:/app/.tensorrt_cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; grpc.insecure_channel('localhost:50051').get_state()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits for GPU service
+    mem_limit: 8g
+    mem_reservation: 4g
+    cpus: 4.0
+
+  # =============================================================================
+  # Triton Inference Server (Alternative high-performance option)
+  # =============================================================================
+  triton-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: triton-inference
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai:triton
+    container_name: its-camera-ai-triton
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "8000:8000"   # HTTP inference
+      - "8001:8001"   # gRPC inference  
+      - "8002:8002"   # Metrics
+    volumes:
+      - ./models:/models:rw
+      - triton_cache:/opt/tritonserver/.cache
+      - triton_logs:/opt/tritonserver/logs
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    profiles:
+      - triton  # Only start when explicitly requested
+    # Resource limits for Triton
+    mem_limit: 12g
+    mem_reservation: 6g
+    cpus: 6.0
+
+  # =============================================================================
+  # GPU-enabled Analytics Worker (for ML post-processing)
+  # =============================================================================
+  worker-ml-analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu-development
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai:gpu-dev
+    container_name: its-camera-ai-worker-ml-analytics
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    runtime: nvidia
+    environment:
+      # GPU configuration
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=all
+      # Worker configuration
+      - ENVIRONMENT=development
+      - WORKER_TYPE=ml_analytics
+      - WORKER_CONCURRENCY=1
+      - WORKER_QUEUE=ml_analytics
+      - CELERY_BROKER_URL=redis://redis:6379/3
+      - CELERY_RESULT_BACKEND=redis://redis:6379/4
+      # ML configuration
+      - ML_DEVICE=cuda
+      - ML_BATCH_SIZE=16
+      - ML_PRECISION=fp16
+      # Database and cache
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    volumes:
+      - ./src:/app/src:rw
+      - ml_worker_logs:/app/logs
+      - model_cache:/app/.cache:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - its-network
+    restart: unless-stopped
+    # Resource limits for GPU worker
+    mem_limit: 4g
+    mem_reservation: 2g
+    cpus: 2.0
+
+  # =============================================================================
+  # Model Registry Service (for model management and versioning)
+  # =============================================================================
+  model-registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+      args:
+        BUILD_DATE: "${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        VCS_REF: "${VCS_REF:-$(git rev-parse --short HEAD)}"
+        VERSION: "${VERSION:-0.1.0-dev}"
+    image: its-camera-ai:dev
+    container_name: its-camera-ai-model-registry
+    environment:
+      - ENVIRONMENT=development
+      - SERVICE_TYPE=model_registry
+      - API_HOST=0.0.0.0
+      - API_PORT=8003
+      # Model storage configuration
+      - MODEL_STORAGE_BACKEND=minio
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=models
+      # Database configuration
+      - DATABASE_URL=postgresql+asyncpg://its_user:its_password@postgres:5432/its_camera_ai
+      # Redis for model metadata caching
+      - REDIS_URL=redis://redis:6379/6
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./src:/app/src:rw
+      - model_registry_logs:/app/logs
+      - model_storage:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - its-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # =============================================================================
+  # NVIDIA DCGM Exporter (for GPU monitoring)
+  # =============================================================================
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.5-3.4.0-ubuntu22.04
+    container_name: its-camera-ai-dcgm-exporter
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "9400:9400"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    networks:
+      - its-network
+    restart: unless-stopped
+    privileged: true
+    pid: host
+
+# =============================================================================
+# Additional GPU-specific volumes
+# =============================================================================
+volumes:
+  # ML inference volumes
+  ml_inference_logs:
+    driver: local
+  model_cache:
+    driver: local
+  tensorrt_cache:
+    driver: local
+  
+  # Triton server volumes
+  triton_cache:
+    driver: local
+  triton_logs:
+    driver: local
+  
+  # ML worker volumes
+  ml_worker_logs:
+    driver: local
+  
+  # Model registry volumes
+  model_registry_logs:
+    driver: local

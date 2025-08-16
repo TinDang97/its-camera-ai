@@ -419,9 +419,9 @@ models/*.bin
 config.local.json
 
 # Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
+# Dockerfile*
+# docker-compose*.yml
+# .dockerignore
 
 # Development tools
 Makefile

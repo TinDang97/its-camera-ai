@@ -18,10 +18,34 @@ import redis.asyncio as redis
 from dependency_injector import containers, providers
 
 from .core.config import get_settings
+from .core.configs.workers import get_workers_config
 from .core.logging import get_logger
 from .models.database import DatabaseManager
 
 logger = get_logger(__name__)
+
+
+async def _init_database_manager(settings):
+    """Initialize and return a database manager with proper lifecycle.
+    
+    This function creates a DatabaseManager, initializes it, and returns it.
+    The Resource provider will handle cleanup automatically.
+    
+    Args:
+        settings: Application settings
+        
+    Returns:
+        Initialized DatabaseManager instance
+    """
+    db_manager = DatabaseManager(settings)
+    await db_manager.initialize()
+
+    # Return the database manager for use in the container
+    # The Resource provider will call cleanup() when disposing
+    try:
+        yield db_manager
+    finally:
+        await db_manager.cleanup()
 
 
 class InfrastructureContainer(containers.DeclarativeContainer):
@@ -40,15 +64,15 @@ class InfrastructureContainer(containers.DeclarativeContainer):
         get_settings,
     )
 
-    # Database Manager - Unified database resource with production optimizations
-    database = providers.Singleton(
-        DatabaseManager,
+    # Database Manager - Resource with proper lifecycle management
+    database = providers.Resource(
+        _init_database_manager,
         settings=settings,
     )
 
-    # Session Factory - Convenience provider for accessing session factory
+    # Session Factory - Direct access to the database manager's get_session method
     session_factory = providers.Factory(
-        lambda db: db.session_factory,
+        lambda db: db.get_session,
         db=database,
     )
 
@@ -461,4 +485,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
     mp4_streaming_service = providers.Singleton(
         "its_camera_ai.services.mp4_streaming_service.MP4StreamingService",
         base_config=config.mp4_streaming,
+    )
+
+    # Background Workers Configuration
+    workers_config = providers.Singleton(
+        get_workers_config,
     )

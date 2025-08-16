@@ -1,0 +1,333 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: its-camera-ai-business-rules
+  namespace: monitoring
+  labels:
+    app: its-camera-ai
+    component: business-monitoring
+    prometheus: kube-prometheus
+    release: prometheus
+spec:
+  groups:
+  - name: its-camera-ai.business.traffic-analytics
+    interval: 30s
+    rules:
+    # Business SLI Calculations
+    
+    # Traffic Detection Efficiency
+    - record: its_camera_ai:traffic_detection_efficiency
+      expr: |
+        (
+          sum(rate(traffic_vehicles_detected_total[5m])) /
+          sum(camera_active_total)
+        )
+      labels:
+        metric_type: "business"
+        sla_tier: "tier1"
+    
+    # System Availability for Business Operations
+    - record: its_camera_ai:business_system_availability
+      expr: |
+        (
+          avg(up{job=~"camera-service|analytics-service|vision-engine"}) 
+        )
+      labels:
+        metric_type: "business"
+        sla_tier: "tier1"
+    
+    # Data Processing Throughput (TB/day)
+    - record: its_camera_ai:data_processing_throughput_tb_day
+      expr: |
+        (
+          sum(rate(data_processed_bytes_total[5m])) * 86400 / 1e12
+        )
+      labels:
+        metric_type: "business"
+        business_unit: "operations"
+    
+    # Traffic Incident Response Time
+    - record: its_camera_ai:incident_response_efficiency
+      expr: |
+        avg(incident_detection_time_seconds + incident_response_time_seconds)
+      labels:
+        metric_type: "business"
+        sla_tier: "tier1"
+    
+    # Revenue Impact Metrics
+    - record: its_camera_ai:revenue_impact_per_hour
+      expr: |
+        (
+          sum(rate(traffic_vehicles_detected_total[5m])) * 3600 * 0.01
+        )
+      labels:
+        metric_type: "business"
+        business_unit: "revenue"
+
+  - name: its-camera-ai.business.cost-optimization
+    interval: 60s
+    rules:
+    # Cost Efficiency Metrics
+    
+    # Cost per Detection
+    - record: its_camera_ai:cost_per_detection_usd
+      expr: |
+        (
+          sum(infrastructure_cost_per_hour) /
+          sum(rate(traffic_vehicles_detected_total[5m]) * 3600)
+        )
+      labels:
+        metric_type: "business"
+        cost_category: "variable"
+    
+    # Resource Utilization Efficiency
+    - record: its_camera_ai:resource_utilization_efficiency
+      expr: |
+        (
+          (avg(DCGM_FI_DEV_GPU_UTIL) / 100) * 0.4 +
+          (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 0.3 +
+          (1 - (avg(node_memory_MemAvailable_bytes) / avg(node_memory_MemTotal_bytes))) * 0.3
+        )
+      labels:
+        metric_type: "business"
+        optimization_target: "efficiency"
+    
+    # Infrastructure ROI
+    - record: its_camera_ai:infrastructure_roi_percentage
+      expr: |
+        (
+          (its_camera_ai:revenue_impact_per_hour - sum(infrastructure_cost_per_hour)) /
+          sum(infrastructure_cost_per_hour) * 100
+        )
+      labels:
+        metric_type: "business"
+        kpi_type: "roi"
+
+  - name: its-camera-ai.business.alerts
+    interval: 30s
+    rules:
+    # Business Critical Alerts
+    
+    - alert: BusinessSystemAvailabilityLow
+      expr: its_camera_ai:business_system_availability < 0.99
+      for: 2m
+      labels:
+        severity: critical
+        business_impact: high
+        component: business-operations
+        escalation_required: "true"
+      annotations:
+        summary: "Business system availability below 99%"
+        description: "Business system availability is {{ $value | humanizePercentage }}, below the 99% SLA target"
+        business_impact: "Traffic monitoring capabilities degraded"
+        estimated_revenue_loss: "${{ with query \"(1 - its_camera_ai:business_system_availability) * its_camera_ai:revenue_impact_per_hour\" }}{{ . | first | value | printf \"%.2f\" }}{{ end }}/hour"
+        runbook_url: "https://runbooks.its-camera-ai.com/business-availability"
+    
+    - alert: TrafficDetectionEfficiencyLow
+      expr: its_camera_ai:traffic_detection_efficiency < 5
+      for: 5m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: traffic-analytics
+      annotations:
+        summary: "Traffic detection efficiency below target"
+        description: "Detecting {{ $value }} vehicles per camera, below the target of 5 vehicles/camera"
+        business_impact: "Reduced traffic monitoring effectiveness"
+        recommended_action: "Check camera positioning and ML model performance"
+        runbook_url: "https://runbooks.its-camera-ai.com/traffic-detection"
+    
+    - alert: DataProcessingVolumeLow
+      expr: its_camera_ai:data_processing_throughput_tb_day < 8
+      for: 10m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: data-pipeline
+      annotations:
+        summary: "Data processing volume below capacity"
+        description: "Processing {{ $value }}TB/day, below the expected 10TB/day capacity"
+        business_impact: "Underutilized infrastructure capacity"
+        recommended_action: "Investigate data pipeline bottlenecks or scale down infrastructure"
+        runbook_url: "https://runbooks.its-camera-ai.com/data-processing"
+    
+    - alert: IncidentResponseTimeSlow
+      expr: its_camera_ai:incident_response_efficiency > 300
+      for: 3m
+      labels:
+        severity: critical
+        business_impact: high
+        component: incident-management
+        escalation_required: "true"
+      annotations:
+        summary: "Incident response time exceeds 5 minutes"
+        description: "Average incident response time is {{ $value }}s, above the 300s SLA"
+        business_impact: "Emergency response capabilities compromised"
+        regulatory_impact: "May violate traffic safety regulations"
+        runbook_url: "https://runbooks.its-camera-ai.com/incident-response"
+    
+    - alert: CostPerDetectionHigh
+      expr: its_camera_ai:cost_per_detection_usd > 0.05
+      for: 15m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: cost-optimization
+        finance_team: "true"
+      annotations:
+        summary: "Cost per detection exceeds budget target"
+        description: "Cost per detection is ${{ $value }}, above the $0.05 target"
+        business_impact: "Operating costs above budget projections"
+        monthly_impact: "${{ with query \"its_camera_ai:cost_per_detection_usd * rate(traffic_vehicles_detected_total[5m]) * 3600 * 24 * 30\" }}{{ . | first | value | printf \"%.2f\" }}{{ end }} monthly budget overage"
+        recommended_action: "Review resource utilization and consider optimization"
+        runbook_url: "https://runbooks.its-camera-ai.com/cost-optimization"
+    
+    - alert: ResourceUtilizationEfficiencyLow
+      expr: its_camera_ai:resource_utilization_efficiency < 0.6
+      for: 10m
+      labels:
+        severity: info
+        business_impact: low
+        component: resource-management
+      annotations:
+        summary: "Resource utilization efficiency below 60%"
+        description: "Resource utilization efficiency is {{ $value | humanizePercentage }}, below optimal 60%"
+        business_impact: "Infrastructure underutilized, cost optimization opportunity"
+        potential_savings: "${{ with query \"sum(infrastructure_cost_per_hour) * (0.6 - its_camera_ai:resource_utilization_efficiency) * 24 * 30\" }}{{ . | first | value | printf \"%.2f\" }}{{ end }}/month"
+        recommended_action: "Consider scaling down infrastructure or increasing workload"
+        runbook_url: "https://runbooks.its-camera-ai.com/resource-optimization"
+
+  - name: its-camera-ai.business.sla-tracking
+    interval: 60s
+    rules:
+    # SLA Compliance Tracking
+    
+    # 99.9% Uptime SLA Tracking
+    - record: its_camera_ai:uptime_sla_compliance_monthly
+      expr: |
+        (
+          avg_over_time(its_camera_ai:business_system_availability[30d])
+        )
+      labels:
+        sla_type: "uptime"
+        sla_target: "99.9"
+        measurement_period: "monthly"
+    
+    # Response Time SLA Tracking
+    - record: its_camera_ai:response_time_sla_compliance
+      expr: |
+        (
+          1 - (its_camera_ai:incident_response_efficiency > 300)
+        )
+      labels:
+        sla_type: "response_time"
+        sla_target: "300s"
+        measurement_period: "real_time"
+    
+    # Data Processing SLA Tracking
+    - record: its_camera_ai:data_processing_sla_compliance
+      expr: |
+        (
+          its_camera_ai:data_processing_throughput_tb_day >= 10
+        )
+      labels:
+        sla_type: "data_throughput"
+        sla_target: "10tb_day"
+        measurement_period: "daily"
+
+  - name: its-camera-ai.business.capacity-planning
+    interval: 300s  # 5 minutes
+    rules:
+    # Capacity Planning Metrics
+    
+    # Camera Capacity Utilization
+    - record: its_camera_ai:camera_capacity_utilization
+      expr: |
+        (
+          sum(camera_active_total) / 1000
+        )
+      labels:
+        capacity_type: "cameras"
+        max_capacity: "1000"
+    
+    # Data Processing Capacity Utilization
+    - record: its_camera_ai:data_processing_capacity_utilization
+      expr: |
+        (
+          its_camera_ai:data_processing_throughput_tb_day / 15
+        )
+      labels:
+        capacity_type: "data_processing"
+        max_capacity: "15tb_day"
+    
+    # GPU Compute Capacity Utilization
+    - record: its_camera_ai:gpu_capacity_utilization
+      expr: |
+        (
+          avg(DCGM_FI_DEV_GPU_UTIL) / 100
+        )
+      labels:
+        capacity_type: "gpu_compute"
+        max_capacity: "100_percent"
+    
+    # Inference Capacity Utilization
+    - record: its_camera_ai:inference_capacity_utilization
+      expr: |
+        (
+          sum(rate(inference_requests_total[5m])) / 1000
+        )
+      labels:
+        capacity_type: "inference_rps"
+        max_capacity: "1000_rps"
+
+  - name: its-camera-ai.business.capacity-alerts
+    interval: 60s
+    rules:
+    # Capacity Planning Alerts
+    
+    - alert: CameraCapacityNearLimit
+      expr: its_camera_ai:camera_capacity_utilization > 0.85
+      for: 5m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: capacity-planning
+        capacity_team: "true"
+      annotations:
+        summary: "Camera capacity approaching limit"
+        description: "Camera utilization at {{ $value | humanizePercentage }} of maximum capacity"
+        business_impact: "May need to limit new camera connections"
+        growth_projection: "Capacity exhausted in {{ with query \"(1 - its_camera_ai:camera_capacity_utilization) / 0.01 * 24\" }}{{ . | first | value | printf \"%.0f\" }}{{ end }} hours at current growth"
+        recommended_action: "Plan infrastructure scaling to support additional cameras"
+        runbook_url: "https://runbooks.its-camera-ai.com/capacity-planning"
+    
+    - alert: DataProcessingCapacityHigh
+      expr: its_camera_ai:data_processing_capacity_utilization > 0.8
+      for: 10m
+      labels:
+        severity: warning
+        business_impact: medium
+        component: data-pipeline
+        capacity_team: "true"
+      annotations:
+        summary: "Data processing capacity at 80%"
+        description: "Data processing at {{ $value | humanizePercentage }} of maximum capacity"
+        business_impact: "Risk of data processing bottlenecks"
+        recommended_action: "Scale data processing infrastructure"
+        runbook_url: "https://runbooks.its-camera-ai.com/data-scaling"
+    
+    - alert: InferenceCapacityNearLimit
+      expr: its_camera_ai:inference_capacity_utilization > 0.9
+      for: 3m
+      labels:
+        severity: critical
+        business_impact: high
+        component: ml-inference
+        capacity_team: "true"
+        escalation_required: "true"
+      annotations:
+        summary: "ML inference capacity critical"
+        description: "Inference utilization at {{ $value | humanizePercentage }} of maximum capacity"
+        business_impact: "Risk of inference request queuing and latency spikes"
+        immediate_action: "Scale GPU inference infrastructure immediately"
+        runbook_url: "https://runbooks.its-camera-ai.com/inference-scaling"

@@ -1,0 +1,519 @@
+# Production AlertManager Configuration for ITS Camera AI
+# Comprehensive alerting with escalation policies, PagerDuty integration, and business context
+# Supports high-availability setup with intelligent routing and noise reduction
+
+global:
+  # SMTP configuration for email alerts
+  smtp_smarthost: '${SMTP_SMARTHOST}'
+  smtp_from: 'alerts@its-camera-ai.com'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+  
+  # HTTP client configuration
+  http_config:
+    follow_redirects: true
+    enable_http2: true
+  
+  # Resolve timeout for alerts
+  resolve_timeout: 5m
+  
+  # Slack webhook URLs (templated for security)
+  slack_api_url: '${SLACK_API_URL}'
+  slack_api_url_file: '/etc/alertmanager/slack_api_url'
+
+# Templates for alert formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration with intelligent alert distribution
+route:
+  # Root route configuration
+  group_by: ['alertname', 'service', 'severity', 'business_impact']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'its-camera-ai-default'
+  
+  # Comprehensive routing rules with business context
+  routes:
+    # CRITICAL PRODUCTION ALERTS - Immediate PagerDuty escalation
+    - match:
+        severity: critical
+        environment: production
+      receiver: 'critical-production-escalation'
+      group_wait: 0s
+      group_interval: 30s
+      repeat_interval: 2m
+      continue: true
+      routes:
+        # Business critical services require immediate attention
+        - match:
+            business_impact: high
+          receiver: 'business-critical-emergency'
+          repeat_interval: 1m
+          continue: true
+        # Infrastructure critical alerts
+        - match_re:
+            component: 'infrastructure|kubernetes|database'
+          receiver: 'infrastructure-emergency'
+          repeat_interval: 5m
+          continue: true
+    
+    # SLA VIOLATION ALERTS - Special handling for contract compliance
+    - match_re:
+        alertname: '.*SLA.*|.*SLO.*'
+      receiver: 'sla-violation-team'
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 15m
+      routes:
+        # Fast burn rate alerts require immediate action
+        - match:
+            burn_rate: fast
+          receiver: 'sla-emergency'
+          group_wait: 10s
+          repeat_interval: 5m
+          continue: true
+        # Error budget alerts for capacity planning
+        - match_re:
+            alertname: '.*ErrorBudget.*'
+          receiver: 'capacity-planning-team'
+          repeat_interval: 30m
+    
+    # ML PIPELINE ALERTS - Specialized handling for AI/ML issues
+    - match_re:
+        component: 'ml-.*|vision-engine|model-.*'
+      receiver: 'ml-engineering-team'
+      group_wait: 1m
+      group_interval: 5m
+      repeat_interval: 1h
+      routes:
+        # Model drift requires data science team involvement
+        - match_re:
+            alertname: '.*Drift.*|.*Accuracy.*'
+          receiver: 'data-science-team'
+          repeat_interval: 8h
+        # Performance issues require immediate attention
+        - match_re:
+            alertname: '.*Latency.*|.*Performance.*'
+          receiver: 'ml-performance-team'
+          repeat_interval: 30m
+    
+    # BUSINESS METRICS ALERTS - Revenue and compliance impact
+    - match_re:
+        component: 'business-.*|traffic-analytics|incident-management'
+      receiver: 'business-operations-team'
+      group_wait: 2m
+      group_interval: 10m
+      repeat_interval: 2h
+      routes:
+        # Revenue impacting alerts
+        - match:
+            business_impact: high
+          receiver: 'executive-escalation'
+          repeat_interval: 30m
+          continue: true
+        # Compliance and regulatory alerts
+        - match_re:
+            alertname: '.*Compliance.*|.*Regulatory.*'
+          receiver: 'compliance-team'
+          repeat_interval: 4h
+    
+    # INFRASTRUCTURE ALERTS - System and resource management
+    - match_re:
+        component: 'infrastructure|gpu|database|cache|messaging'
+      receiver: 'infrastructure-team'
+      group_wait: 2m
+      group_interval: 10m
+      repeat_interval: 1h
+      routes:
+        # GPU alerts require specialized handling
+        - match:
+            component: gpu
+          receiver: 'gpu-specialist-team'
+          repeat_interval: 30m
+        # Database alerts require DBA involvement
+        - match:
+            component: database
+          receiver: 'database-team'
+          repeat_interval: 30m
+        # Capacity planning alerts
+        - match_re:
+            alertname: '.*Capacity.*|.*Utilization.*'
+          receiver: 'capacity-planning-team'
+          repeat_interval: 4h
+    
+    # SECURITY ALERTS - Special handling for security incidents
+    - match_re:
+        component: 'security|auth|encryption'
+      receiver: 'security-team'
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 15m
+      routes:
+        # Critical security issues
+        - match:
+            severity: critical
+          receiver: 'security-emergency'
+          group_wait: 0s
+          repeat_interval: 5m
+          continue: true
+    
+    # ENVIRONMENT-SPECIFIC ROUTING
+    - match:
+        environment: staging
+      receiver: 'staging-team'
+      group_wait: 5m
+      group_interval: 15m
+      repeat_interval: 8h
+    
+    - match:
+        environment: development
+      receiver: 'dev-team'
+      group_wait: 10m
+      group_interval: 30m
+      repeat_interval: 24h
+    
+    # MAINTENANCE AND SCHEDULED EVENTS
+    - match:
+        alertname: 'InfoMaintenanceWindow'
+      receiver: 'maintenance-notifications'
+      group_wait: 0s
+      repeat_interval: 12h
+
+# Inhibition rules to reduce alert noise
+inhibit_rules:
+  # Suppress downstream alerts when upstream is down
+  - source_match:
+      alertname: 'KubernetesNodeDown'
+    target_match_re:
+      alertname: '.*Down|.*Unavailable|.*Offline'
+    equal: ['kubernetes_node']
+  
+  # Suppress latency alerts when service is down
+  - source_match_re:
+      alertname: '.*Down|.*Unavailable'
+    target_match_re:
+      alertname: '.*Latency.*|.*ResponseTime.*|.*Performance.*'
+    equal: ['service', 'job']
+  
+  # Suppress resource alerts when node is down
+  - source_match:
+      alertname: 'NodeDown'
+    target_match_re:
+      alertname: '.*Memory.*|.*CPU.*|.*Disk.*|.*GPU.*'
+    equal: ['instance']
+  
+  # Suppress individual GPU alerts when DCGM exporter is down
+  - source_match:
+      alertname: 'GPUDown'
+    target_match_re:
+      alertname: 'GPU.*'
+    equal: ['instance']
+  
+  # Suppress model performance alerts when ML pipeline is down
+  - source_match:
+      alertname: 'MLInferenceDown'
+    target_match_re:
+      alertname: 'ML.*|Model.*|Inference.*'
+    equal: ['model_version']
+  
+  # Suppress business alerts when core system is down
+  - source_match:
+      alertname: 'BusinessSystemAvailabilityLow'
+    target_match_re:
+      alertname: 'Traffic.*|Incident.*|Business.*'
+    equal: ['environment']
+
+# Receiver configurations with comprehensive notification strategies
+receivers:
+  # Default receiver for unmatched alerts
+  - name: 'its-camera-ai-default'
+    email_configs:
+      - to: 'its-camera-ai-team@company.com'
+        subject: 'ITS Camera AI Alert: {{ .GroupLabels.alertname }}'
+        html: |
+          <h2>ITS Camera AI Alert</h2>
+          <p><strong>Environment:</strong> {{ .GroupLabels.environment }}</p>
+          <p><strong>Severity:</strong> {{ .GroupLabels.severity }}</p>
+          {{ range .Alerts }}
+          <hr>
+          <h3>{{ .Annotations.summary }}</h3>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <p><strong>Service:</strong> {{ .Labels.service }}</p>
+          <p><strong>Component:</strong> {{ .Labels.component }}</p>
+          {{ if .Annotations.business_impact }}
+          <p><strong>Business Impact:</strong> {{ .Annotations.business_impact }}</p>
+          {{ end }}
+          {{ if .Annotations.runbook_url }}
+          <p><strong>Runbook:</strong> <a href="{{ .Annotations.runbook_url }}">{{ .Annotations.runbook_url }}</a></p>
+          {{ end }}
+          <p><strong>Started:</strong> {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}</p>
+          {{ end }}
+        headers:
+          From: 'ITS Camera AI Monitoring <alerts@its-camera-ai.com>'
+          Reply-To: 'its-camera-ai-oncall@company.com'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#its-camera-ai-alerts'
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: 'ITS Camera AI Alert - {{ .Status | title }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Environment:* {{ .Labels.environment }}
+          *Service:* {{ .Labels.service }}
+          {{ if .Annotations.business_impact }}*Business Impact:* {{ .Annotations.business_impact }}{{ end }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+        actions:
+          - type: button
+            text: 'View Dashboard'
+            url: 'https://grafana.its-camera-ai.com/d/its-camera-ai-overview'
+          - type: button
+            text: 'Silence Alert'
+            url: 'https://alertmanager.its-camera-ai.com/#/silences/new'
+
+  # Critical production alerts with PagerDuty escalation
+  - name: 'critical-production-escalation'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_INTEGRATION_KEY_CRITICAL}'
+        description: 'CRITICAL: ITS Camera AI Production Alert'
+        details:
+          summary: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+          environment: '{{ .GroupLabels.environment }}'
+          service: '{{ .GroupLabels.service }}'
+          severity: '{{ .GroupLabels.severity }}'
+          business_impact: '{{ with index .Alerts 0 }}{{ .Annotations.business_impact }}{{ end }}'
+          incident_key: '{{ .GroupLabels.alertname }}-{{ .GroupLabels.service }}'
+        links:
+          - href: 'https://grafana.its-camera-ai.com/d/its-camera-ai-overview'
+            text: 'System Dashboard'
+          - href: 'https://grafana.its-camera-ai.com/d/its-camera-ai-infrastructure'
+            text: 'Infrastructure Dashboard'
+        client: 'AlertManager'
+        client_url: 'https://alertmanager.its-camera-ai.com'
+    
+    # Parallel Slack notification for critical alerts
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#its-camera-ai-critical'
+        color: 'danger'
+        title: '🚨 CRITICAL PRODUCTION ALERT 🚨'
+        text: |
+          <!channel>
+          {{ range .Alerts }}
+          *CRITICAL ALERT:* {{ .Annotations.summary }}
+          *Service:* {{ .Labels.service }}
+          *Environment:* {{ .Labels.environment }}
+          {{ if .Annotations.business_impact }}*Business Impact:* {{ .Annotations.business_impact }}{{ end }}
+          {{ if .Annotations.estimated_revenue_loss }}*Revenue Impact:* {{ .Annotations.estimated_revenue_loss }}{{ end }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          {{ end }}
+        actions:
+          - type: button
+            text: 'Acknowledge in PagerDuty'
+            url: 'https://company.pagerduty.com/incidents'
+          - type: button
+            text: 'Emergency Runbook'
+            url: 'https://runbooks.its-camera-ai.com/emergency'
+
+  # Business critical emergency escalation
+  - name: 'business-critical-emergency'
+    email_configs:
+      - to: 'executives@company.com, cto@company.com'
+        subject: '🚨 BUSINESS CRITICAL: ITS Camera AI Emergency'
+        html: |
+          <h1 style="color: red;">BUSINESS CRITICAL EMERGENCY</h1>
+          <h2>ITS Camera AI System Alert</h2>
+          {{ range .Alerts }}
+          <p><strong>Alert:</strong> {{ .Annotations.summary }}</p>
+          <p><strong>Business Impact:</strong> {{ .Annotations.business_impact }}</p>
+          {{ if .Annotations.estimated_revenue_loss }}
+          <p><strong>Estimated Revenue Loss:</strong> {{ .Annotations.estimated_revenue_loss }}</p>
+          {{ end }}
+          {{ if .Annotations.regulatory_impact }}
+          <p><strong>Regulatory Impact:</strong> {{ .Annotations.regulatory_impact }}</p>
+          {{ end }}
+          <p><strong>Immediate Action Required:</strong> {{ .Annotations.immediate_action }}</p>
+          {{ end }}
+        headers:
+          Importance: 'high'
+          Priority: 'urgent'
+    
+    # Executive Slack channel
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#executive-alerts'
+        color: 'danger'
+        title: '🚨 BUSINESS CRITICAL EMERGENCY 🚨'
+
+  # SLA violation team
+  - name: 'sla-violation-team'
+    email_configs:
+      - to: 'sre-team@company.com, product-owner@company.com'
+        subject: 'SLA Violation Alert: {{ .GroupLabels.alertname }}'
+        html: |
+          <h2>SLA Violation Detected</h2>
+          {{ range .Alerts }}
+          <p><strong>SLA:</strong> {{ .Labels.slo }}</p>
+          <p><strong>Current Performance:</strong> {{ .Annotations.description }}</p>
+          {{ if .Annotations.burn_rate }}
+          <p><strong>Burn Rate:</strong> {{ .Labels.burn_rate }}</p>
+          {{ end }}
+          {{ if .Annotations.error_budget_remaining }}
+          <p><strong>Error Budget Remaining:</strong> {{ .Annotations.error_budget_remaining }}</p>
+          {{ end }}
+          <p><strong>Business Impact:</strong> {{ .Annotations.business_impact }}</p>
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#sla-monitoring'
+        color: 'warning'
+        title: '⚠️ SLA Violation Alert'
+
+  # ML Engineering team
+  - name: 'ml-engineering-team'
+    email_configs:
+      - to: 'ml-team@company.com'
+        subject: 'ML Pipeline Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#ml-engineering'
+        color: '{{ if eq .GroupLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+        title: '🤖 ML Pipeline Alert'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          {{ if .Labels.model_version }}*Model Version:* {{ .Labels.model_version }}{{ end }}
+          {{ if .Annotations.performance_degradation }}*Performance Impact:* {{ .Annotations.performance_degradation }}{{ end }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          {{ end }}
+
+  # Data Science team for model quality issues
+  - name: 'data-science-team'
+    email_configs:
+      - to: 'data-science@company.com'
+        subject: 'Model Quality Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#data-science'
+        color: 'warning'
+        title: '📊 Model Quality Alert'
+
+  # Infrastructure team
+  - name: 'infrastructure-team'
+    email_configs:
+      - to: 'infrastructure@company.com'
+        subject: 'Infrastructure Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#infrastructure'
+        color: '{{ if eq .GroupLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+        title: '🔧 Infrastructure Alert'
+
+  # Security team
+  - name: 'security-team'
+    email_configs:
+      - to: 'security@company.com, ciso@company.com'
+        subject: 'SECURITY ALERT: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#security-alerts'
+        color: 'danger'
+        title: '🔒 Security Alert'
+
+  # Capacity planning team
+  - name: 'capacity-planning-team'
+    email_configs:
+      - to: 'capacity-planning@company.com, finance@company.com'
+        subject: 'Capacity Planning Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#capacity-planning'
+        color: 'warning'
+        title: '📈 Capacity Planning Alert'
+
+  # Business operations team
+  - name: 'business-operations-team'
+    email_configs:
+      - to: 'business-ops@company.com'
+        subject: 'Business Operations Alert: {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#business-operations'
+        color: 'warning'
+        title: '📊 Business Operations Alert'
+
+  # Development team (low priority)
+  - name: 'dev-team'
+    email_configs:
+      - to: 'dev-team@company.com'
+        subject: '[DEV] {{ .GroupLabels.alertname }}'
+    
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#dev-alerts'
+        color: 'warning'
+        title: '[DEV] Alert Notification'
+
+  # Staging team
+  - name: 'staging-team'
+    slack_configs:
+      - api_url: '{{ .SlackAPIURL }}'
+        channel: '#staging-alerts'
+        color: 'warning'
+        title: '[STAGING] Alert Notification'
+
+  # Webhook receiver for external integrations
+  - name: 'webhook-receiver'
+    webhook_configs:
+      - url: 'http://alert-webhook-processor:8080/alerts'
+        send_resolved: true
+        http_config:
+          bearer_token: '${WEBHOOK_BEARER_TOKEN}'
+        max_alerts: 0
+
+# Time-based routing (working hours vs after hours)
+time_intervals:
+  - name: business-hours
+    time_intervals:
+      - times:
+        - start_time: '09:00'
+          end_time: '17:00'
+        weekdays: ['monday:friday']
+        location: 'America/Los_Angeles'
+  
+  - name: after-hours
+    time_intervals:
+      - times:
+        - start_time: '17:01'
+          end_time: '08:59'
+        weekdays: ['monday:friday']
+        location: 'America/Los_Angeles'
+      - times:
+        - start_time: '00:00'
+          end_time: '23:59'
+        weekdays: ['saturday', 'sunday']
+        location: 'America/Los_Angeles'
+
+# Mute/silence patterns for known maintenance
+mute_time_intervals:
+  - name: maintenance-window
+    time_intervals:
+      - times:
+        - start_time: '02:00'
+          end_time: '04:00'
+        weekdays: ['sunday']
+        location: 'UTC'

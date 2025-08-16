@@ -4,6 +4,7 @@ Provides generic async CRUD functionality with error handling,
 transaction management, and query optimization for all repository classes.
 """
 
+from collections.abc import Callable
 from typing import Any, AsyncContextManager, TypeVar
 from uuid import UUID
 
@@ -27,7 +28,7 @@ class BaseRepository[T: BaseTableModel]:
     """
 
     def __init__(
-        self, session_factory: AsyncContextManager[AsyncSession], model: type[T]
+        self, session_factory: Callable[[], AsyncContextManager[AsyncSession]], model: type[T]
     ):
         self.session_factory = session_factory
         self.model = model
